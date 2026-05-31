@@ -37,3 +37,30 @@
 2. **Fine-Tune:** Slide the Kelvin or Tint bars at the bottom to tweak your colors manually once Manual mode is selected[cite: 1].
 3. **Save Your Look:** Type an easily recognizable name (e.g., `Sunny-590nm`) in the text field and click **Save**[cite: 1].
 4. **Shoot:** Hit the central **Capture** button to freeze your perfectly color-corrected infrared view[cite: 1].
+
+
+Without App;
+
+IRCHROME FİLTER
+<img width="3000" height="4000" alt="20260531_170029" src="https://github.com/user-attachments/assets/44c1615c-f072-4dad-b48a-56258c5f42c1" />
+
+590nm FILTER
+<img width="3000" height="4000" alt="20260531_170151" src="https://github.com/user-attachments/assets/95e0870a-6e6c-4272-a51c-aa7f9f15f0a6" />
+
+720nm FILTER
+<img width="3000" height="4000" alt="20260531_170447" src="https://github.com/user-attachments/assets/6dc2f3b5-9808-4ed3-8ce9-1a210b978f3c" />
+
+
+With App;
+
+IRCHROME FİLTER
+<img width="3000" height="4000" alt="IMG_1780236070810" src="https://github.com/user-attachments/assets/6613e6e4-4192-4ac1-a0fe-c8a38b82b876" />
+
+590nm FILTER
+<img width="3000" height="4000" alt="IMG_1780236201803" src="https://github.com/user-attachments/assets/b83b3871-2e1a-47b6-8891-bb25194e70d1" />
+
+720nm FILTER
+<img width="3000" height="4000" alt="IMG_1780236262974" src="https://github.com/user-attachments/assets/db32ca29-6efa-450b-81c9-aa2e6cadb13c" />
+
+
+

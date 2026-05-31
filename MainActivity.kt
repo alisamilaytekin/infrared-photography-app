@@ -2,7 +2,6 @@
 
 package com.example.kameras
 
-
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
@@ -15,6 +14,7 @@ import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.*
 import android.media.ImageReader
+import android.media.MediaActionSound
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -56,7 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 class MainActivity : ComponentActivity() {
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (!granted) Toast.makeText(this, "Kamera izni gerekli", Toast.LENGTH_LONG).show()
+            if (!granted) Toast.makeText(this, "Camera permission is required", Toast.LENGTH_LONG).show()
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,6 +88,9 @@ fun CameraScreen() {
     val cameraThread = remember { HandlerThread("CameraThread").also { it.start() } }
     val cameraHandler = remember { Handler(cameraThread.looper) }
 
+    // Shutter sound generator
+    val shutterSound = remember { MediaActionSound() }
+
     var cameraReady by remember { mutableStateOf(false) }
     var isAutoMode by remember { mutableStateOf(true) }
     var kelvinValue by remember { mutableFloatStateOf(5500f) }
@@ -95,7 +98,7 @@ fun CameraScreen() {
     var textureViewInstance by remember { mutableStateOf<TextureView?>(null) }
     var previewSize by remember { mutableStateOf<Size?>(null) }
 
-    // Görüntü oranını güncellemek için tetikleyici
+    // Trigger to update aspect ratio and refresh the transform matrix
     var matrixRefreshTrigger by remember { mutableIntStateOf(0) }
 
     var isPickerActive by remember { mutableStateOf(false) }
@@ -103,7 +106,6 @@ fun CameraScreen() {
 
     val savedPresets = remember { mutableStateListOf<CameraPreset>() }
     val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
-
 
     fun loadPresets() {
         savedPresets.clear()
@@ -120,23 +122,28 @@ fun CameraScreen() {
     LaunchedEffect(Unit) { loadPresets() }
 
     fun kelvinToGains(kVal: Float, tVal: Float): Triple<Float, Float, Float> {
-        // Kelvin arttıkça mavi artar (soğuk), azaldıkça kırmızı artar (sıcak)
+        // As Kelvin increases, blue increases (cool); as it decreases, red increases (warm)
         val kRatio = (kVal - 1000f) / (10000f - 1000f)  // 0.0 (1000K) → 1.0 (10000K)
-        val r = (4.0f - (kRatio * 3.0f)).coerceIn(1.0f, 4.0f)  // 1000K → 4.0 (çok sıcak), 10000K → 1.0
-        val b = (1.0f + (kRatio * 3.0f)).coerceIn(1.0f, 4.0f)  // 1000K → 1.0, 10000K → 4.0 (çok soğuk)
+        val r = (4.0f - (kRatio * 3.0f)).coerceIn(1.0f, 4.0f)  // 1000K → 4.0 (very warm), 10000K → 1.0
+        val b = (1.0f + (kRatio * 3.0f)).coerceIn(1.0f, 4.0f)  // 1000K → 1.0, 10000K → 4.0 (very cool)
 
-        // Tint: sadece yeşil kanalını etkiler
-        // Pozitif tint = daha fazla yeşil (magenta azalt)
-        // Negatif tint = daha az yeşil (magenta artır)
+        // Tint: only affects the green channel
+        // Positive tint = more green (reduces magenta)
+        // Negative tint = less green (increases magenta)
         val tRatio = tVal / 100f
         val g = (1.5f + tRatio * 1.5f).coerceIn(1.0f, 4.0f)
 
         return Triple(r, g, b)
     }
 
-    // Yardımcı fonksiyon: Seçilen noktadan Kelvin ve Tint türetir
-    fun calculateSpotWhiteBalance(bitmap: android.graphics.Bitmap, x: Int, y: Int): Pair<Float, Float> {
-        val sampleSize = 25 // Örnekleme alanını biraz artırmak gürültüyü azaltır
+    // Yardımcı fonksiyon: Seçilen noktadan Kelvin ve Tint türetir (Gelişmiş Kapalı Devre Modeli)
+    fun calculateSpotWhiteBalance(
+        bitmap: android.graphics.Bitmap,
+        x: Int,
+        y: Int,
+        currentGains: RggbChannelVector
+    ): Pair<Float, Float> {
+        val sampleSize = 25
         val startX = (x - sampleSize / 2).coerceIn(0, bitmap.width - sampleSize)
         val startY = (y - sampleSize / 2).coerceIn(0, bitmap.height - sampleSize)
 
@@ -145,7 +152,6 @@ fun CameraScreen() {
         for (i in 0 until sampleSize) {
             for (j in 0 until sampleSize) {
                 val pixel = bitmap[startX + i, startY + j]
-                // Renkleri 0.0 - 1.0 arasına çekerek işlemek daha sağlıklıdır
                 rSum += AndroidColor.red(pixel)
                 gSum += AndroidColor.green(pixel)
                 bSum += AndroidColor.blue(pixel)
@@ -153,18 +159,35 @@ fun CameraScreen() {
         }
 
         val count = (sampleSize * sampleSize).toDouble()
-        val r = (rSum / count).coerceAtLeast(1.0)
-        val g = (gSum / count).coerceAtLeast(1.0)
-        val b = (bSum / count).coerceAtLeast(1.0)
 
-        // Kelvin tahmini: R/B oranı Kelvin ile ters orantılıdır.
-        // Logaritmik yaklaşım daha kararlı sonuçlar verir.
-        val kelvin = (5500.0 * (r / b)).coerceIn(1000.0, 10000.0).toFloat()
+        // NOT: Tip hatalarını önlemek için sonlarına .toFloat() ekledik
+        val rAvg = (rSum / count).coerceAtLeast(1.0).toFloat()
+        val gAvg = (gSum / count).coerceAtLeast(1.0).toFloat()
+        val bAvg = (bSum / count).coerceAtLeast(1.0).toFloat()
 
-        // Tint tahmini: Yeşil ve kırmızı/mavi dengesi
-        val tint = ((g / ((r + b) / 2.0)) - 1.0) * 100.0
+        // 1. Mevcut donanım kazançlarını piksellere oranlayarak ham sensör değerlerinin tersini buluyoruz
+        val rRawInverse = currentGains.red / rAvg
+        val bRawInverse = currentGains.blue / bAvg
+        val gRawInverse = currentGains.greenEven / gAvg
 
-        return Pair(kelvin, tint.toFloat().coerceIn(-100f, 100f))
+        // 2. Kelvin modelimize (R + B = 5.0) uyması için ölçekleme katsayısını hesaplıyoruz
+        val scaleFactor = 5.0f / (rRawInverse + bRawInverse)
+
+        // 3. Renkleri nötrleyecek hedef donanım kazançlarını buluyoruz
+        val rTarget = rRawInverse * scaleFactor
+        val bTarget = bRawInverse * scaleFactor
+        val gTarget = gRawInverse * scaleFactor
+
+        // 4. Hedef R ve B kazançlarından kelvinToGains'in tersini alarak Kelvin değerini hesaplıyoruz
+        val kRatioR = (4.0f - rTarget) / 3.0f
+        val kRatioB = (bTarget - 1.0f) / 3.0f
+        val kRatio = ((kRatioR + kRatioB) / 2.0f).coerceIn(0.0f, 1.0f)
+        val kelvin = 1000f + kRatio * 9000f
+
+        // 5. Hedef Yeşil kazancından Tint sürgü değerini (-100 ile +100 arası) hesaplıyoruz
+        val tint = (100f * (gTarget - 1.5f) / 1.5f).coerceIn(-100f, 100f)
+
+        return Pair(kelvin, tint)
     }
 
     val captureCallback = remember {
@@ -180,13 +203,13 @@ fun CameraScreen() {
             builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
         } else {
-        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO) // bu satırı ekle
-        builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
-        builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
-        // HIGH_QUALITY yerine TRANSFORM_MATRIX — gain override için daha güvenilir
-        val (r, g, b) = kelvinToGains(kVal, tVal)
-        builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, RggbChannelVector(r, g, g, b))
-    }
+            builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+            builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+            // TRANSFORM_MATRIX is used instead of HIGH_QUALITY — more reliable for gain overrides
+            val (r, g, b) = kelvinToGains(kVal, tVal)
+            builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, RggbChannelVector(r, g, g, b))
+        }
     }
 
     fun savePresetsToStorage() {
@@ -262,7 +285,7 @@ fun CameraScreen() {
         val session = holder.session ?: return
         val reader = holder.imageReader ?: return
 
-        // 1. Cihaz ve sensör oryantasyonunu hesapla
+        // 1. Calculate device and sensor orientations
         val cameraIdList = cameraManager.cameraIdList
         if (cameraIdList.isEmpty()) return
         val cameraId = cameraIdList[0]
@@ -283,10 +306,10 @@ fun CameraScreen() {
             else -> 0
         }
 
-        // JPEG yönünü hesapla
+        // Calculate JPEG orientation mapping
         val jpegOrientation = (sensorOrientation - rotationCompensation + 360) % 360
 
-        // 2. Görüntü alma işlemini tanımla
+        // 2. Define the image capture available listener
         reader.setOnImageAvailableListener({ imageReader ->
             val image = imageReader.acquireLatestImage() ?: return@setOnImageAvailableListener
             val buffer = image.planes[0].buffer
@@ -304,17 +327,21 @@ fun CameraScreen() {
             }
         }, cameraHandler)
 
-        // 3. Yakalama isteğini hazırla
+        // 3. Prepare the still capture request
         val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
             addTarget(reader.surface)
             applyCamera2Settings(this, auto, kelvinValue, tintValue)
-            // Hesaplanan yön bilgisini buraya ekliyoruz
+            // Inject calculated orientation parameter here
             set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
         }
 
-        // 4. Çekimi gerçekleştir ve önizlemeyi yenile
+        // 4. Execute the capture, play sound, and restore preview loop
         try {
             session.stopRepeating()
+
+            // Play the native system camera shutter sound asynchronously
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
                 override fun onCaptureCompleted(s: CameraCaptureSession, r: CaptureRequest, res: TotalCaptureResult) {
                     super.onCaptureCompleted(s, r, res)
@@ -337,7 +364,7 @@ fun CameraScreen() {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                // Matrisi yeniden hesaplamayı tetikle
+                // Force matrix calculation on resume
                 matrixRefreshTrigger++
 
                 if (holder.device == null) textureViewInstance?.let { tv ->
@@ -358,6 +385,7 @@ fun CameraScreen() {
             holder.device?.close()
             holder.imageReader?.close()
             cameraThread.quitSafely()
+            shutterSound.release()
             holder.session = null
             holder.device = null
             holder.imageReader = null
@@ -365,7 +393,7 @@ fun CameraScreen() {
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
-// AndroidView yapısı
+        // AndroidView Configuration
         AndroidView(
             modifier = Modifier
                 .fillMaxSize()
@@ -376,19 +404,20 @@ fun CameraScreen() {
                             if (view != null) {
                                 val bitmap = view.bitmap
                                 if (bitmap != null) {
-                                    // Koordinatları Bitmap boyutuna oranla
+                                    // Scale raw coordinates onto Bitmap boundaries
                                     val x = (offset.x * bitmap.width / view.width).toInt()
                                     val y = (offset.y * bitmap.height / view.height).toInt()
 
-                                    val (newK, newT) = calculateSpotWhiteBalance(bitmap, x, y)
+                                    // DEĞİŞEN SATIR BURASI: holder.lastHardwareGains parametresini ekledik
+                                    val (newK, newT) = calculateSpotWhiteBalance(bitmap, x, y, holder.lastHardwareGains)
 
-                                    // Değerleri güncelle
+                                    // Apply parsed adjustments
                                     kelvinValue = newK
                                     tintValue = newT
                                     isAutoMode = false
                                     isPickerActive = false
                                     updatePreviewSettings()
-                                    Toast.makeText(context, "WB Ayarlandı: ${newK.toInt()}K", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "WB Set: ${newK.toInt()}K / Tint: ${newT.toInt()}", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }
@@ -407,7 +436,7 @@ fun CameraScreen() {
                         override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
                             previewSize = Size(w, h)
                             st.setDefaultBufferSize(w, h)
-                            matrixRefreshTrigger++ // Boyut değişince matrisi yenile
+                            matrixRefreshTrigger++ // Recalculate aspect ratio matrix
                         }
                         override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
                         override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
@@ -415,7 +444,7 @@ fun CameraScreen() {
                 }
             },
             update = { view ->
-                // matrixRefreshTrigger'ı okuyarak update bloğunun tetiklenmesini sağlıyoruz
+                // Observe matrixRefreshTrigger state changes to force execution blocks
                 Log.d("CameraScreen", "Updating matrix, trigger: $matrixRefreshTrigger")
 
                 val preview = previewSize ?: return@AndroidView
@@ -457,26 +486,26 @@ fun CameraScreen() {
                         onClick = { isAutoMode = true; updatePreviewSettings() },
                         enabled = cameraReady,
                         colors = ButtonDefaults.buttonColors(containerColor = if (isAutoMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f))
-                    ) { Text("Otomatik") }
+                    ) { Text("Auto") }
 
                     Button(
                         onClick = {
                             isPickerActive = !isPickerActive
                             if (isPickerActive) {
-                                Toast.makeText(context, "Görüntüde nötr/beyaz bir noktaya dokunun", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Tap a neutral/white spot on the preview", Toast.LENGTH_SHORT).show()
                             }
                         },
                         enabled = cameraReady,
                         colors = ButtonDefaults.buttonColors(containerColor = if (isPickerActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f))
                     ) {
-                        Text(if (isPickerActive) "Nokta Seçin..." else "WB Seçici 🎯")
+                        Text(if (isPickerActive) "Select Spot..." else "WB Picker 🎯")
                     }
 
                     Button(
                         onClick = { isAutoMode = false; updatePreviewSettings() },
                         enabled = cameraReady,
                         colors = ButtonDefaults.buttonColors(containerColor = if (!isAutoMode && !isPickerActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.8f))
-                    ) { Text("Manuel") }
+                    ) { Text("Manual") }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -497,12 +526,12 @@ fun CameraScreen() {
                                         kelvinValue = preset.kelvin
                                         tintValue = preset.tint
                                         updatePreviewSettings()
-                                        Toast.makeText(context, "${preset.name} yüklendi", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "${preset.name} loaded", Toast.LENGTH_SHORT).show()
                                     },
                                     onLongClick = {
                                         savedPresets.remove(preset)
                                         savePresetsToStorage()
-                                        Toast.makeText(context, "${preset.name} silindi", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "${preset.name} deleted", Toast.LENGTH_SHORT).show()
                                     }
                                 )
                             ) {
@@ -523,7 +552,7 @@ fun CameraScreen() {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = if (isAutoMode) "Canlı Otomatik Kelvin: ${kelvinValue.toInt()} K" else "Kelvin: ${kelvinValue.toInt()} K",
+                    text = if (isAutoMode) "Live Auto Kelvin: ${kelvinValue.toInt()} K" else "Kelvin: ${kelvinValue.toInt()} K",
                     color = Color.White
                 )
                 Slider(
@@ -534,7 +563,7 @@ fun CameraScreen() {
                 )
 
                 Text(
-                    text = if (isAutoMode) "Canlı Otomatik Tint: ${if(tintValue > 0) "+" else ""}${tintValue.toInt()}" else "Tint: ${if(tintValue > 0) "+" else ""}${tintValue.toInt()}",
+                    text = if (isAutoMode) "Live Auto Tint: ${if(tintValue > 0) "+" else ""}${tintValue.toInt()}" else "Tint: ${if(tintValue > 0) "+" else ""}${tintValue.toInt()}",
                     color = Color.White
                 )
                 Slider(
@@ -553,7 +582,7 @@ fun CameraScreen() {
                         OutlinedTextField(
                             value = presetNameInput,
                             onValueChange = { presetNameInput = it },
-                            label = { Text("Ayar Adı", color = Color.White) },
+                            label = { Text("Preset Name", color = Color.White) },
                             modifier = Modifier.weight(1f),
                             singleLine = true,
                             colors = OutlinedTextFieldDefaults.colors(
@@ -569,15 +598,15 @@ fun CameraScreen() {
                                     savedPresets.removeAll { it.name.equals(presetNameInput, ignoreCase = true) }
                                     savedPresets.add(CameraPreset(presetNameInput, kelvinValue, tintValue))
                                     savePresetsToStorage()
-                                    Toast.makeText(context, "$presetNameInput kaydedildi", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "$presetNameInput saved", Toast.LENGTH_SHORT).show()
                                     presetNameInput = ""
                                 } else {
-                                    Toast.makeText(context, "Lütfen bir isim girin", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, "Please enter a name", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             enabled = cameraReady
                         ) {
-                            Text("Kaydet")
+                            Text("Save")
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -589,7 +618,7 @@ fun CameraScreen() {
                         enabled = cameraReady,
                         modifier = Modifier.fillMaxWidth(0.5f)
                     ) {
-                        Text("Çek")
+                        Text("Capture")
                     }
                 }
             }

@@ -4,6 +4,19 @@
 
 ---
 
+## ✨ What's New in Version 4.0
+
+* **Hardware ISP Color & Contrast Engine in Manual Mode:**
+  * **Normalized RGGB Gains:** Eliminates unintended digital overexposure and highlight clipping when switching from Auto to Manual white balance.
+  * **3x3 Color Correction Matrix (`COLOR_CORRECTION_TRANSFORM`):** Preserves and enhances sensor-calibrated color separation with real-time **Saturation** control (`0.50x – 2.00x`).
+  * **Hardware S-Curve Tonemapping (`TONEMAP_CURVE`):** Delivers crisp shadows and punchy contrast (`0.60x – 1.80x`) directly on the camera ISP in both live preview and full-res captures.
+  * **Exposure Compensation (EV):** Hardware AE compensation slider for bright infrared foliage.
+* **Modern Pro Camera UI:**
+  * Edge-to-edge dark HUD with segmented **AUTO / WB Seçici / MANUEL** mode switcher, live Kelvin/Tint/Contrast/Saturation telemetry, 3x3 Rule-of-Thirds grid toggle, gradient spectrum sliders with `-` / `+` fine-step controls, preset modal saving, and concentric pro shutter button.
+  * **One-Tap Auto Lock:** Capture Auto mode's measured Kelvin & Tint into Manual sliders with a single tap.
+
+---
+
 ## 📱 Core User Features
 
 ### 🎛️ Advanced White Balance Control

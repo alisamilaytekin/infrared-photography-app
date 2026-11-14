@@ -623,7 +623,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val largest = outputSizes.maxByOrNull { it.width * it.height } ?: return
 
         holder.supportedTonemapModes =
-            chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONEMAP_MODES) ?: intArrayOf()
+            chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
         holder.maxTonemapCurvePoints =
             chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 33
         val range = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)

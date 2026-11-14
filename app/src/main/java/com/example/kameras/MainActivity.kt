@@ -26,7 +26,6 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
 import android.util.Rational
-import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
@@ -63,6 +62,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -411,8 +411,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
 
     var textureViewInstance by remember { mutableStateOf<TextureView?>(null) }
-    var previewSize by remember { mutableStateOf<Size?>(null) }
-    var matrixRefreshTrigger by remember { mutableIntStateOf(0) }
+    var previewAspectRatio by remember { mutableFloatStateOf(3f / 4f) }
 
     var statusBanner by remember { mutableStateOf<String?>(null) }
     val shutterFlashAlpha = remember { Animatable(0f) }
@@ -608,7 +607,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
-    fun startCamera(surface: Surface) {
+    fun startCamera(surfaceTexture: SurfaceTexture) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return
         }
@@ -621,6 +620,28 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
         val outputSizes = map.getOutputSizes(ImageFormat.JPEG) ?: return
         val largest = outputSizes.maxByOrNull { it.width * it.height } ?: return
+
+        val targetRatio = largest.width.toFloat() / largest.height.toFloat()
+        val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: arrayOf(largest)
+        val matchingPreviewSizes = previewSizes.filter {
+            abs((it.width.toFloat() / it.height.toFloat()) - targetRatio) <= 0.02f
+        }
+        val candidates = matchingPreviewSizes.ifEmpty { previewSizes.toList() }
+        val chosenPreview = candidates
+            .filter { it.width <= 1920 && it.height <= 1920 }
+            .maxByOrNull { it.width * it.height }
+            ?: candidates.maxByOrNull { it.width * it.height }
+            ?: largest
+
+        surfaceTexture.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
+        val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+        val swapped = sensorOrientation == 90 || sensorOrientation == 270
+        val uprightW = if (swapped) chosenPreview.height else chosenPreview.width
+        val uprightH = if (swapped) chosenPreview.width else chosenPreview.height
+        val ratio = (uprightW.toFloat() / uprightH.toFloat()).coerceIn(0.4f, 2.0f)
+        mainHandler.post { previewAspectRatio = ratio }
+
+        val surface = Surface(surfaceTexture)
 
         holder.supportedTonemapModes =
             chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
@@ -805,7 +826,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             Log.e("CameraScreen", "Failed to resume repeating request", e)
                         }
                     }
-                    mainHandler.post { matrixRefreshTrigger++ }
                 }
             }, cameraHandler)
         } catch (e: CameraAccessException) {
@@ -817,7 +837,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         if (hasCameraPermission && holder.device == null && !holder.isOpening) {
             textureViewInstance?.let { tv ->
                 if (tv.isAvailable) {
-                    tv.surfaceTexture?.let { startCamera(Surface(it)) }
+                    tv.surfaceTexture?.let { startCamera(it) }
                 }
             }
         }
@@ -826,11 +846,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                matrixRefreshTrigger++
                 if (holder.device == null && !holder.isOpening) {
                     textureViewInstance?.let { tv ->
                         if (tv.isAvailable) {
-                            tv.surfaceTexture?.let { startCamera(Surface(it)) }
+                            tv.surfaceTexture?.let { startCamera(it) }
                         }
                     }
                 }
@@ -864,136 +883,122 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val displayKelvin = if (isAutoMode) liveAutoKelvin else kelvinValue
     val displayTint = if (isAutoMode) liveAutoTint else tintValue
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(IrPalette.VoidBlack),
         contentAlignment = Alignment.Center
     ) {
-        // Live camera TextureView preserving exact aspect ratio matrix logic
-        AndroidView(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(isPickerActive) {
-                    detectTapGestures(onTap = { offset ->
-                        if (isPickerActive) {
-                            val view = textureViewInstance
-                            if (view != null) {
-                                val bitmap = view.bitmap
-                                if (bitmap != null) {
-                                    val x = (offset.x * bitmap.width / view.width.coerceAtLeast(1)).toInt()
-                                    val y = (offset.y * bitmap.height / view.height.coerceAtLeast(1)).toInt()
-                                    val (newK, newT) = calculateSpotWhiteBalance(
-                                        bitmap = bitmap,
-                                        x = x,
-                                        y = y,
-                                        currentGains = holder.lastHardwareGains
-                                    )
-                                    pickedMarkerPos = offset
-                                    kelvinValue = newK
-                                    tintValue = newT
-                                    isAutoMode = false
-                                    isPickerActive = false
-                                    updatePreviewSettings()
-                                    showStatus("WB Ayarlandı: ${newK.toInt()}K · Tint ${formatSigned(newT)}")
-                                }
-                            }
-                        }
-                    })
-                },
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    textureViewInstance = this
-                    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                        override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                            val hRes = 3000
-                            val wRes = 4000
-                            previewSize = Size(hRes, wRes)
-                            st.setDefaultBufferSize(hRes, wRes)
-                            startCamera(Surface(st))
-                        }
-
-                        override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                            previewSize = Size(w, h)
-                            st.setDefaultBufferSize(w, h)
-                            matrixRefreshTrigger++
-                        }
-
-                        override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
-                        override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
-                    }
-                }
-            },
-            update = { view ->
-                Log.d("CameraScreen", "Updating matrix, trigger: $matrixRefreshTrigger")
-                val preview = previewSize ?: return@AndroidView
-                val viewWidth = view.width.toFloat()
-                val viewHeight = view.height.toFloat()
-                if (viewWidth <= 0f || viewHeight <= 0f) return@AndroidView
-
-                val sensorRatio = preview.width.toFloat() / preview.height.toFloat()
-                val viewRatio = viewWidth / viewHeight
-
-                val matrix = android.graphics.Matrix()
-                val scaleX: Float
-                val scaleY: Float
-                if (viewRatio > sensorRatio) {
-                    scaleY = 1f
-                    scaleX = sensorRatio / viewRatio
-                } else {
-                    scaleX = 1f
-                    scaleY = viewRatio / sensorRatio
-                }
-                matrix.setScale(scaleX, scaleY, viewWidth / 2f, viewHeight / 2f)
-                view.setTransform(matrix)
-            }
-        )
-
-        // Optional 3x3 Rule-of-Thirds Grid & WB Picker Reticle Overlay
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            if (showGrid) {
-                val gridColor = Color.White.copy(alpha = 0.22f)
-                val stroke = 1.dp.toPx()
-                val thirdW = size.width / 3f
-                val thirdH = size.height / 3f
-                drawLine(gridColor, Offset(thirdW, 0f), Offset(thirdW, size.height), strokeWidth = stroke)
-                drawLine(gridColor, Offset(thirdW * 2f, 0f), Offset(thirdW * 2f, size.height), strokeWidth = stroke)
-                drawLine(gridColor, Offset(0f, thirdH), Offset(size.width, thirdH), strokeWidth = stroke)
-                drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
-            }
-
-            if (isPickerActive) {
-                val borderStroke = 2.dp.toPx()
-                drawRect(
-                    color = IrPalette.IrCoral.copy(alpha = 0.65f),
-                    style = Stroke(width = borderStroke)
-                )
-            }
-
-            pickedMarkerPos?.let { pos ->
-                val outerR = 22.dp.toPx()
-                val innerR = 4.dp.toPx()
-                drawCircle(
-                    color = IrPalette.IrAmber,
-                    radius = outerR,
-                    center = pos,
-                    style = Stroke(width = 2.dp.toPx())
-                )
-                drawCircle(
-                    color = Color.White,
-                    radius = innerR,
-                    center = pos
-                )
-            }
+        val containerRatio = if (maxHeight > 0.dp) maxWidth / maxHeight else 0.5f
+        val viewfinderModifier = if (containerRatio > previewAspectRatio) {
+            Modifier.fillMaxHeight().aspectRatio(previewAspectRatio)
+        } else {
+            Modifier.fillMaxWidth().aspectRatio(previewAspectRatio)
         }
 
-        // Shutter Capture Flash Overlay
-        if (shutterFlashAlpha.value > 0.01f) {
-            Box(
+        // Exact aspect-ratio viewfinder box matching the camera sensor & captured JPEG framing
+        Box(
+            modifier = viewfinderModifier.clipToBounds(),
+            contentAlignment = Alignment.Center
+        ) {
+            AndroidView(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color.White.copy(alpha = shutterFlashAlpha.value))
+                    .pointerInput(isPickerActive) {
+                        detectTapGestures(onTap = { offset ->
+                            if (isPickerActive) {
+                                val view = textureViewInstance
+                                if (view != null) {
+                                    val bitmap = view.bitmap
+                                    if (bitmap != null) {
+                                        val x = (offset.x * bitmap.width / view.width.coerceAtLeast(1)).toInt()
+                                        val y = (offset.y * bitmap.height / view.height.coerceAtLeast(1)).toInt()
+                                        val (newK, newT) = calculateSpotWhiteBalance(
+                                            bitmap = bitmap,
+                                            x = x,
+                                            y = y,
+                                            currentGains = holder.lastHardwareGains
+                                        )
+                                        pickedMarkerPos = offset
+                                        kelvinValue = newK
+                                        tintValue = newT
+                                        isAutoMode = false
+                                        isPickerActive = false
+                                        updatePreviewSettings()
+                                        showStatus("WB Ayarlandı: ${newK.toInt()}K · Tint ${formatSigned(newT)}")
+                                    }
+                                }
+                            }
+                        })
+                    },
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        textureViewInstance = this
+                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                startCamera(st)
+                            }
+
+                            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                                // Keep camera stream's chosen buffer size and aspect ratio intact
+                            }
+
+                            override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
+                            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                        }
+                    }
+                },
+                update = { view ->
+                    view.setTransform(null)
+                }
             )
+
+            // Optional 3x3 Rule-of-Thirds Grid & WB Picker Reticle Overlay aligned with exact photo frame
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                if (showGrid) {
+                    val gridColor = Color.White.copy(alpha = 0.22f)
+                    val stroke = 1.dp.toPx()
+                    val thirdW = size.width / 3f
+                    val thirdH = size.height / 3f
+                    drawLine(gridColor, Offset(thirdW, 0f), Offset(thirdW, size.height), strokeWidth = stroke)
+                    drawLine(gridColor, Offset(thirdW * 2f, 0f), Offset(thirdW * 2f, size.height), strokeWidth = stroke)
+                    drawLine(gridColor, Offset(0f, thirdH), Offset(size.width, thirdH), strokeWidth = stroke)
+                    drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
+                }
+
+                if (isPickerActive) {
+                    val borderStroke = 2.dp.toPx()
+                    drawRect(
+                        color = IrPalette.IrCoral.copy(alpha = 0.65f),
+                        style = Stroke(width = borderStroke)
+                    )
+                }
+
+                pickedMarkerPos?.let { pos ->
+                    val outerR = 22.dp.toPx()
+                    val innerR = 4.dp.toPx()
+                    drawCircle(
+                        color = IrPalette.IrAmber,
+                        radius = outerR,
+                        center = pos,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                    drawCircle(
+                        color = Color.White,
+                        radius = innerR,
+                        center = pos
+                    )
+                }
+            }
+
+            // Shutter Capture Flash Overlay
+            if (shutterFlashAlpha.value > 0.01f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.White.copy(alpha = shutterFlashAlpha.value))
+                )
+            }
         }
 
         // Main Pro HUD Overlay

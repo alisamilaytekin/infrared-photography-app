@@ -5,6 +5,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -33,3 +37,22 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Keep Only Latest 3 Releases and Workflow Runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/releases?per_page=100" \
+            --jq 'sort_by(.created_at) | reverse | .[3:] | .[] | "\(.id) \(.tag_name)"' | \
+          while read -r rel_id tag_name; do
+            [ -z "$rel_id" ] && continue
+            gh api -X DELETE "repos/${{ github.repository }}/releases/$rel_id" || true
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/tags/$tag_name" || true
+          done
+
+          gh api "repos/${{ github.repository }}/actions/runs?per_page=100" \
+            --jq '[.workflow_runs[] | select(.status == "completed")] | sort_by(.created_at) | reverse | .[3:] | .[].id' | \
+          while read -r run_id; do
+            [ -z "$run_id" ] && continue
+            gh api -X DELETE "repos/${{ github.repository }}/actions/runs/$run_id" || true
+          done

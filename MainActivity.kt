@@ -735,8 +735,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         submitRepeatingRequest(session, builder)
     }
 
-    fun closeCameraInternal(releaseReader: Boolean = true, pendingReopen: SurfaceTexture? = null) {
-        var reopenDirectly: SurfaceTexture? = null
+    /** Returns true when no open CameraDevice existed (so caller can reopen immediately without waiting for onClosed). */
+    fun closeCameraInternal(releaseReader: Boolean = true, pendingReopen: SurfaceTexture? = null): Boolean {
+        var closedWithoutActiveDevice = false
         synchronized(holder) {
             holder.cameraGeneration += 1
             holder.isOpening = false
@@ -756,13 +757,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             }
             if (!hadDevice && pendingReopen != null && !holder.isDisposed) {
                 holder.pendingReopenSurfaceTexture = null
-                reopenDirectly = pendingReopen
+                closedWithoutActiveDevice = true
             }
         }
         mainHandler.post { cameraReady = false }
-        reopenDirectly?.let { st ->
-            cameraHandler.post { startCameraInternal(st) }
-        }
+        return closedWithoutActiveDevice
     }
 
     @SuppressLint("MissingPermission")
@@ -907,7 +906,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     Log.w("CameraScreen", "Session config failed at tier=${holder.previewFallbackLevel}")
                                     if (!holder.isDisposed && holder.previewFallbackLevel < 2) {
                                         holder.previewFallbackLevel += 1
-                                        closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)
+                                        if (closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)) {
+                                            cameraHandler.post { startCameraInternal(surfaceTexture) }
+                                        }
                                     } else {
                                         closeCameraInternal(releaseReader = true)
                                         mainHandler.post {
@@ -959,7 +960,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     fun restartCamera() {
         val st = textureViewInstance?.surfaceTexture ?: return
         cameraHandler.post {
-            closeCameraInternal(releaseReader = true, pendingReopen = st)
+            if (closeCameraInternal(releaseReader = true, pendingReopen = st)) {
+                startCameraInternal(st)
+            }
         }
     }
 

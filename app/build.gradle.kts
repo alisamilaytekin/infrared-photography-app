@@ -8,12 +8,26 @@ android {
     namespace = "com.example.kameras"
     compileSdk = 35
 
+    val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+
     defaultConfig {
         applicationId = "com.example.kameras"
-        minSdk = 24
-        targetSdk = 35
-        versionCode = 4
-        versionName = "4.0"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = 100 + ciRunNumber
+        versionName = "4.1.$ciRunNumber"
+    }
+
+    signingConfigs {
+        create("kamerasRelease") {
+            storeFile = file("kameras-release.jks")
+            storePassword = "kameras123"
+            keyAlias = "kameras"
+            keyPassword = "kameras123"
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+        }
     }
 
     sourceSets {
@@ -26,6 +40,7 @@ android {
         debug {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfig = signingConfigs.getByName("kamerasRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -34,7 +49,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("kamerasRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

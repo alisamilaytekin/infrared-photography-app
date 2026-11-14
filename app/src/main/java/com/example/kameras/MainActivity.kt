@@ -3,6 +3,7 @@
 package com.example.kameras
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
@@ -19,6 +20,7 @@ import android.media.ImageReader
 import android.media.MediaActionSound
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -26,6 +28,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.util.Range
 import android.util.Rational
+import android.util.Size
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
@@ -53,6 +56,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -86,6 +90,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -109,9 +114,11 @@ class MainActivity : ComponentActivity() {
     private var hasCameraPermission by mutableStateOf(false)
 
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            hasCameraPermission = granted
-            if (!granted) {
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+            val camGranted = results[Manifest.permission.CAMERA]
+                ?: (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
+            hasCameraPermission = camGranted
+            if (!camGranted) {
                 Toast.makeText(this, "Kamera izni gerekli", Toast.LENGTH_LONG).show()
             }
         }
@@ -124,8 +131,18 @@ class MainActivity : ComponentActivity() {
         )
         hasCameraPermission =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+
+        val missingPermissions = mutableListOf<String>()
         if (!hasCameraPermission) {
-            permissionLauncher.launch(Manifest.permission.CAMERA)
+            missingPermissions.add(Manifest.permission.CAMERA)
+        }
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                missingPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        if (missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(missingPermissions.toTypedArray())
         }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -136,6 +153,7 @@ class MainActivity : ComponentActivity() {
 }
 
 private class CameraHolder {
+    var activeCameraId: String? = null
     var device: CameraDevice? = null
     var session: CameraCaptureSession? = null
     var previewBuilder: CaptureRequest.Builder? = null
@@ -144,10 +162,17 @@ private class CameraHolder {
     var isOpening: Boolean = false
     var isDisposed: Boolean = false
 
+    @Volatile var selectedResolution: Size? = null
+    @Volatile var previewFallbackLevel: Int = 0
+    @Volatile var isTakingPhoto: Boolean = false
+    var pendingReopenSurfaceTexture: SurfaceTexture? = null
+    var cameraGeneration: Int = 0
+
     @Volatile var lastHardwareGains: RggbChannelVector = RggbChannelVector(1.5f, 1.0f, 1.0f, 1.5f)
     @Volatile var lastAutoColorTransform: ColorSpaceTransform? = null
     @Volatile var lastTelemetryUpdateMs: Long = 0L
     @Volatile var supportedTonemapModes: IntArray = intArrayOf()
+    @Volatile var availableAfModes: IntArray = intArrayOf()
     @Volatile var maxTonemapCurvePoints: Int = 33
     @Volatile var aeCompensationRange: Range<Int> = Range(0, 0)
     @Volatile var aeCompensationStep: Float = 0.5f
@@ -159,6 +184,64 @@ private class CameraHolder {
     @Volatile var currentContrast: Float = DEFAULT_CONTRAST
     @Volatile var currentSaturation: Float = DEFAULT_SATURATION
     @Volatile var currentExposureEv: Int = 0
+}
+
+private fun formatMegapixels(size: Size): String {
+    val mp = (size.width.toLong() * size.height.toLong()) / 1_000_000.0
+    return when {
+        mp >= 9.95 -> "${mp.roundToInt()}MP"
+        mp >= 1.0 -> "${"%.1f".format(Locale.US, mp)}MP"
+        else -> "${"%.2f".format(Locale.US, mp)}MP"
+    }
+}
+
+private tailrec fun gcdInt(a: Int, b: Int): Int = if (b == 0) a else gcdInt(b, a % b)
+
+private fun formatAspectRatioTag(size: Size): String {
+    if (size.height <= 0) return ""
+    val r = size.width.toFloat() / size.height.toFloat()
+    return when {
+        abs(r - 4f / 3f) < 0.035f -> "4:3"
+        abs(r - 16f / 9f) < 0.04f -> "16:9"
+        abs(r - 1f) < 0.035f -> "1:1"
+        abs(r - 3f / 2f) < 0.035f -> "3:2"
+        abs(r - 5f / 4f) < 0.035f -> "5:4"
+        abs(r - 18f / 9f) < 0.06f -> "18:9"
+        abs(r - 20f / 9f) < 0.06f -> "20:9"
+        abs(r - 21f / 9f) < 0.06f -> "21:9"
+        else -> {
+            val g = gcdInt(size.width, size.height).coerceAtLeast(1)
+            val rw = size.width / g
+            val rh = size.height / g
+            if (rw <= 25 && rh <= 25) "$rw:$rh" else "${"%.2f".format(Locale.US, r)}:1"
+        }
+    }
+}
+
+private fun choosePreviewSize(
+    previewSizes: Array<Size>,
+    targetJpeg: Size,
+    fallbackTier: Int
+): Size {
+    val targetRatio = targetJpeg.width.toFloat() / targetJpeg.height.coerceAtLeast(1).toFloat()
+    val matching = previewSizes.filter {
+        it.height > 0 && abs((it.width.toFloat() / it.height.toFloat()) - targetRatio) <= 0.03f
+    }
+    val candidates = matching.ifEmpty { previewSizes.toList() }
+
+    // Camera2 guarantees PREVIEW <= 1920x1080 alongside MAXIMUM JPEG even on LIMITED/LEGACY devices
+    val (maxLong, maxShort) = when (fallbackTier) {
+        0 -> 1920 to 1080
+        1 -> 1280 to 960
+        else -> 800 to 600
+    }
+
+    return candidates
+        .filter { maxOf(it.width, it.height) <= maxLong && minOf(it.width, it.height) <= maxShort }
+        .maxByOrNull { it.width.toLong() * it.height.toLong() }
+        ?: candidates.minByOrNull { it.width.toLong() * it.height.toLong() }
+        ?: previewSizes.minByOrNull { it.width.toLong() * it.height.toLong() }
+        ?: targetJpeg
 }
 
 data class CameraPreset(
@@ -405,7 +488,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var activeTab by remember { mutableStateOf(ControlTab.WB) }
     var showGrid by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
+    var showResolutionDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
+
+    val availableResolutions = remember { mutableStateListOf<Size>() }
+    var selectedResolution by remember { mutableStateOf<Size?>(null) }
 
     var isPickerActive by remember { mutableStateOf(false) }
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
@@ -506,11 +593,17 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         contrastVal: Float,
         saturationVal: Float,
         exposureEv: Int,
-        isStillCapture: Boolean = false
+        isStillCapture: Boolean = false,
+        compatibilityFallback: Boolean = false
     ) {
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        val clampedEv = exposureEv.coerceIn(holder.aeCompensationRange.lower, holder.aeCompensationRange.upper)
-        builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedEv)
+        if (holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
+            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        }
+        if (holder.aeCompensationRange.upper > holder.aeCompensationRange.lower) {
+            val clampedEv = exposureEv.coerceIn(holder.aeCompensationRange.lower, holder.aeCompensationRange.upper)
+            builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedEv)
+        }
 
         if (auto) {
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
@@ -519,6 +612,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 if (isStillCapture) CaptureRequest.COLOR_CORRECTION_MODE_HIGH_QUALITY
                 else CaptureRequest.COLOR_CORRECTION_MODE_FAST
             )
+            builder.set(
+                CaptureRequest.TONEMAP_MODE,
+                if (isStillCapture) CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                else CaptureRequest.TONEMAP_MODE_FAST
+            )
+        } else if (compatibilityFallback) {
+            // Safe legacy/LIMITED fallback if a HAL rejects manual transform matrix or tonemap curve
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+            builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
+            builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, kelvinToGains(kVal, tVal))
             builder.set(
                 CaptureRequest.TONEMAP_MODE,
                 if (isStillCapture) CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
@@ -586,6 +689,35 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
+    fun submitRepeatingRequest(session: CameraCaptureSession, builder: CaptureRequest.Builder): Boolean {
+        return try {
+            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+            true
+        } catch (e: Exception) {
+            Log.w("CameraScreen", "Primary repeating request failed, trying compatibility fallback", e)
+            if (!holder.currentAutoMode) {
+                try {
+                    applyCamera2Settings(
+                        builder = builder,
+                        auto = false,
+                        kVal = holder.currentKelvin,
+                        tVal = holder.currentTint,
+                        contrastVal = holder.currentContrast,
+                        saturationVal = holder.currentSaturation,
+                        exposureEv = holder.currentExposureEv,
+                        isStillCapture = false,
+                        compatibilityFallback = true
+                    )
+                    session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
+                    return true
+                } catch (e2: Exception) {
+                    Log.e("CameraScreen", "Compatibility repeating request failed", e2)
+                }
+            }
+            false
+        }
+    }
+
     fun updatePreviewSettings() {
         syncHolderSettings()
         val builder = holder.previewBuilder ?: return
@@ -600,146 +732,245 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             exposureEv = holder.currentExposureEv,
             isStillCapture = false
         )
-        try {
-            session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
-        } catch (e: Exception) {
-            Log.e("CameraScreen", "Failed to update preview settings", e)
+        submitRepeatingRequest(session, builder)
+    }
+
+    fun closeCameraInternal(releaseReader: Boolean = true, pendingReopen: SurfaceTexture? = null) {
+        var reopenDirectly: SurfaceTexture? = null
+        synchronized(holder) {
+            holder.cameraGeneration += 1
+            holder.isOpening = false
+            holder.isTakingPhoto = false
+            holder.pendingReopenSurfaceTexture = pendingReopen
+            val hadDevice = holder.device != null
+            try { holder.session?.close() } catch (_: Exception) {}
+            holder.session = null
+            try { holder.device?.close() } catch (_: Exception) {}
+            holder.device = null
+            holder.previewBuilder = null
+            try { holder.activeSurface?.release() } catch (_: Exception) {}
+            holder.activeSurface = null
+            if (releaseReader) {
+                try { holder.imageReader?.close() } catch (_: Exception) {}
+                holder.imageReader = null
+            }
+            if (!hadDevice && pendingReopen != null && !holder.isDisposed) {
+                holder.pendingReopenSurfaceTexture = null
+                reopenDirectly = pendingReopen
+            }
+        }
+        mainHandler.post { cameraReady = false }
+        reopenDirectly?.let { st ->
+            cameraHandler.post { startCameraInternal(st) }
         }
     }
 
-    fun startCamera(surfaceTexture: SurfaceTexture) {
+    @SuppressLint("MissingPermission")
+    fun startCameraInternal(surfaceTexture: SurfaceTexture) {
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return
         }
-        if (holder.isDisposed || holder.device != null || holder.isOpening) return
-
-        val cameraIdList = cameraManager.cameraIdList
-        if (cameraIdList.isEmpty()) return
-        val cameraId = cameraIdList[0]
-        val chars = cameraManager.getCameraCharacteristics(cameraId)
-        val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return
-        val outputSizes = map.getOutputSizes(ImageFormat.JPEG) ?: return
-        val largest = outputSizes.maxByOrNull { it.width * it.height } ?: return
-
-        val targetRatio = largest.width.toFloat() / largest.height.toFloat()
-        val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: arrayOf(largest)
-        val matchingPreviewSizes = previewSizes.filter {
-            abs((it.width.toFloat() / it.height.toFloat()) - targetRatio) <= 0.02f
+        val openGen = synchronized(holder) {
+            if (holder.isDisposed || holder.device != null || holder.isOpening) return
+            holder.isOpening = true
+            holder.cameraGeneration += 1
+            holder.cameraGeneration
         }
-        val candidates = matchingPreviewSizes.ifEmpty { previewSizes.toList() }
-        val chosenPreview = candidates
-            .filter { it.width <= 1920 && it.height <= 1920 }
-            .maxByOrNull { it.width * it.height }
-            ?: candidates.maxByOrNull { it.width * it.height }
-            ?: largest
-
-        surfaceTexture.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
-        val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
-        val swapped = sensorOrientation == 90 || sensorOrientation == 270
-        val uprightW = if (swapped) chosenPreview.height else chosenPreview.width
-        val uprightH = if (swapped) chosenPreview.width else chosenPreview.height
-        val ratio = (uprightW.toFloat() / uprightH.toFloat()).coerceIn(0.4f, 2.0f)
-        mainHandler.post { previewAspectRatio = ratio }
-
-        val surface = Surface(surfaceTexture)
-
-        holder.supportedTonemapModes =
-            chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
-        holder.maxTonemapCurvePoints =
-            chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 33
-        val range = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)
-        val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
-        holder.aeCompensationRange = range
-        holder.aeCompensationStep = step
-        mainHandler.post {
-            aeRange = range
-            aeStep = step
-        }
-
-        holder.imageReader?.close()
-        holder.imageReader = ImageReader.newInstance(largest.width, largest.height, ImageFormat.JPEG, 2)
-        holder.activeSurface = surface
-        holder.isOpening = true
 
         try {
+            val cameraIdList = cameraManager.cameraIdList
+            if (cameraIdList.isEmpty()) {
+                synchronized(holder) { holder.isOpening = false }
+                return
+            }
+            val cameraId = cameraIdList.firstOrNull { id ->
+                try {
+                    cameraManager.getCameraCharacteristics(id)
+                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                } catch (_: Exception) {
+                    false
+                }
+            } ?: cameraIdList[0]
+            holder.activeCameraId = cameraId
+
+            val chars = cameraManager.getCameraCharacteristics(cameraId)
+            val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+            if (map == null) {
+                synchronized(holder) { holder.isOpening = false }
+                return
+            }
+
+            val rawOutputSizes = map.getOutputSizes(ImageFormat.JPEG)
+            if (rawOutputSizes.isNullOrEmpty()) {
+                synchronized(holder) { holder.isOpening = false }
+                return
+            }
+
+            val filteredRes = rawOutputSizes.filter { it.width >= 640 && it.height >= 480 }
+            val sortedSizes = (filteredRes.ifEmpty { rawOutputSizes.toList() })
+                .distinctBy { it.width to it.height }
+                .sortedByDescending { it.width.toLong() * it.height.toLong() }
+
+            val savedW = sharedPrefs.getInt("selected_res_w", -1)
+            val savedH = sharedPrefs.getInt("selected_res_h", -1)
+            val chosenJpeg = holder.selectedResolution?.let { sel ->
+                sortedSizes.firstOrNull { it.width == sel.width && it.height == sel.height }
+            } ?: sortedSizes.firstOrNull { it.width == savedW && it.height == savedH }
+                ?: sortedSizes.first()
+
+            holder.selectedResolution = chosenJpeg
+            mainHandler.post {
+                availableResolutions.clear()
+                availableResolutions.addAll(sortedSizes)
+                selectedResolution = chosenJpeg
+            }
+
+            val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: arrayOf(chosenJpeg)
+            val chosenPreview = choosePreviewSize(previewSizes, chosenJpeg, holder.previewFallbackLevel)
+
+            surfaceTexture.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
+            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            val swapped = sensorOrientation == 90 || sensorOrientation == 270
+            val uprightW = if (swapped) chosenPreview.height else chosenPreview.width
+            val uprightH = if (swapped) chosenPreview.width else chosenPreview.height
+            val ratio = (uprightW.toFloat() / uprightH.coerceAtLeast(1).toFloat()).coerceIn(0.4f, 2.0f)
+            mainHandler.post { previewAspectRatio = ratio }
+
+            val surface = Surface(surfaceTexture)
+
+            holder.supportedTonemapModes =
+                chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
+            holder.availableAfModes =
+                chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+            holder.maxTonemapCurvePoints =
+                chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 33
+            val range = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)
+            val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
+            holder.aeCompensationRange = range
+            holder.aeCompensationStep = step
+            mainHandler.post {
+                aeRange = range
+                aeStep = step
+            }
+
+            synchronized(holder) {
+                holder.imageReader?.close()
+                holder.imageReader = ImageReader.newInstance(chosenJpeg.width, chosenJpeg.height, ImageFormat.JPEG, 2)
+                holder.activeSurface = surface
+            }
+
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
-                    holder.isOpening = false
-                    if (holder.isDisposed) {
-                        camera.close()
+                    synchronized(holder) {
+                        holder.isOpening = false
+                        if (holder.isDisposed || holder.cameraGeneration != openGen) {
+                            camera.close()
+                            return
+                        }
+                        holder.device = camera
+                    }
+                    val readerSurface = holder.imageReader?.surface
+                    if (readerSurface == null) {
+                        closeCameraInternal(releaseReader = true)
                         return
                     }
-                    holder.device = camera
-                    val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                        addTarget(surface)
-                        applyCamera2Settings(
-                            builder = this,
-                            auto = holder.currentAutoMode,
-                            kVal = holder.currentKelvin,
-                            tVal = holder.currentTint,
-                            contrastVal = holder.currentContrast,
-                            saturationVal = holder.currentSaturation,
-                            exposureEv = holder.currentExposureEv,
-                            isStillCapture = false
-                        )
-                    }
-                    holder.previewBuilder = builder
-                    @Suppress("DEPRECATION")
-                    camera.createCaptureSession(
-                        listOf(surface, holder.imageReader!!.surface),
-                        object : CameraCaptureSession.StateCallback() {
-                            override fun onConfigured(session: CameraCaptureSession) {
-                                if (holder.isDisposed) {
-                                    session.close()
-                                    return
+                    try {
+                        val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                            addTarget(surface)
+                            applyCamera2Settings(
+                                builder = this,
+                                auto = holder.currentAutoMode,
+                                kVal = holder.currentKelvin,
+                                tVal = holder.currentTint,
+                                contrastVal = holder.currentContrast,
+                                saturationVal = holder.currentSaturation,
+                                exposureEv = holder.currentExposureEv,
+                                isStillCapture = false
+                            )
+                        }
+                        holder.previewBuilder = builder
+                        @Suppress("DEPRECATION")
+                        camera.createCaptureSession(
+                            listOf(surface, readerSurface),
+                            object : CameraCaptureSession.StateCallback() {
+                                override fun onConfigured(session: CameraCaptureSession) {
+                                    if (holder.isDisposed || holder.device !== camera) {
+                                        try { session.close() } catch (_: Exception) {}
+                                        return
+                                    }
+                                    holder.session = session
+                                    val started = submitRepeatingRequest(session, builder)
+                                    mainHandler.post { cameraReady = started }
                                 }
-                                holder.session = session
-                                try {
-                                    session.setRepeatingRequest(builder.build(), captureCallback, cameraHandler)
-                                    mainHandler.post { cameraReady = true }
-                                } catch (e: CameraAccessException) {
-                                    Log.e("CameraScreen", "Failed to start repeating request", e)
-                                    mainHandler.post { cameraReady = false }
-                                }
-                            }
 
-                            override fun onConfigureFailed(s: CameraCaptureSession) {
-                                mainHandler.post { cameraReady = false }
-                            }
-                        },
-                        cameraHandler
-                    )
+                                override fun onConfigureFailed(s: CameraCaptureSession) {
+                                    Log.w("CameraScreen", "Session config failed at tier=${holder.previewFallbackLevel}")
+                                    if (!holder.isDisposed && holder.previewFallbackLevel < 2) {
+                                        holder.previewFallbackLevel += 1
+                                        closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)
+                                    } else {
+                                        closeCameraInternal(releaseReader = true)
+                                        mainHandler.post {
+                                            cameraReady = false
+                                            showStatus("Bu çözünürlük desteklenmedi")
+                                        }
+                                    }
+                                }
+                            },
+                            cameraHandler
+                        )
+                    } catch (e: Exception) {
+                        Log.e("CameraScreen", "Failed to create capture session", e)
+                        closeCameraInternal(releaseReader = true)
+                    }
                 }
 
                 override fun onDisconnected(c: CameraDevice) {
-                    holder.isOpening = false
-                    c.close()
-                    holder.device = null
-                    cameraReady = false
+                    closeCameraInternal(releaseReader = true)
+                    try { c.close() } catch (_: Exception) {}
                 }
 
                 override fun onError(c: CameraDevice, e: Int) {
-                    holder.isOpening = false
-                    c.close()
-                    holder.device = null
-                    cameraReady = false
+                    closeCameraInternal(releaseReader = true)
+                    try { c.close() } catch (_: Exception) {}
+                }
+
+                override fun onClosed(c: CameraDevice) {
+                    val pending = synchronized(holder) {
+                        val st = holder.pendingReopenSurfaceTexture
+                        holder.pendingReopenSurfaceTexture = null
+                        st
+                    }
+                    if (pending != null && !holder.isDisposed) {
+                        cameraHandler.post { startCameraInternal(pending) }
+                    }
                 }
             }, cameraHandler)
-        } catch (e: CameraAccessException) {
-            holder.isOpening = false
+        } catch (e: Exception) {
+            synchronized(holder) { holder.isOpening = false }
             Log.e("CameraScreen", "Failed to open camera", e)
         }
     }
 
+    fun startCamera(surfaceTexture: SurfaceTexture) {
+        cameraHandler.post { startCameraInternal(surfaceTexture) }
+    }
+
+    fun restartCamera() {
+        val st = textureViewInstance?.surfaceTexture ?: return
+        cameraHandler.post {
+            closeCameraInternal(releaseReader = true, pendingReopen = st)
+        }
+    }
+
     fun takePhoto() {
+        if (holder.isTakingPhoto) return
         syncHolderSettings()
         val camera = holder.device ?: return
         val session = holder.session ?: return
         val reader = holder.imageReader ?: return
 
-        val cameraIdList = cameraManager.cameraIdList
-        if (cameraIdList.isEmpty()) return
-        val cameraId = cameraIdList[0]
+        val cameraId = holder.activeCameraId ?: cameraManager.cameraIdList.firstOrNull() ?: return
         val characteristics = cameraManager.getCameraCharacteristics(cameraId)
         val sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
         val displayRotation = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -758,6 +989,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
         val jpegOrientation = (sensorOrientation - rotationCompensation + 360) % 360
 
+        holder.isTakingPhoto = true
         coroutineScope.launch {
             isShutterPressed = true
             shutterFlashAlpha.snapTo(0.45f)
@@ -766,21 +998,51 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
 
         reader.setOnImageAvailableListener({ imageReader ->
-            val image = imageReader.acquireLatestImage() ?: return@setOnImageAvailableListener
-            val buffer = image.planes[0].buffer
-            val bytes = ByteArray(buffer.remaining()).also { buffer.get(it) }
-            image.close()
-
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "IMG_${System.currentTimeMillis()}.jpg")
-                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            val image = try { imageReader.acquireLatestImage() } catch (_: Exception) { null }
+            if (image == null) {
+                holder.isTakingPhoto = false
+                return@setOnImageAvailableListener
+            }
+            val bytes = try {
+                val buffer = image.planes[0].buffer
+                ByteArray(buffer.remaining()).also { buffer.get(it) }
+            } finally {
+                image.close()
             }
 
-            val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            uri?.let {
-                context.contentResolver.openOutputStream(it)?.use { out -> out.write(bytes) }
+            try {
+                val timestamp = System.currentTimeMillis()
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, "IMG_$timestamp.jpg")
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        out.write(bytes)
+                        out.flush()
+                    }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+                        resolver.update(uri, done, null, null)
+                    }
+                    mainHandler.post { showStatus("Fotoğraf galeriye kaydedildi") }
+                } else {
+                    mainHandler.post { showStatus("Fotoğraf kaydedilemedi") }
+                }
+            } catch (e: Exception) {
+                Log.e("CameraScreen", "Failed to save image", e)
+                mainHandler.post { showStatus("Kayıt hatası: depolama iznini kontrol edin") }
+            } finally {
+                holder.isTakingPhoto = false
             }
-            mainHandler.post { showStatus("Fotoğraf galeriye kaydedildi") }
         }, cameraHandler)
 
         val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
@@ -799,36 +1061,18 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
 
         try {
-            session.stopRepeating()
             shutterSound.play(MediaActionSound.SHUTTER_CLICK)
-
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
+                override fun onCaptureFailed(
                     s: CameraCaptureSession,
                     r: CaptureRequest,
-                    res: TotalCaptureResult
+                    failure: CaptureFailure
                 ) {
-                    super.onCaptureCompleted(s, r, res)
-                    holder.previewBuilder?.let {
-                        applyCamera2Settings(
-                            builder = it,
-                            auto = holder.currentAutoMode,
-                            kVal = holder.currentKelvin,
-                            tVal = holder.currentTint,
-                            contrastVal = holder.currentContrast,
-                            saturationVal = holder.currentSaturation,
-                            exposureEv = holder.currentExposureEv,
-                            isStillCapture = false
-                        )
-                        try {
-                            session.setRepeatingRequest(it.build(), captureCallback, cameraHandler)
-                        } catch (e: CameraAccessException) {
-                            Log.e("CameraScreen", "Failed to resume repeating request", e)
-                        }
-                    }
+                    holder.isTakingPhoto = false
                 }
             }, cameraHandler)
-        } catch (e: CameraAccessException) {
+        } catch (e: Exception) {
+            holder.isTakingPhoto = false
             Log.e("CameraScreen", "Failed to capture photo", e)
         }
     }
@@ -846,6 +1090,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                holder.previewFallbackLevel = 0
                 if (holder.device == null && !holder.isOpening) {
                     textureViewInstance?.let { tv ->
                         if (tv.isAvailable) {
@@ -854,29 +1099,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
             } else if (event == Lifecycle.Event.ON_PAUSE) {
-                holder.isOpening = false
-                holder.session?.close()
-                holder.device?.close()
-                holder.activeSurface?.release()
-                holder.activeSurface = null
-                holder.session = null
-                holder.device = null
-                cameraReady = false
+                closeCameraInternal(releaseReader = true)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             holder.isDisposed = true
             lifecycleOwner.lifecycle.removeObserver(observer)
-            holder.session?.close()
-            holder.device?.close()
-            holder.imageReader?.close()
-            holder.activeSurface?.release()
+            closeCameraInternal(releaseReader = true)
             cameraThread.quitSafely()
             shutterSound.release()
-            holder.session = null
-            holder.device = null
-            holder.imageReader = null
         }
     }
 
@@ -1017,9 +1249,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     )
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Brand + Telemetry + Grid Row
+                // Brand + Resolution Switcher + Grid Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -1063,26 +1295,35 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        // Telemetry Pill
+                        // Resolution Selector Pill
+                        val activeRes = selectedResolution
+                        val resLabel = if (activeRes != null) {
+                            "${formatMegapixels(activeRes)} · ${formatAspectRatioTag(activeRes)} ▾"
+                        } else {
+                            "Çözünürlük ▾"
+                        }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(IrPalette.HudCard)
-                                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                .border(
+                                    1.dp,
+                                    if (availableResolutions.isNotEmpty()) IrPalette.IrCyan.copy(alpha = 0.45f)
+                                    else IrPalette.BorderSubtle,
+                                    RoundedCornerShape(50)
+                                )
+                                .clickable(enabled = availableResolutions.isNotEmpty()) {
+                                    showResolutionDialog = true
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
-                            val telemetry = if (isAutoMode) {
-                                "AUTO · ~${displayKelvin.toInt()}K · T${formatSigned(displayTint)}"
-                            } else {
-                                "${displayKelvin.toInt()}K · T${formatSigned(displayTint)} · C${"%.2f".format(contrastValue)} · S${"%.2f".format(saturationValue)}"
-                            }
                             Text(
-                                text = telemetry,
-                                color = IrPalette.TextPrimary,
+                                text = resLabel,
+                                color = IrPalette.IrCyan,
                                 fontSize = 11.sp,
                                 fontFamily = FontFamily.Monospace,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
                             )
                         }
 
@@ -1105,6 +1346,46 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 modifier = Modifier.size(16.dp)
                             )
                         }
+                    }
+                }
+
+                // Live Telemetry & Output Size Strip
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f, fill = false)
+                            .clip(RoundedCornerShape(50))
+                            .background(IrPalette.HudCard)
+                            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        val telemetry = if (isAutoMode) {
+                            "AUTO · ~${displayKelvin.toInt()}K · T${formatSigned(displayTint)}"
+                        } else {
+                            "${displayKelvin.toInt()}K · T${formatSigned(displayTint)} · C${"%.2f".format(Locale.US, contrastValue)} · S${"%.2f".format(Locale.US, saturationValue)}"
+                        }
+                        Text(
+                            text = telemetry,
+                            color = IrPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    selectedResolution?.let { res ->
+                        Text(
+                            text = "${res.width}×${res.height}",
+                            color = IrPalette.TextSecondary,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
                     }
                 }
 
@@ -1651,6 +1932,124 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             dismissButton = {
                 TextButton(onClick = { showSaveDialog = false }) {
                     Text("Vazgeç", color = IrPalette.TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Resolution Selector Dialog
+    if (showResolutionDialog) {
+        AlertDialog(
+            onDismissRequest = { showResolutionDialog = false },
+            containerColor = Color(0xFF141822),
+            titleContentColor = IrPalette.TextPrimary,
+            textContentColor = IrPalette.TextSecondary,
+            title = {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Fotoğraf Çözünürlüğü",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "${availableResolutions.size} desteklenen boyut · Önizleme otomatik hizalanır",
+                        color = IrPalette.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(availableResolutions, key = { "${it.width}x${it.height}" }) { res ->
+                        val isSelected = selectedResolution?.let {
+                            it.width == res.width && it.height == res.height
+                        } == true
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(
+                                    if (isSelected) IrPalette.IrCyan.copy(alpha = 0.16f)
+                                    else Color.White.copy(alpha = 0.04f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) IrPalette.IrCyan else IrPalette.BorderSubtle,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    sharedPrefs.edit {
+                                        putInt("selected_res_w", res.width)
+                                        putInt("selected_res_h", res.height)
+                                    }
+                                    selectedResolution = res
+                                    holder.selectedResolution = res
+                                    holder.previewFallbackLevel = 0
+                                    showResolutionDialog = false
+                                    showStatus("Çözünürlük: ${formatMegapixels(res)} (${res.width}×${res.height})")
+                                    restartCamera()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = formatMegapixels(res),
+                                    color = if (isSelected) IrPalette.IrCyan else IrPalette.TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "${res.width} × ${res.height}",
+                                    color = IrPalette.TextSecondary,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Text(
+                                        text = formatAspectRatioTag(res),
+                                        color = IrPalette.TextPrimary,
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                                if (isSelected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(IrPalette.IrCyan)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showResolutionDialog = false }) {
+                    Text("Kapat", color = IrPalette.IrCyan)
                 }
             }
         )

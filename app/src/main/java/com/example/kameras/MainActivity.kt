@@ -313,9 +313,9 @@ data class CameraPreset(
 
 private const val KELVIN_MIN = 1f
 private const val KELVIN_MAX = 10000f
-private const val DEFAULT_CONTRAST = 1.18f
-private const val DEFAULT_SATURATION = 1.22f
-private const val DEFAULT_SPECTRAL_BOOST = 0.0f
+private const val DEFAULT_CONTRAST = 1.15f
+private const val DEFAULT_SATURATION = 1.15f
+private const val DEFAULT_SPECTRAL_BOOST = 1.15f
 
 private val DEFAULT_SRGB_CCM = floatArrayOf(
     1.65f, -0.50f, -0.15f,
@@ -534,17 +534,13 @@ private fun buildContrastTonemapCurve(
                 } else {
                     (1.055f * x.toDouble().pow(1.0 / 2.4).toFloat() - 0.055f).coerceIn(0f, 1f)
                 }
-                val lifted = if (abs(lift) > 0.005f) {
-                    (perceptual + lift * perceptual * (1f - perceptual) * 2.2f).coerceIn(0f, 1f)
-                } else {
-                    perceptual
-                }
+                val lifted = (perceptual + lift * perceptual * (1f - perceptual) * 2.2f).coerceIn(0f, 1f)
                 val shaped = if (lifted < 0.5f) {
                     0.5f * (2.0 * lifted).pow(c.toDouble()).toFloat()
                 } else {
                     1.0f - 0.5f * (2.0 * (1.0 - lifted)).pow(c.toDouble()).toFloat()
                 }
-                val shouldered = if (abs(lift) > 0.005f && shaped > 0.80f) {
+                val shouldered = if (shaped > 0.80f) {
                     val over = shaped - 0.80f
                     0.80f + 0.20f * (over / (over + 0.20f)) * 1.95f
                 } else {
@@ -608,9 +604,16 @@ private fun applySpectralColorCalibration(
             var b = (px and 0xFF) / 255f
 
             if (str > 0.05f) {
+                val maxRG = maxOf(r, g)
+                val blueVeil = b - maxRG
+                if (blueVeil > 0f) {
+                    val veilFade = 1f - smoothStep(0.03f, 0.10f, blueVeil)
+                    b -= minOf(blueVeil, 0.05f) * 0.65f * veilFade * minOf(1f, str)
+                }
+
                 val luma = 0.299f * r + 0.587f * g + 0.114f * b
-                val lift = if (luma < 0.78f) {
-                    1f + 0.18f * minOf(1.2f, str) * (1.0 - (luma / 0.78)).pow(1.4).toFloat()
+                val lift = if (luma < 0.80f) {
+                    1f + 0.40f * minOf(1.2f, str) * (1.0 - (luma / 0.80)).pow(1.35).toFloat()
                 } else {
                     1f
                 }
@@ -619,61 +622,76 @@ private fun applySpectralColorCalibration(
                 g = softClipChannel(g * gain)
                 b = softClipChannel(b * gain)
 
-                val maxC = maxOf(r, maxOf(g, b))
-                val minC = minOf(r, minOf(g, b))
-                val chroma = maxC - minC
-                val sat = if (maxC > 0.02f) chroma / maxC else 0f
+                var maxC = maxOf(r, maxOf(g, b))
+                var minC = minOf(r, minOf(g, b))
+                var chroma = maxC - minC
+                var sat = if (maxC > 0.02f) chroma / maxC else 0f
 
-                val activeWeight = smoothStep(0.05f, 0.18f, chroma) *
-                    smoothStep(0.10f, 0.26f, sat) * str
+                val neutAmount = (1f - smoothStep(0.025f, 0.095f, chroma)) *
+                    (1f - smoothStep(0.08f, 0.18f, sat))
+                if (neutAmount > 0.001f) {
+                    val avg = 0.34f * r + 0.50f * g + 0.16f * b
+                    val pull = 0.72f * neutAmount * minOf(1f, str)
+                    r = r * (1f - pull) + avg * pull
+                    g = g * (1f - pull) + avg * pull
+                    b = b * (1f - pull) + avg * pull
+                    maxC = maxOf(r, maxOf(g, b))
+                    minC = minOf(r, minOf(g, b))
+                    chroma = maxC - minC
+                    sat = if (maxC > 0.02f) chroma / maxC else 0f
+                }
+
+                val activeWeight = smoothStep(0.045f, 0.16f, chroma) *
+                    smoothStep(0.09f, 0.24f, sat) * str
 
                 if (activeWeight > 0.001f) {
                     val rgDiff = r - g
                     val gbDiff = g - b
                     val rbDiff = r - b
 
-                    val warmWeight = smoothStep(0.015f, 0.07f, rgDiff) * smoothStep(0.02f, 0.09f, rbDiff)
+                    val warmWeight = smoothStep(0.01f, 0.06f, rgDiff) * smoothStep(0.02f, 0.08f, rbDiff)
                     if (warmWeight > 0.001f && rbDiff > 0.001f) {
                         val yellowRatio = (gbDiff / rbDiff).coerceIn(0f, 1f)
-                        val yellowBlend = smoothStep(0.26f, 0.46f, yellowRatio)
+                        val yellowBlend = smoothStep(0.24f, 0.44f, yellowRatio)
                         val irBlend = 1f - yellowBlend
 
                         if (yellowBlend > 0.001f) {
                             val yStr = yellowBlend * warmWeight * activeWeight
-                            val boost = rbDiff * 0.45f * yStr
-                            r = softClipChannel(r + boost * 0.40f)
-                            g = softClipChannel(g + boost * 0.55f)
-                            b = maxOf(0f, b - boost * 0.25f)
+                            val boost = rbDiff * 1.05f * yStr
+                            r = softClipChannel(r + boost * 0.52f)
+                            g = softClipChannel(g + boost * 0.72f)
+                            b = maxOf(0f, b - boost * 0.48f)
                         }
                         if (irBlend > 0.001f) {
                             val irStr = irBlend * warmWeight * activeWeight
-                            val crosstalk = rgDiff * 0.65f * irStr
-                            val rBoost = crosstalk * 0.28f * (1f - 0.50f * r)
+                            val crosstalk = rgDiff * 1.62f * irStr
+                            val rBoost = crosstalk * 0.42f * (1f - 0.52f * r)
                             r = minOf(0.96f, r + rBoost)
-                            g = maxOf(0.18f * r, g - crosstalk * 0.45f)
-                            b = maxOf(0.16f * r, b - crosstalk * 0.40f)
+                            g = maxOf(0.06f * r, g - crosstalk * 0.98f)
+                            b = maxOf(0.06f * r, b - crosstalk * 0.92f)
                         }
                     }
 
                     val coolSpan = b - r
-                    if (coolSpan > 0.015f) {
-                        val coolWeight = smoothStep(0.015f, 0.07f, coolSpan) * smoothStep(-0.01f, 0.03f, g - r)
+                    if (coolSpan > 0.01f) {
+                        val coolWeight = smoothStep(0.01f, 0.06f, coolSpan) * smoothStep(-0.01f, 0.03f, g - r)
                         val greenPeak = g - maxOf(r, b - 0.015f)
-                        val greenBlend = smoothStep(0.004f, 0.04f, greenPeak) * (1f - smoothStep(0.20f, 0.36f, sat))
+                        val greenBlend = smoothStep(0.002f, 0.035f, greenPeak) * (1f - smoothStep(0.18f, 0.35f, sat))
                         val blueBlend = (1f - greenBlend) * smoothStep(0.03f, 0.12f, coolSpan)
 
                         if (greenBlend > 0.001f) {
                             val gStr = greenBlend * activeWeight
-                            val gBoost = (g - r) * 0.90f * gStr
-                            g = softClipChannel(g + gBoost * 0.45f)
-                            r = maxOf(0f, r - gBoost * 0.35f)
+                            val gBoost = (g - r) * 2.2f * gStr
+                            g = softClipChannel(g + gBoost * 0.60f)
+                            r = maxOf(0f, r - gBoost * 0.65f)
+                            b = maxOf(0f, b - gBoost * 0.25f)
                         }
                         if (blueBlend > 0.001f) {
                             val bStr = blueBlend * coolWeight * activeWeight
                             val skyProtect = 1f - smoothStep(0.72f, 0.94f, minOf(r, g))
-                            r = maxOf(0f, r - coolSpan * 0.18f * bStr * skyProtect)
-                            g = softClipChannel(g + coolSpan * 0.08f * bStr * skyProtect)
-                            b = softClipChannel(b + coolSpan * 0.22f * bStr * skyProtect)
+                            r = maxOf(0f, r - coolSpan * 0.38f * bStr * skyProtect)
+                            g = softClipChannel(g + coolSpan * 0.12f * bStr * skyProtect)
+                            b = softClipChannel(b + coolSpan * 0.42f * bStr * skyProtect)
                         }
                     }
                 }
@@ -1333,6 +1351,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val name = obj.getString("name")
+                val defaultSpec = if (name.contains("720", ignoreCase = true)) 0f else DEFAULT_SPECTRAL_BOOST
                 savedPresets.add(
                     CameraPreset(
                         name = name,
@@ -1340,25 +1359,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         tint = obj.getDouble("tint").toFloat(),
                         contrast = obj.optDouble("contrast", DEFAULT_CONTRAST.toDouble()).toFloat(),
                         saturation = obj.optDouble("saturation", DEFAULT_SATURATION.toDouble()).toFloat(),
-                        spectralBoost = obj.optDouble("spectralBoost", DEFAULT_SPECTRAL_BOOST.toDouble()).toFloat()
+                        spectralBoost = obj.optDouble("spectralBoost", defaultSpec.toDouble()).toFloat()
                     )
                 )
             }
         } catch (_: Exception) {
         }
 
-        if (savedPresets.isEmpty() && !sharedPrefs.getBoolean("presets_seeded_v6", false)) {
+        if (savedPresets.isEmpty() && !sharedPrefs.getBoolean("presets_seeded_v7", false)) {
             savedPresets.addAll(
                 listOf(
-                    CameraPreset("IRChrome", 3200f, -10f, 1.20f, 1.28f, DEFAULT_SPECTRAL_BOOST),
-                    CameraPreset("590nm Gold", 2400f, 8f, 1.22f, 1.25f, DEFAULT_SPECTRAL_BOOST),
-                    CameraPreset("720nm Crisp", 1800f, 0f, 1.35f, 0.90f, DEFAULT_SPECTRAL_BOOST)
+                    CameraPreset("IRChrome Pro", 3348f, 13f, 1.15f, 1.15f, DEFAULT_SPECTRAL_BOOST),
+                    CameraPreset("590nm Gold", 2400f, 8f, 1.22f, 1.25f, 0.35f),
+                    CameraPreset("720nm Crisp", 1800f, 0f, 1.35f, 0.90f, 0.0f)
                 )
             )
             savePresetsToStorage()
-            sharedPrefs.edit { putBoolean("presets_seeded_v6", true) }
-        } else if (savedPresets.isNotEmpty() && !sharedPrefs.getBoolean("presets_seeded_v6", false)) {
-            sharedPrefs.edit { putBoolean("presets_seeded_v6", true) }
+            sharedPrefs.edit { putBoolean("presets_seeded_v7", true) }
+        } else if (savedPresets.isNotEmpty() && !sharedPrefs.getBoolean("presets_seeded_v7", false)) {
+            sharedPrefs.edit { putBoolean("presets_seeded_v7", true) }
         }
     }
 

@@ -203,13 +203,10 @@ private class CameraHolder {
     @Volatile var currentTint: Float = 0f
     @Volatile var currentContrast: Float = DEFAULT_CONTRAST
     @Volatile var currentSaturation: Float = DEFAULT_SATURATION
-    @Volatile var currentSpectralBoost: Float = DEFAULT_SPECTRAL_BOOST
     @Volatile var currentExposureEv: Int = 0
     @Volatile var currentMeteringMode: ExposureMeteringMode = ExposureMeteringMode.FULL_SCREEN
     @Volatile var currentExposureBoxNorm: Offset = Offset(0.5f, 0.5f)
-    @Volatile var currentExposureBoxSizeNorm: Float = 0.20f
-    @Volatile var currentComputedGain: Float = 1.0f
-    @Volatile var currentMultiShotMode: Boolean = false
+    @Volatile var currentExposureBoxSizeNorm: Float = 0.28f
 }
 
 private fun formatMegapixels(size: Size): String {
@@ -307,31 +304,18 @@ data class CameraPreset(
     val kelvin: Float,
     val tint: Float,
     val contrast: Float = DEFAULT_CONTRAST,
-    val saturation: Float = DEFAULT_SATURATION,
-    val spectralBoost: Float = DEFAULT_SPECTRAL_BOOST
+    val saturation: Float = DEFAULT_SATURATION
 )
 
 private const val KELVIN_MIN = 1f
 private const val KELVIN_MAX = 10000f
-private const val DEFAULT_CONTRAST = 1.15f
-private const val DEFAULT_SATURATION = 1.15f
-private const val DEFAULT_SPECTRAL_BOOST = 1.15f
+private const val DEFAULT_CONTRAST = 1.0f
+private const val DEFAULT_SATURATION = 1.0f
 
 private val DEFAULT_SRGB_CCM = floatArrayOf(
     1.65f, -0.50f, -0.15f,
     -0.20f, 1.45f, -0.25f,
     -0.05f, -0.55f, 1.60f
-)
-
-/**
- * Calibrated 3x3 Color Correction Matrix for Kolari IRChrome + full-spectrum phone CMOS.
- * Row sums remain strictly 1.0f to preserve neutral white (R=G=B) while subtracting
- * out-of-band >720nm NIR crosstalk between channels and lifting 500-580nm G separation.
- */
-private val IRCHROME_CALIBRATED_CCM = floatArrayOf(
-    1.86f, -0.56f, -0.30f,
-    -0.26f, 1.60f, -0.34f,
-    -0.12f, -0.46f, 1.58f
 )
 
 private fun kelvinToRawTriple(kVal: Float, tVal: Float): Triple<Float, Float, Float> {
@@ -439,61 +423,52 @@ private fun inverseRgbToKelvinTint(
 }
 
 /**
- * Builds a 3x3 hardware ColorSpaceTransform.
- * When spectralBoost > 0.05f, blends from DEFAULT_SRGB_CCM toward IRCHROME_CALIBRATED_CCM
- * instead of using AWB-poisoned Auto CCM matrices, then applies luminance-preserving saturation.
+ * Builds a 3x3 hardware ColorSpaceTransform with luminance-preserving saturation.
+ * Uses the camera sensor's native matrix (or default sRGB matrix) without synthetic distortion.
  */
 private fun buildColorTransform(
     baseTransform: ColorSpaceTransform?,
-    saturation: Float,
-    spectralBoost: Float
+    saturation: Float
 ): ColorSpaceTransform {
     val base = FloatArray(9)
-    if (spectralBoost > 0.05f) {
-        val blend = (spectralBoost / 1.15f).coerceIn(0f, 1.35f)
-        for (i in 0 until 9) {
-            base[i] = DEFAULT_SRGB_CCM[i] * (1f - blend) + IRCHROME_CALIBRATED_CCM[i] * blend
-        }
-    } else {
-        var validBase = false
-        if (baseTransform != null) {
-            try {
-                val elements = Array(9) { Rational(0, 1) }
-                baseTransform.copyElements(elements, 0)
-                for (i in 0 until 9) {
-                    val rat = elements[i]
-                    if (rat.denominator == 0) {
-                        validBase = false
-                        break
-                    }
-                    val v = rat.toFloat()
-                    if (!v.isFinite()) {
-                        validBase = false
-                        break
-                    }
-                    base[i] = v
-                    validBase = true
-                }
-                if (validBase && (abs(base[0]) < 0.1f || abs(base[4]) < 0.1f || abs(base[8]) < 0.1f)) {
+    var validBase = false
+    if (baseTransform != null) {
+        try {
+            val elements = Array(9) { Rational(0, 1) }
+            baseTransform.copyElements(elements, 0)
+            for (i in 0 until 9) {
+                val rat = elements[i]
+                if (rat.denominator == 0) {
                     validBase = false
+                    break
                 }
-            } catch (_: Exception) {
+                val v = rat.toFloat()
+                if (!v.isFinite()) {
+                    validBase = false
+                    break
+                }
+                base[i] = v
+                validBase = true
+            }
+            if (validBase && (abs(base[0]) < 0.1f || abs(base[4]) < 0.1f || abs(base[8]) < 0.1f)) {
                 validBase = false
             }
-        }
-        if (!validBase) {
-            DEFAULT_SRGB_CCM.copyInto(base)
+        } catch (_: Exception) {
+            validBase = false
         }
     }
+    if (!validBase) {
+        DEFAULT_SRGB_CCM.copyInto(base)
+    }
 
-    val s = saturation.coerceIn(0.3f, 2.5f)
+    val s = saturation.coerceIn(0.0f, 2.5f)
     val lr = 0.299f
     val lg = 0.587f
     val lb = 0.114f
     val satMat = floatArrayOf(
-        (1f - s) * lr + s, (1f - s) * lg, (1f - s) * lb,
-        (1f - s) * lr, (1f - s) * lg + s, (1f - s) * lb,
-        (1f - s) * lr, (1f - s) * lg, (1f - s) * lb + s
+        (1f - s) * lr + s, (1f - s) * lg,     (1f - s) * lb,
+        (1f - s) * lr,     (1f - s) * lg + s, (1f - s) * lb,
+        (1f - s) * lr,     (1f - s) * lg,     (1f - s) * lb + s
     )
 
     val outRationals = Array(9) { idx ->
@@ -509,19 +484,16 @@ private fun buildColorTransform(
 }
 
 /**
- * Generates a hardware TonemapCurve applying sRGB gamma, midtone shadow recovery
- * (for IRChrome 550-700nm optical attenuation + exposure gain), soft highlight roll-off,
- * and an adjustable S-curve contrast.
+ * Generates a hardware TonemapCurve with filmic highlight roll-off (soft shoulder),
+ * preventing bright whites / specular highlights from harsh clipping into pure 1.0.
  */
 private fun buildContrastTonemapCurve(
     contrast: Float,
-    brightnessLift: Float,
     maxCurvePoints: Int
 ): TonemapCurve {
     val count = minOf(33, maxCurvePoints).coerceIn(2, 64)
     val curve = FloatArray(count * 2)
     val c = contrast.coerceIn(0.5f, 2.0f)
-    val lift = brightnessLift.coerceIn(-0.45f, 0.65f)
 
     for (i in 0 until count) {
         val x = i.toFloat() / (count - 1).toFloat()
@@ -529,20 +501,14 @@ private fun buildContrastTonemapCurve(
             0 -> 0f
             count - 1 -> 1f
             else -> {
-                val perceptual = if (x <= 0.0031308f) {
-                    12.92f * x
+                val shaped = if (x < 0.45f) {
+                    0.45f * (x / 0.45).pow(c.toDouble()).toFloat()
                 } else {
-                    (1.055f * x.toDouble().pow(1.0 / 2.4).toFloat() - 0.055f).coerceIn(0f, 1f)
+                    1.0f - 0.55f * ((1.0 - x) / 0.55).pow(c.toDouble()).toFloat()
                 }
-                val lifted = (perceptual + lift * perceptual * (1f - perceptual) * 2.2f).coerceIn(0f, 1f)
-                val shaped = if (lifted < 0.5f) {
-                    0.5f * (2.0 * lifted).pow(c.toDouble()).toFloat()
-                } else {
-                    1.0f - 0.5f * (2.0 * (1.0 - lifted)).pow(c.toDouble()).toFloat()
-                }
-                val shouldered = if (shaped > 0.80f) {
-                    val over = shaped - 0.80f
-                    0.80f + 0.20f * (over / (over + 0.20f)) * 1.95f
+                val shouldered = if (shaped > 0.72f) {
+                    val over = shaped - 0.72f
+                    0.72f + 0.28f * (over / (over + 0.18f))
                 } else {
                     shaped
                 }
@@ -557,453 +523,31 @@ private fun buildContrastTonemapCurve(
     return TonemapCurve(curve, curve, curve)
 }
 
-private fun smoothStep(edge0: Float, edge1: Float, x: Float): Float {
-    if (edge1 <= edge0) return if (x >= edge1) 1f else 0f
-    val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
-    return t * t * (3f - 2f * t)
-}
 
-private fun softClipChannel(x: Float): Float {
-    if (x <= 0.86f) return x.coerceAtLeast(0f)
-    val over = x - 0.86f
-    return (0.86f + 0.14f * (over / (over + 0.14f))).coerceAtMost(1.0f)
-}
 
-/**
- * Applies smoothstep chroma-gated IRChrome spectral unmixing & hue-selective restoration:
- * - Removes NIR blue/gray veil on neutral concrete/walls without amplifying shadow noise
- * - Separates IR Foliage (yellowRatio < 0.32 -> deep Aerochrome crimson) from
- *   Yellow/Amber/Warm objects (yellowRatio >= 0.32 -> golden yellow recovery)
- * - Revives 550nm-attenuated greens and clears NIR red-haze from blue skies.
- */
-private fun applySpectralColorCalibration(
-    bitmap: Bitmap,
-    spectralStrength: Float,
-    targetLumaGain: Float
-): Bitmap {
-    val work = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
-    val w = work.width
-    val h = work.height
-    if (w <= 0 || h <= 0) return work
 
-    val str = spectralStrength.coerceIn(0f, 2.0f)
-    val lumaGain = targetLumaGain.coerceIn(0.55f, 1.85f)
-    val stripHeight = 256.coerceAtMost(h)
-    val rowBuf = IntArray(w * stripHeight)
 
-    var y = 0
-    while (y < h) {
-        val rows = minOf(stripHeight, h - y)
-        work.getPixels(rowBuf, 0, w, 0, y, w, rows)
-        val count = w * rows
-        for (idx in 0 until count) {
-            val px = rowBuf[idx]
-            val a = px and -0x1000000
-            var r = ((px ushr 16) and 0xFF) / 255f
-            var g = ((px ushr 8) and 0xFF) / 255f
-            var b = (px and 0xFF) / 255f
 
-            if (str > 0.05f) {
-                val maxRG = maxOf(r, g)
-                val blueVeil = b - maxRG
-                if (blueVeil > 0f) {
-                    val veilFade = 1f - smoothStep(0.03f, 0.10f, blueVeil)
-                    b -= minOf(blueVeil, 0.05f) * 0.65f * veilFade * minOf(1f, str)
-                }
 
-                val luma = 0.299f * r + 0.587f * g + 0.114f * b
-                val lift = if (luma < 0.80f) {
-                    1f + 0.40f * minOf(1.2f, str) * (1.0 - (luma / 0.80)).pow(1.35).toFloat()
-                } else {
-                    1f
-                }
-                val gain = lift * lumaGain
-                r = softClipChannel(r * gain)
-                g = softClipChannel(g * gain)
-                b = softClipChannel(b * gain)
-
-                var maxC = maxOf(r, maxOf(g, b))
-                var minC = minOf(r, minOf(g, b))
-                var chroma = maxC - minC
-                var sat = if (maxC > 0.02f) chroma / maxC else 0f
-
-                val neutAmount = (1f - smoothStep(0.025f, 0.095f, chroma)) *
-                    (1f - smoothStep(0.08f, 0.18f, sat))
-                if (neutAmount > 0.001f) {
-                    val avg = 0.34f * r + 0.50f * g + 0.16f * b
-                    val pull = 0.72f * neutAmount * minOf(1f, str)
-                    r = r * (1f - pull) + avg * pull
-                    g = g * (1f - pull) + avg * pull
-                    b = b * (1f - pull) + avg * pull
-                    maxC = maxOf(r, maxOf(g, b))
-                    minC = minOf(r, minOf(g, b))
-                    chroma = maxC - minC
-                    sat = if (maxC > 0.02f) chroma / maxC else 0f
-                }
-
-                val activeWeight = smoothStep(0.045f, 0.16f, chroma) *
-                    smoothStep(0.09f, 0.24f, sat) * str
-
-                if (activeWeight > 0.001f) {
-                    val rgDiff = r - g
-                    val gbDiff = g - b
-                    val rbDiff = r - b
-
-                    val warmWeight = smoothStep(0.01f, 0.06f, rgDiff) * smoothStep(0.02f, 0.08f, rbDiff)
-                    if (warmWeight > 0.001f && rbDiff > 0.001f) {
-                        val yellowRatio = (gbDiff / rbDiff).coerceIn(0f, 1f)
-                        val yellowBlend = smoothStep(0.24f, 0.44f, yellowRatio)
-                        val irBlend = 1f - yellowBlend
-
-                        if (yellowBlend > 0.001f) {
-                            val yStr = yellowBlend * warmWeight * activeWeight
-                            val boost = rbDiff * 1.05f * yStr
-                            r = softClipChannel(r + boost * 0.52f)
-                            g = softClipChannel(g + boost * 0.72f)
-                            b = maxOf(0f, b - boost * 0.48f)
-                        }
-                        if (irBlend > 0.001f) {
-                            val irStr = irBlend * warmWeight * activeWeight
-                            val crosstalk = rgDiff * 1.62f * irStr
-                            val rBoost = crosstalk * 0.42f * (1f - 0.52f * r)
-                            r = minOf(0.96f, r + rBoost)
-                            g = maxOf(0.06f * r, g - crosstalk * 0.98f)
-                            b = maxOf(0.06f * r, b - crosstalk * 0.92f)
-                        }
-                    }
-
-                    val coolSpan = b - r
-                    if (coolSpan > 0.01f) {
-                        val coolWeight = smoothStep(0.01f, 0.06f, coolSpan) * smoothStep(-0.01f, 0.03f, g - r)
-                        val greenPeak = g - maxOf(r, b - 0.015f)
-                        val greenBlend = smoothStep(0.002f, 0.035f, greenPeak) * (1f - smoothStep(0.18f, 0.35f, sat))
-                        val blueBlend = (1f - greenBlend) * smoothStep(0.03f, 0.12f, coolSpan)
-
-                        if (greenBlend > 0.001f) {
-                            val gStr = greenBlend * activeWeight
-                            val gBoost = (g - r) * 2.2f * gStr
-                            g = softClipChannel(g + gBoost * 0.60f)
-                            r = maxOf(0f, r - gBoost * 0.65f)
-                            b = maxOf(0f, b - gBoost * 0.25f)
-                        }
-                        if (blueBlend > 0.001f) {
-                            val bStr = blueBlend * coolWeight * activeWeight
-                            val skyProtect = 1f - smoothStep(0.72f, 0.94f, minOf(r, g))
-                            r = maxOf(0f, r - coolSpan * 0.38f * bStr * skyProtect)
-                            g = softClipChannel(g + coolSpan * 0.12f * bStr * skyProtect)
-                            b = softClipChannel(b + coolSpan * 0.42f * bStr * skyProtect)
-                        }
-                    }
-                }
-            } else if (abs(lumaGain - 1f) > 0.02f) {
-                r = softClipChannel(r * lumaGain)
-                g = softClipChannel(g * lumaGain)
-                b = softClipChannel(b * lumaGain)
-            }
-
-            val rInt = (r * 255f).roundToInt().coerceIn(0, 255)
-            val gInt = (g * 255f).roundToInt().coerceIn(0, 255)
-            val bInt = (b * 255f).roundToInt().coerceIn(0, 255)
-            rowBuf[idx] = a or (rInt shl 16) or (gInt shl 8) or bInt
-        }
-        work.setPixels(rowBuf, 0, w, 0, y, w, rows)
-        y += rows
-    }
-    return work
-}
+private data class MeteringStats(
+    val avgLuma: Float,
+    val maxLuma: Float,
+    val highlightRatio: Float
+)
 
 /**
- * Estimates coarse-to-fine translational offset (dx, dy) between two images using exposure-normalized
- * central luminance matching, resilient to EV bracketing differences.
- */
-private fun estimateFrameShift(baseThumb: Bitmap, otherThumb: Bitmap, scaleFactor: Int): Pair<Int, Int> {
-    val w = minOf(baseThumb.width, otherThumb.width)
-    val h = minOf(baseThumb.height, otherThumb.height)
-    if (w < 24 || h < 24) return 0 to 0
-
-    val x0 = w / 4
-    val x1 = (w * 3) / 4
-    val y0 = h / 4
-    val y1 = (h * 3) / 4
-
-    fun meanLuma(bmp: Bitmap): Float {
-        var sum = 0.0
-        var n = 0
-        for (py in y0 until y1 step 2) {
-            for (px in x0 until x1 step 2) {
-                val c = bmp[px, py]
-                sum += 0.299 * AndroidColor.red(c) + 0.587 * AndroidColor.green(c) + 0.114 * AndroidColor.blue(c)
-                n++
-            }
-        }
-        return (sum / n.coerceAtLeast(1)).toFloat().coerceAtLeast(1f)
-    }
-
-    val mBase = meanLuma(baseThumb)
-    val mOther = meanLuma(otherThumb)
-    val maxSearch = 3
-    var bestDx = 0
-    var bestDy = 0
-    var bestErr = Double.MAX_VALUE
-
-    for (dy in -maxSearch..maxSearch) {
-        for (dx in -maxSearch..maxSearch) {
-            var err = 0.0
-            var n = 0
-            for (py in (y0 + maxSearch) until (y1 - maxSearch) step 2) {
-                for (px in (x0 + maxSearch) until (x1 - maxSearch) step 2) {
-                    val cb = baseThumb[px, py]
-                    val co = otherThumb[px + dx, py + dy]
-                    val lb = (0.299f * AndroidColor.red(cb) + 0.587f * AndroidColor.green(cb) + 0.114f * AndroidColor.blue(cb)) / mBase
-                    val lo = (0.299f * AndroidColor.red(co) + 0.587f * AndroidColor.green(co) + 0.114f * AndroidColor.blue(co)) / mOther
-                    err += abs(lb - lo)
-                    n++
-                }
-            }
-            val avgErr = err / n.coerceAtLeast(1)
-            if (avgErr < bestErr) {
-                bestErr = avgErr
-                bestDx = dx
-                bestDy = dy
-            }
-        }
-    }
-    return (bestDx * scaleFactor) to (bestDy * scaleFactor)
-}
-
-/**
- * Fuses 3 bracketed frames (0 EV, -EV highlight protection, +EV shadow/550nm recovery)
- * with alignment, anti-ghosting, residual neutral drift correction, and spectral unmixing.
- */
-private fun fuseMultiShotFrames(
-    framesBytes: List<ByteArray>,
-    spectralStrength: Float,
-    exposureGain: Float
-): Bitmap? {
-    if (framesBytes.isEmpty()) return null
-    val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(framesBytes[0], 0, framesBytes[0].size, boundsOpts)
-    val totalPixels = boundsOpts.outWidth.toLong() * boundsOpts.outHeight.toLong()
-    val decodeSample = if (totalPixels > 20_000_000L) 2 else 1
-
-    val mutOpts = BitmapFactory.Options().apply {
-        inMutable = true
-        inPreferredConfig = Bitmap.Config.ARGB_8888
-        inSampleSize = decodeSample
-    }
-    val baseBmp = BitmapFactory.decodeByteArray(framesBytes[0], 0, framesBytes[0].size, mutOpts)
-        ?: return null
-
-    if (framesBytes.size == 1) {
-        return applySpectralColorCalibration(baseBmp, spectralStrength, exposureGain)
-    }
-
-    val thumbScale = 8
-    val thumbOpts = BitmapFactory.Options().apply {
-        inPreferredConfig = Bitmap.Config.ARGB_8888
-        inSampleSize = decodeSample * thumbScale
-    }
-    val thumb0 = BitmapFactory.decodeByteArray(framesBytes[0], 0, framesBytes[0].size, thumbOpts)
-
-    val roOpts = BitmapFactory.Options().apply {
-        inMutable = false
-        inPreferredConfig = Bitmap.Config.ARGB_8888
-        inSampleSize = decodeSample
-    }
-    val lowBytes = framesBytes.getOrNull(1)
-    val highBytes = framesBytes.getOrNull(2)
-    val lowBmp = lowBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size, roOpts) }
-    val highBmp = highBytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size, roOpts) }
-
-    var shiftLow = 0 to 0
-    var shiftHigh = 0 to 0
-    var ratioLow = 2.0f
-    var ratioHigh = 0.55f
-
-    fun thumbMean(bmp: Bitmap): Float {
-        var sum = 0.0
-        var n = 0
-        for (py in 0 until bmp.height step 2) {
-            for (px in 0 until bmp.width step 2) {
-                val c = bmp[px, py]
-                sum += 0.299 * AndroidColor.red(c) + 0.587 * AndroidColor.green(c) + 0.114 * AndroidColor.blue(c)
-                n++
-            }
-        }
-        return (sum / n.coerceAtLeast(1)).toFloat().coerceAtLeast(1f)
-    }
-
-    if (thumb0 != null) {
-        val m0 = thumbMean(thumb0)
-        if (lowBytes != null) {
-            val tLow = BitmapFactory.decodeByteArray(lowBytes, 0, lowBytes.size, thumbOpts)
-            if (tLow != null) {
-                shiftLow = estimateFrameShift(thumb0, tLow, thumbScale)
-                ratioLow = (m0 / thumbMean(tLow)).coerceIn(1.05f, 3.6f)
-                tLow.recycle()
-            }
-        }
-        if (highBytes != null) {
-            val tHigh = BitmapFactory.decodeByteArray(highBytes, 0, highBytes.size, thumbOpts)
-            if (tHigh != null) {
-                shiftHigh = estimateFrameShift(thumb0, tHigh, thumbScale)
-                ratioHigh = (m0 / thumbMean(tHigh)).coerceIn(0.30f, 0.95f)
-                tHigh.recycle()
-            }
-        }
-        thumb0.recycle()
-    }
-
-    val w = baseBmp.width
-    val h = baseBmp.height
-    val stripHeight = 192.coerceAtMost(h)
-    val buf0 = IntArray(w * stripHeight)
-    val bufLow = if (lowBmp != null) IntArray(w * stripHeight) else null
-    val bufHigh = if (highBmp != null) IntArray(w * stripHeight) else null
-
-    var y = 0
-    while (y < h) {
-        val rows = minOf(stripHeight, h - y)
-        baseBmp.getPixels(buf0, 0, w, 0, y, w, rows)
-
-        if (lowBmp != null && bufLow != null) {
-            val srcY = (y + shiftLow.second).coerceIn(0, (lowBmp.height - rows).coerceAtLeast(0))
-            val readRows = minOf(rows, lowBmp.height - srcY)
-            if (readRows > 0) lowBmp.getPixels(bufLow, 0, w, 0, srcY, w, readRows)
-        }
-        if (highBmp != null && bufHigh != null) {
-            val srcY = (y + shiftHigh.second).coerceIn(0, (highBmp.height - rows).coerceAtLeast(0))
-            val readRows = minOf(rows, highBmp.height - srcY)
-            if (readRows > 0) highBmp.getPixels(bufHigh, 0, w, 0, srcY, w, readRows)
-        }
-
-        for (ry in 0 until rows) {
-            val rowOff = ry * w
-            for (rx in 0 until w) {
-                val idx = rowOff + rx
-                val p0 = buf0[idx]
-                val a = p0 and -0x1000000
-                val r0 = ((p0 ushr 16) and 0xFF) / 255f
-                val g0 = ((p0 ushr 8) and 0xFF) / 255f
-                val b0 = (p0 and 0xFF) / 255f
-                val luma0 = 0.299f * r0 + 0.587f * g0 + 0.114f * b0
-                val max0 = maxOf(r0, maxOf(g0, b0))
-
-                var wSum = 1.0f
-                var rAcc = r0
-                var gAcc = g0
-                var bAcc = b0
-
-                if (bufLow != null) {
-                    val lx = (rx + shiftLow.first).coerceIn(0, w - 1)
-                    val pL = bufLow[rowOff + lx]
-                    val rL = (((pL ushr 16) and 0xFF) / 255f) * ratioLow
-                    val gL = (((pL ushr 8) and 0xFF) / 255f) * ratioLow
-                    val bL = ((pL and 0xFF) / 255f) * ratioLow
-                    val lumaL = 0.299f * rL + 0.587f * gL + 0.114f * bL
-                    val ghostOk = smoothStep(0.26f, 0.07f, abs(luma0 - lumaL))
-                    val wLow = smoothStep(0.70f, 0.96f, max0) * 1.45f * ghostOk
-                    if (wLow > 0.005f) {
-                        rAcc += rL.coerceAtMost(1.05f) * wLow
-                        gAcc += gL.coerceAtMost(1.05f) * wLow
-                        bAcc += bL.coerceAtMost(1.05f) * wLow
-                        wSum += wLow
-                    }
-                }
-
-                if (bufHigh != null) {
-                    val hx = (rx + shiftHigh.first).coerceIn(0, w - 1)
-                    val pH = bufHigh[rowOff + hx]
-                    val rH = (((pH ushr 16) and 0xFF) / 255f) * ratioHigh
-                    val gH = (((pH ushr 8) and 0xFF) / 255f) * ratioHigh
-                    val bH = ((pH and 0xFF) / 255f) * ratioHigh
-                    val lumaH = 0.299f * rH + 0.587f * gH + 0.114f * bH
-                    val ghostOk = smoothStep(0.24f, 0.06f, abs(luma0 - lumaH))
-                    val wHigh = (1f - smoothStep(0.06f, 0.50f, luma0)) * 0.85f * ghostOk
-                    if (wHigh > 0.005f) {
-                        rAcc += rH * wHigh
-                        gAcc += gH * wHigh
-                        bAcc += bH * wHigh
-                        wSum += wHigh
-                    }
-                }
-
-                val rOut = ((rAcc / wSum) * 255f).roundToInt().coerceIn(0, 255)
-                val gOut = ((gAcc / wSum) * 255f).roundToInt().coerceIn(0, 255)
-                val bOut = ((bAcc / wSum) * 255f).roundToInt().coerceIn(0, 255)
-                buf0[idx] = a or (rOut shl 16) or (gOut shl 8) or bOut
-            }
-        }
-        baseBmp.setPixels(buf0, 0, w, 0, y, w, rows)
-        y += rows
-    }
-
-    lowBmp?.recycle()
-    highBmp?.recycle()
-
-    // Gentle auto-WB neutral drift pass across low-chroma scene surfaces
-    var neutR = 0.0
-    var neutG = 0.0
-    var neutB = 0.0
-    var neutCount = 0
-    for (sy in (h / 10) until ((h * 9) / 10) step 24) {
-        for (sx in (w / 10) until ((w * 9) / 10) step 24) {
-            val c = baseBmp[sx, sy]
-            val pr = AndroidColor.red(c)
-            val pg = AndroidColor.green(c)
-            val pb = AndroidColor.blue(c)
-            val maxC = maxOf(pr, maxOf(pg, pb))
-            val minC = minOf(pr, minOf(pg, pb))
-            if (maxC in 55..220 && (maxC - minC) < maxC * 0.24f && pr < pg * 1.15f) {
-                neutR += pr
-                neutG += pg
-                neutB += pb
-                neutCount++
-            }
-        }
-    }
-    if (neutCount >= 12) {
-        val avgR = (neutR / neutCount).toFloat().coerceAtLeast(1f)
-        val avgG = (neutG / neutCount).toFloat().coerceAtLeast(1f)
-        val avgB = (neutB / neutCount).toFloat().coerceAtLeast(1f)
-        val meanGray = (avgR + avgG + avgB) / 3f
-        val mulR = (1f + ((meanGray / avgR) - 1f) * 0.45f).coerceIn(0.85f, 1.18f)
-        val mulG = (1f + ((meanGray / avgG) - 1f) * 0.45f).coerceIn(0.85f, 1.18f)
-        val mulB = (1f + ((meanGray / avgB) - 1f) * 0.45f).coerceIn(0.85f, 1.18f)
-        if (abs(mulR - 1f) > 0.02f || abs(mulB - 1f) > 0.02f) {
-            var cy = 0
-            while (cy < h) {
-                val rows = minOf(stripHeight, h - cy)
-                baseBmp.getPixels(buf0, 0, w, 0, cy, w, rows)
-                for (i in 0 until (w * rows)) {
-                    val px = buf0[i]
-                    val a = px and -0x1000000
-                    val rr = (((px ushr 16) and 0xFF) * mulR).roundToInt().coerceIn(0, 255)
-                    val gg = (((px ushr 8) and 0xFF) * mulG).roundToInt().coerceIn(0, 255)
-                    val bb = ((px and 0xFF) * mulB).roundToInt().coerceIn(0, 255)
-                    buf0[i] = a or (rr shl 16) or (gg shl 8) or bb
-                }
-                baseBmp.setPixels(buf0, 0, w, 0, cy, w, rows)
-                cy += rows
-            }
-        }
-    }
-
-    return applySpectralColorCalibration(baseBmp, spectralStrength, exposureGain)
-}
-
-/**
- * Measures average luminance (0..255) inside the selected Exposure Box or across the full screen.
+ * Measures average luminance and highlight saturation (0..255) inside the selected
+ * Exposure Box or across the full frame. Used for intelligent highlight preservation.
  */
 private fun measureRegionLuminance(
     bitmap: Bitmap,
     mode: ExposureMeteringMode,
     boxNorm: Offset,
     boxSizeNorm: Float
-): Float {
+): MeteringStats {
     val w = bitmap.width
     val h = bitmap.height
-    if (w <= 0 || h <= 0) return 128f
+    if (w <= 0 || h <= 0) return MeteringStats(128f, 128f, 0f)
 
     val (x0, x1, y0, y1) = if (mode == ExposureMeteringMode.BOX_SPOT) {
         val boxW = (minOf(w, h) * boxSizeNorm).roundToInt().coerceAtLeast(12)
@@ -1013,13 +557,15 @@ private fun measureRegionLuminance(
         val top = (cy - boxW / 2).coerceIn(0, (h - boxW).coerceAtLeast(0))
         listOf(left, (left + boxW).coerceAtMost(w), top, (top + boxW).coerceAtMost(h))
     } else {
-        listOf((w * 0.08f).roundToInt(), (w * 0.92f).roundToInt(), (h * 0.08f).roundToInt(), (h * 0.92f).roundToInt())
+        listOf((w * 0.05f).roundToInt(), (w * 0.95f).roundToInt(), (h * 0.05f).roundToInt(), (h * 0.95f).roundToInt())
     }
 
-    val stepX = maxOf(1, (x1 - x0) / 24)
-    val stepY = maxOf(1, (y1 - y0) / 24)
+    val stepX = maxOf(1, (x1 - x0) / 28)
+    val stepY = maxOf(1, (y1 - y0) / 28)
     var lumaSum = 0.0
-    var weightSum = 0.0
+    var sampleCount = 0
+    var maxLuma = 0.0
+    var highlightCount = 0
 
     var py = y0
     while (py < y1) {
@@ -1027,15 +573,17 @@ private fun measureRegionLuminance(
         while (px < x1) {
             val c = bitmap[px, py]
             val luma = 0.299 * AndroidColor.red(c) + 0.587 * AndroidColor.green(c) + 0.114 * AndroidColor.blue(c)
-            // Slightly downweight completely clipped sky (>248) in full-screen average mode
-            val wPx = if (mode == ExposureMeteringMode.FULL_SCREEN && luma > 248.0) 0.4 else 1.0
-            lumaSum += luma * wPx
-            weightSum += wPx
+            lumaSum += luma
+            sampleCount++
+            if (luma > maxLuma) maxLuma = luma
+            if (luma > 220.0) highlightCount++
             px += stepX
         }
         py += stepY
     }
-    return (lumaSum / weightSum.coerceAtLeast(1.0)).toFloat().coerceIn(0f, 255f)
+    val avg = if (sampleCount > 0) (lumaSum / sampleCount).toFloat().coerceIn(0f, 255f) else 128f
+    val ratio = if (sampleCount > 0) highlightCount.toFloat() / sampleCount.toFloat() else 0f
+    return MeteringStats(avg, maxLuma.toFloat(), ratio)
 }
 
 /**
@@ -1261,7 +809,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var tintValue by remember { mutableFloatStateOf(0f) }
     var contrastValue by remember { mutableFloatStateOf(DEFAULT_CONTRAST) }
     var saturationValue by remember { mutableFloatStateOf(DEFAULT_SATURATION) }
-    var spectralBoostValue by remember { mutableFloatStateOf(DEFAULT_SPECTRAL_BOOST) }
     var exposureEvIndex by remember { mutableIntStateOf(0) }
     var aeRange by remember { mutableStateOf(Range(0, 0)) }
     var aeStep by remember { mutableFloatStateOf(0.5f) }
@@ -1275,14 +822,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var showResolutionDialog by remember { mutableStateOf(false) }
     var presetNameInput by remember { mutableStateOf("") }
 
-    var isMultiShotMode by remember { mutableStateOf(false) }
+    var highlightProtectionEnabled by remember { mutableStateOf(true) }
     var meteringMode by remember { mutableStateOf(ExposureMeteringMode.FULL_SCREEN) }
     var isExposureBoxPicking by remember { mutableStateOf(false) }
     var exposureBoxNorm by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
-    var exposureBoxSizeNorm by remember { mutableFloatStateOf(0.20f) }
+    var exposureBoxSizeNorm by remember { mutableFloatStateOf(0.28f) }
     var targetBrightnessLevel by remember { mutableFloatStateOf(1.00f) }
     var measuredRegionBrightness by remember { mutableIntStateOf(128) }
-    var computedExposureGain by remember { mutableFloatStateOf(1.00f) }
 
     val availableResolutions = remember { mutableStateListOf<Size>() }
     var selectedResolution by remember { mutableStateOf<Size?>(null) }
@@ -1337,7 +883,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 put("tint", it.tint.toDouble())
                 put("contrast", it.contrast.toDouble())
                 put("saturation", it.saturation.toDouble())
-                put("spectralBoost", it.spectralBoost.toDouble())
             })
         }
         sharedPrefs.edit { putString("presets_list", jsonArray.toString()) }
@@ -1351,33 +896,31 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val name = obj.getString("name")
-                val defaultSpec = if (name.contains("720", ignoreCase = true)) 0f else DEFAULT_SPECTRAL_BOOST
                 savedPresets.add(
                     CameraPreset(
                         name = name,
                         kelvin = obj.getDouble("kelvin").toFloat(),
                         tint = obj.getDouble("tint").toFloat(),
                         contrast = obj.optDouble("contrast", DEFAULT_CONTRAST.toDouble()).toFloat(),
-                        saturation = obj.optDouble("saturation", DEFAULT_SATURATION.toDouble()).toFloat(),
-                        spectralBoost = obj.optDouble("spectralBoost", defaultSpec.toDouble()).toFloat()
+                        saturation = obj.optDouble("saturation", DEFAULT_SATURATION.toDouble()).toFloat()
                     )
                 )
             }
         } catch (_: Exception) {
         }
 
-        if (savedPresets.isEmpty() && !sharedPrefs.getBoolean("presets_seeded_v7", false)) {
+        if (savedPresets.isEmpty() && !sharedPrefs.getBoolean("presets_seeded_v8", false)) {
             savedPresets.addAll(
                 listOf(
-                    CameraPreset("IRChrome Pro", 3348f, 13f, 1.15f, 1.15f, DEFAULT_SPECTRAL_BOOST),
-                    CameraPreset("590nm Gold", 2400f, 8f, 1.22f, 1.25f, 0.35f),
-                    CameraPreset("720nm Crisp", 1800f, 0f, 1.35f, 0.90f, 0.0f)
+                    CameraPreset("IRChrome Doğal", 3348f, 13f, 1.00f, 1.15f),
+                    CameraPreset("590nm Altın", 2400f, 8f, 1.05f, 1.25f),
+                    CameraPreset("720nm Klasik IR", 1800f, 0f, 1.10f, 0.90f)
                 )
             )
             savePresetsToStorage()
-            sharedPrefs.edit { putBoolean("presets_seeded_v7", true) }
-        } else if (savedPresets.isNotEmpty() && !sharedPrefs.getBoolean("presets_seeded_v7", false)) {
-            sharedPrefs.edit { putBoolean("presets_seeded_v7", true) }
+            sharedPrefs.edit { putBoolean("presets_seeded_v8", true) }
+        } else if (savedPresets.isNotEmpty() && !sharedPrefs.getBoolean("presets_seeded_v8", false)) {
+            sharedPrefs.edit { putBoolean("presets_seeded_v8", true) }
         }
     }
 
@@ -1389,13 +932,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         holder.currentTint = tintValue
         holder.currentContrast = contrastValue
         holder.currentSaturation = saturationValue
-        holder.currentSpectralBoost = spectralBoostValue
         holder.currentExposureEv = exposureEvIndex
         holder.currentMeteringMode = meteringMode
         holder.currentExposureBoxNorm = exposureBoxNorm
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
-        holder.currentComputedGain = computedExposureGain
-        holder.currentMultiShotMode = isMultiShotMode
     }
 
     fun applyCamera2Settings(
@@ -1405,16 +945,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         tVal: Float,
         contrastVal: Float,
         saturationVal: Float,
-        spectralBoostVal: Float,
         exposureEv: Int,
         meteringModeVal: ExposureMeteringMode,
         boxNorm: Offset,
         boxSizeNorm: Float,
-        computedGainVal: Float,
         isStillCapture: Boolean = false,
         compatibilityFallback: Boolean = false
     ) {
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
+        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
         if (holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
             builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
         }
@@ -1465,27 +1004,35 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             builder.set(CaptureRequest.COLOR_CORRECTION_GAINS, kelvinToGains(kVal, tVal))
             builder.set(
                 CaptureRequest.COLOR_CORRECTION_TRANSFORM,
-                buildColorTransform(holder.lastAutoColorTransform, saturationVal, spectralBoostVal)
+                buildColorTransform(holder.lastAutoColorTransform, saturationVal)
             )
 
-            val supportsContrastCurve =
-                holder.supportedTonemapModes.contains(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE) &&
-                    holder.maxTonemapCurvePoints >= 2
-
-            if (supportsContrastCurve) {
-                val baseSpectralLift = if (spectralBoostVal > 0.05f) 0.16f * minOf(1.2f, spectralBoostVal) else 0f
-                val gainLift = (computedGainVal - 1.0f) * 0.65f
-                builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
-                builder.set(
-                    CaptureRequest.TONEMAP_CURVE,
-                    buildContrastTonemapCurve(contrastVal, baseSpectralLift + gainLift, holder.maxTonemapCurvePoints)
-                )
-            } else {
+            // When contrast is standard (~1.0), use HIGH_QUALITY hardware tone mapping so
+            // the camera ISP's native dynamic range engine prevents whites from blowing out!
+            if (contrastVal in 0.98f..1.02f) {
                 builder.set(
                     CaptureRequest.TONEMAP_MODE,
                     if (isStillCapture) CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
                     else CaptureRequest.TONEMAP_MODE_FAST
                 )
+            } else {
+                val supportsContrastCurve =
+                    holder.supportedTonemapModes.contains(CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE) &&
+                        holder.maxTonemapCurvePoints >= 2
+
+                if (supportsContrastCurve) {
+                    builder.set(CaptureRequest.TONEMAP_MODE, CaptureRequest.TONEMAP_MODE_CONTRAST_CURVE)
+                    builder.set(
+                        CaptureRequest.TONEMAP_CURVE,
+                        buildContrastTonemapCurve(contrastVal, holder.maxTonemapCurvePoints)
+                    )
+                } else {
+                    builder.set(
+                        CaptureRequest.TONEMAP_MODE,
+                        if (isStillCapture) CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
+                        else CaptureRequest.TONEMAP_MODE_FAST
+                    )
+                }
             }
         }
     }
@@ -1535,12 +1082,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         tVal = holder.currentTint,
                         contrastVal = holder.currentContrast,
                         saturationVal = holder.currentSaturation,
-                        spectralBoostVal = holder.currentSpectralBoost,
                         exposureEv = holder.currentExposureEv,
                         meteringModeVal = holder.currentMeteringMode,
                         boxNorm = holder.currentExposureBoxNorm,
                         boxSizeNorm = holder.currentExposureBoxSizeNorm,
-                        computedGainVal = holder.currentComputedGain,
                         isStillCapture = false,
                         compatibilityFallback = true
                     )
@@ -1565,12 +1110,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             tVal = holder.currentTint,
             contrastVal = holder.currentContrast,
             saturationVal = holder.currentSaturation,
-            spectralBoostVal = holder.currentSpectralBoost,
             exposureEv = holder.currentExposureEv,
             meteringModeVal = holder.currentMeteringMode,
             boxNorm = holder.currentExposureBoxNorm,
             boxSizeNorm = holder.currentExposureBoxSizeNorm,
-            computedGainVal = holder.currentComputedGain,
             isStillCapture = false
         )
         submitRepeatingRequest(session, builder)
@@ -1581,14 +1124,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
         val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
         try {
-            val meanLuma = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
-            measuredRegionBrightness = meanLuma.roundToInt()
+            val stats = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
+            measuredRegionBrightness = stats.avgLuma.roundToInt()
 
             if (applyEvAdjust) {
                 val targetLuma = (128f * targetBrightnessLevel).coerceIn(55f, 205f)
-                val neededRatio = (targetLuma / meanLuma.coerceAtLeast(14f)).coerceIn(0.38f, 2.75f)
-                val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
+                var neededRatio = (targetLuma / stats.avgLuma.coerceAtLeast(14f)).coerceIn(0.35f, 2.75f)
 
+                // Highlight protection: if bright white areas exist in the scene,
+                // prevent exposure from pushing highlights into pure burnout clipping (>226)
+                if (highlightProtectionEnabled && stats.maxLuma > 200f) {
+                    val safeRatio = (226f / stats.maxLuma).coerceAtMost(1.0f)
+                    if (stats.highlightRatio > 0.03f || stats.maxLuma > 228f) {
+                        neededRatio = minOf(neededRatio, safeRatio)
+                    } else if (neededRatio > 1.0f) {
+                        neededRatio = minOf(neededRatio, 235f / stats.maxLuma)
+                    }
+                }
+
+                val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
                 val hasAeRange = aeRange.upper > aeRange.lower
                 val step = aeStep.coerceAtLeast(0.1f)
                 val newEv = if (hasAeRange) {
@@ -1597,16 +1151,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 } else {
                     exposureEvIndex
                 }
-                val appliedStops = (newEv - exposureEvIndex) * step
-                val residualStops = deltaStops - appliedStops
                 exposureEvIndex = newEv
-                computedExposureGain = 2.0.pow(residualStops.toDouble()).toFloat().coerceIn(0.70f, 1.65f)
                 updatePreviewSettings()
 
-                val pct = (meanLuma * 100f / 255f).roundToInt()
+                val pct = (stats.avgLuma * 100f / 255f).roundToInt()
                 val evDisplay = exposureEvIndex * step
                 val modeLabel = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "Kutu" else "Tam Ekran"
-                showStatus("$modeLabel Pozlama: $pct% · ${if (evDisplay > 0.01f) "+" else ""}${"%.1f".format(evDisplay)} EV")
+                val protBadge = if (highlightProtectionEnabled && stats.maxLuma > 220f) " 🛡 Beyaz Korundu" else ""
+                showStatus("$modeLabel Pozlama: $pct% · ${if (evDisplay > 0.01f) "+" else ""}${"%.1f".format(evDisplay)} EV$protBadge")
             }
         } finally {
             bmp.recycle()
@@ -1624,23 +1176,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             isAutoMode = false
             kelvinValue = cal.kelvin
             tintValue = cal.tint
-            spectralBoostValue = DEFAULT_SPECTRAL_BOOST
             contrastValue = DEFAULT_CONTRAST
             saturationValue = DEFAULT_SATURATION
-
-            val targetLuma = (128f * targetBrightnessLevel).coerceIn(60f, 200f)
-            val neededRatio = (targetLuma / cal.avgLuma.coerceAtLeast(18f)).coerceIn(0.55f, 2.2f)
-            val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
-            if (aeRange.upper > aeRange.lower) {
-                val deltaSteps = (deltaStops / aeStep.coerceAtLeast(0.1f)).roundToInt()
-                val newEv = (exposureEvIndex + deltaSteps).coerceIn(aeRange.lower, aeRange.upper)
-                val appliedStops = (newEv - exposureEvIndex) * aeStep.coerceAtLeast(0.1f)
-                val residualStops = deltaStops - appliedStops
-                exposureEvIndex = newEv
-                computedExposureGain = 2.0.pow(residualStops.toDouble()).toFloat().coerceIn(0.75f, 1.45f)
-            } else {
-                computedExposureGain = 2.0.pow(deltaStops.toDouble()).toFloat().coerceIn(0.75f, 1.45f)
-            }
+            measureAndApplyExposureMetering(applyEvAdjust = true)
             updatePreviewSettings()
             showStatus("Oto-Kalibre: ${cal.kelvin.toInt()}K · ${formatSigned(cal.tint)} (${cal.foundNeutralCount} referans)")
         } finally {
@@ -1813,12 +1351,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 tVal = holder.currentTint,
                                 contrastVal = holder.currentContrast,
                                 saturationVal = holder.currentSaturation,
-                                spectralBoostVal = holder.currentSpectralBoost,
                                 exposureEv = holder.currentExposureEv,
                                 meteringModeVal = holder.currentMeteringMode,
                                 boxNorm = holder.currentExposureBoxNorm,
                                 boxSizeNorm = holder.currentExposureBoxSizeNorm,
-                                computedGainVal = holder.currentComputedGain,
                                 isStillCapture = false
                             )
                         }
@@ -1939,13 +1475,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val snapTint = holder.currentTint
         val snapContrast = holder.currentContrast
         val snapSat = holder.currentSaturation
-        val snapSpectral = holder.currentSpectralBoost
         val snapEv = holder.currentExposureEv
         val snapMetering = holder.currentMeteringMode
         val snapBoxNorm = holder.currentExposureBoxNorm
         val snapBoxSize = holder.currentExposureBoxSizeNorm
-        val snapGain = holder.currentComputedGain
-        val multiShot = holder.currentMultiShotMode
 
         holder.isTakingPhoto = true
         coroutineScope.launch {
@@ -1955,282 +1488,61 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             isShutterPressed = false
         }
 
-        if (!multiShot) {
-            reader.setOnImageAvailableListener({ imageReader ->
-                val image = try { imageReader.acquireLatestImage() } catch (_: Exception) { null }
-                if (image == null) {
-                    holder.isTakingPhoto = false
-                    return@setOnImageAvailableListener
-                }
-                val bytes = try {
-                    val buffer = image.planes[0].buffer
-                    ByteArray(buffer.remaining()).also { buffer.get(it) }
-                } finally {
-                    image.close()
-                }
-
-                val shouldCalibrate = !snapAuto && (snapSpectral > 0.05f || abs(snapGain - 1f) > 0.03f)
-                if (shouldCalibrate) {
-                    mainHandler.post { showStatus("IRChrome renkleri işleniyor...") }
-                    coroutineScope.launch(Dispatchers.Default) {
-                        var ok = false
-                        var decoded: Bitmap? = null
-                        var calibrated: Bitmap? = null
-                        try {
-                            val orientation = readExifOrientation(bytes, context.cacheDir)
-                            val opts = BitmapFactory.Options().apply {
-                                inMutable = true
-                                inPreferredConfig = Bitmap.Config.ARGB_8888
-                            }
-                            decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                            if (decoded != null) {
-                                calibrated = applySpectralColorCalibration(decoded, snapSpectral, snapGain)
-                                ok = saveOutputToGallery(context, null, calibrated, orientation)
-                            } else {
-                                ok = saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
-                            }
-                        } catch (e: Exception) {
-                            Log.e("CameraScreen", "Single-shot spectral processing failed", e)
-                        } finally {
-                            if (calibrated != null && calibrated !== decoded) calibrated.recycle()
-                            decoded?.recycle()
-                            holder.isTakingPhoto = false
-                            mainHandler.post {
-                                showStatus(if (ok) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
-                            }
-                        }
-                    }
-                } else {
-                    coroutineScope.launch(Dispatchers.IO) {
-                        val ok = saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
-                        holder.isTakingPhoto = false
-                        mainHandler.post {
-                            showStatus(if (ok) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
-                        }
-                    }
-                }
-            }, cameraHandler)
-
-            val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                addTarget(reader.surface)
-                applyCamera2Settings(
-                    builder = this,
-                    auto = snapAuto,
-                    kVal = snapKelvin,
-                    tVal = snapTint,
-                    contrastVal = snapContrast,
-                    saturationVal = snapSat,
-                    spectralBoostVal = snapSpectral,
-                    exposureEv = snapEv,
-                    meteringModeVal = snapMetering,
-                    boxNorm = snapBoxNorm,
-                    boxSizeNorm = snapBoxSize,
-                    computedGainVal = snapGain,
-                    isStillCapture = true
-                )
-                set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
-            }
-
-            try {
-                shutterSound.play(MediaActionSound.SHUTTER_CLICK)
-                session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
-                    override fun onCaptureFailed(
-                        s: CameraCaptureSession,
-                        r: CaptureRequest,
-                        failure: CaptureFailure
-                    ) {
-                        holder.isTakingPhoto = false
-                    }
-                }, cameraHandler)
-            } catch (e: Exception) {
-                holder.isTakingPhoto = false
-                Log.e("CameraScreen", "Failed to capture photo", e)
-            }
-            return
-        }
-
-        // 3-Frame Multi-Shot Synthesis (0 EV, -EV highlight guard, +EV shadow/550nm recovery)
-        val range = holder.aeCompensationRange
-        val hasEvRange = range.upper > range.lower
-        val bracketSteps = if (hasEvRange) {
-            ((1.4f / holder.aeCompensationStep.coerceAtLeast(0.1f)).roundToInt()).coerceIn(1, 6)
-        } else {
-            0
-        }
-        val evTargets = if (hasEvRange) {
-            listOf(
-                snapEv.coerceIn(range.lower, range.upper),
-                (snapEv - bracketSteps).coerceIn(range.lower, range.upper),
-                (snapEv + bracketSteps).coerceIn(range.lower, range.upper)
-            )
-        } else {
-            listOf(snapEv, snapEv, snapEv)
-        }
-        val gainTargets = if (hasEvRange) {
-            listOf(snapGain, snapGain, snapGain)
-        } else {
-            listOf(snapGain, (snapGain * 0.68f).coerceAtLeast(0.55f), (snapGain * 1.42f).coerceAtMost(1.65f))
-        }
-
-        val multiLock = Any()
-        val collected = mutableListOf<ByteArray>()
-        var burstFinished = false
-        var activeTimeout: Runnable? = null
-
-        fun finishMultiShot() {
-            val framesCopy: List<ByteArray>
-            synchronized(multiLock) {
-                if (burstFinished) return
-                burstFinished = true
-                activeTimeout?.let { cameraHandler.removeCallbacks(it) }
-                activeTimeout = null
-                framesCopy = collected.toList()
-            }
-            mainHandler.post { updatePreviewSettings() }
-
-            if (framesCopy.isEmpty()) {
-                holder.isTakingPhoto = false
-                mainHandler.post { showStatus("3-Kare Sentez başarısız oldu") }
-                return
-            }
-            mainHandler.post { showStatus("3-Kare Sentez birleştiriliyor...") }
-            coroutineScope.launch(Dispatchers.Default) {
-                var ok = false
-                var resultBmp: Bitmap? = null
-                try {
-                    val orientation = readExifOrientation(framesCopy[0], context.cacheDir)
-                    val effectiveSpectral = if (snapAuto) DEFAULT_SPECTRAL_BOOST else snapSpectral
-                    resultBmp = fuseMultiShotFrames(framesCopy, effectiveSpectral, snapGain)
-                    ok = if (resultBmp != null) {
-                        saveOutputToGallery(context, null, resultBmp, orientation)
-                    } else {
-                        saveOutputToGallery(context, framesCopy[0], null, ExifInterface.ORIENTATION_NORMAL)
-                    }
-                } catch (e: Exception) {
-                    Log.e("CameraScreen", "Multi-shot fusion failed", e)
-                } finally {
-                    resultBmp?.recycle()
-                    holder.isTakingPhoto = false
-                    mainHandler.post {
-                        showStatus(if (ok) "3-Kare Sentez kaydedildi (${framesCopy.size} kare)" else "Kayıt hatası")
-                    }
-                }
-            }
-        }
-
-        fun runBurstStep(stepIdx: Int) {
-            synchronized(multiLock) {
-                if (burstFinished) return
-            }
-            if (stepIdx >= 3 || holder.isDisposed || holder.device !== camera || holder.session !== session) {
-                finishMultiShot()
-                return
-            }
-
-            mainHandler.post { showStatus("3-Kare Sentez (${stepIdx + 1}/3)...") }
-
-            val stepEv = evTargets[stepIdx]
-            val stepGain = gainTargets[stepIdx]
-            val needDelay = stepIdx > 0 && (stepEv != evTargets[stepIdx - 1] || !hasEvRange)
-
-            if (needDelay) {
-                holder.previewBuilder?.let { pb ->
-                    applyCamera2Settings(
-                        builder = pb,
-                        auto = snapAuto,
-                        kVal = snapKelvin,
-                        tVal = snapTint,
-                        contrastVal = snapContrast,
-                        saturationVal = snapSat,
-                        spectralBoostVal = snapSpectral,
-                        exposureEv = stepEv,
-                        meteringModeVal = snapMetering,
-                        boxNorm = snapBoxNorm,
-                        boxSizeNorm = snapBoxSize,
-                        computedGainVal = stepGain,
-                        isStillCapture = false
-                    )
-                    submitRepeatingRequest(session, pb)
-                }
-            }
-
-            val captureAction = Runnable {
-                synchronized(multiLock) {
-                    if (burstFinished) return@Runnable
-                }
-                if (holder.isDisposed || holder.device !== camera || holder.session !== session) {
-                    finishMultiShot()
-                    return@Runnable
-                }
-                val cb = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-                    addTarget(reader.surface)
-                    applyCamera2Settings(
-                        builder = this,
-                        auto = snapAuto,
-                        kVal = snapKelvin,
-                        tVal = snapTint,
-                        contrastVal = snapContrast,
-                        saturationVal = snapSat,
-                        spectralBoostVal = snapSpectral,
-                        exposureEv = stepEv,
-                        meteringModeVal = snapMetering,
-                        boxNorm = snapBoxNorm,
-                        boxSizeNorm = snapBoxSize,
-                        computedGainVal = stepGain,
-                        isStillCapture = true
-                    )
-                    set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
-                }
-                val stepTimeout = Runnable { finishMultiShot() }
-                synchronized(multiLock) {
-                    activeTimeout?.let { cameraHandler.removeCallbacks(it) }
-                    activeTimeout = stepTimeout
-                }
-                cameraHandler.postDelayed(stepTimeout, 2600L)
-                try {
-                    if (stepIdx == 0) shutterSound.play(MediaActionSound.SHUTTER_CLICK)
-                    session.capture(cb.build(), object : CameraCaptureSession.CaptureCallback() {
-                        override fun onCaptureFailed(s: CameraCaptureSession, r: CaptureRequest, failure: CaptureFailure) {
-                            finishMultiShot()
-                        }
-                    }, cameraHandler)
-                } catch (e: Exception) {
-                    Log.e("CameraScreen", "Multi-shot capture failed at step $stepIdx", e)
-                    finishMultiShot()
-                }
-            }
-
-            if (needDelay) {
-                cameraHandler.postDelayed(captureAction, 280L)
-            } else {
-                cameraHandler.post(captureAction)
-            }
-        }
-
         reader.setOnImageAvailableListener({ imageReader ->
-            val image = try { imageReader.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+            val image = try { imageReader.acquireLatestImage() } catch (_: Exception) { null }
+            if (image == null) {
+                holder.isTakingPhoto = false
+                return@setOnImageAvailableListener
+            }
             val bytes = try {
                 val buffer = image.planes[0].buffer
                 ByteArray(buffer.remaining()).also { buffer.get(it) }
             } finally {
                 image.close()
             }
-            val nextIdx: Int
-            synchronized(multiLock) {
-                if (burstFinished) return@setOnImageAvailableListener
-                activeTimeout?.let { cameraHandler.removeCallbacks(it) }
-                activeTimeout = null
-                collected.add(bytes)
-                nextIdx = collected.size
-            }
-            if (nextIdx >= 3) {
-                finishMultiShot()
-            } else {
-                runBurstStep(nextIdx)
+
+            coroutineScope.launch(Dispatchers.IO) {
+                val ok = saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                holder.isTakingPhoto = false
+                mainHandler.post {
+                    showStatus(if (ok) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
+                }
             }
         }, cameraHandler)
 
-        runBurstStep(0)
+        val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+            addTarget(reader.surface)
+            applyCamera2Settings(
+                builder = this,
+                auto = snapAuto,
+                kVal = snapKelvin,
+                tVal = snapTint,
+                contrastVal = snapContrast,
+                saturationVal = snapSat,
+                exposureEv = snapEv,
+                meteringModeVal = snapMetering,
+                boxNorm = snapBoxNorm,
+                boxSizeNorm = snapBoxSize,
+                isStillCapture = true
+            )
+            set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+        }
+
+        try {
+            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
+            session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureFailed(
+                    s: CameraCaptureSession,
+                    r: CaptureRequest,
+                    failure: CaptureFailure
+                ) {
+                    holder.isTakingPhoto = false
+                }
+            }, cameraHandler)
+        } catch (e: Exception) {
+            holder.isTakingPhoto = false
+            Log.e("CameraScreen", "Failed to capture photo", e)
+        }
     }
 
     LaunchedEffect(hasCameraPermission, textureViewInstance, surfaceGeneration) {
@@ -2586,7 +1898,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             val telemetry = if (isAutoMode) {
                                 "~${displayKelvin.toInt()}K · ${formatSigned(displayTint)} · ☀$measuredBrightnessPct%"
                             } else {
-                                "${displayKelvin.toInt()}K · ${formatSigned(displayTint)} · IR${"%.1f".format(Locale.US, spectralBoostValue)} · ☀$measuredBrightnessPct%"
+                                "${displayKelvin.toInt()}K · ${formatSigned(displayTint)} · ☀$measuredBrightnessPct%"
                             }
                             Text(
                                 text = telemetry,
@@ -2709,27 +2021,27 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             modifier = Modifier
                                 .clip(RoundedCornerShape(14.dp))
                                 .background(
-                                    if (isMultiShotMode) IrPalette.IrCoral.copy(alpha = 0.24f)
+                                    if (highlightProtectionEnabled) IrPalette.IrTeal.copy(alpha = 0.22f)
                                     else IrPalette.HudChip
                                 )
                                 .border(
                                     1.dp,
-                                    if (isMultiShotMode) IrPalette.IrCoral else IrPalette.BorderSubtle,
+                                    if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.BorderSubtle,
                                     RoundedCornerShape(14.dp)
                                 )
                                 .clickable(enabled = cameraReady) {
-                                    isMultiShotMode = !isMultiShotMode
-                                    syncHolderSettings()
+                                    highlightProtectionEnabled = !highlightProtectionEnabled
+                                    measureAndApplyExposureMetering(applyEvAdjust = true)
                                     showStatus(
-                                        if (isMultiShotMode) "3-Kare Sentez Aktif"
-                                        else "Tek Kare Modu"
+                                        if (highlightProtectionEnabled) "Vurgu Koruması Açık (Beyazlar Korunur)"
+                                        else "Vurgu Koruması Kapalı"
                                     )
                                 }
                                 .padding(horizontal = 11.dp, vertical = 8.dp)
                         ) {
                             Text(
-                                text = if (isMultiShotMode) "3-Kare Sentez ●" else "3-Kare Sentez",
-                                color = if (isMultiShotMode) IrPalette.IrCoral else IrPalette.TextPrimary,
+                                text = if (highlightProtectionEnabled) "🛡 Vurgu Koruma ●" else "🛡 Vurgu Koruma",
+                                color = if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.TextSecondary,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -2789,7 +2101,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 tintValue = preset.tint
                                 contrastValue = preset.contrast
                                 saturationValue = preset.saturation
-                                spectralBoostValue = preset.spectralBoost
                                 updatePreviewSettings()
                                 showStatus("${preset.name} yüklendi")
                             },
@@ -2948,33 +2259,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                             ControlTab.RENK -> {
                                 ProGradientSliderRow(
-                                    label = "IRCHROME CANLANDIRMA",
-                                    valueBadge = "${"%.2f".format(spectralBoostValue)}x",
-                                    value = spectralBoostValue,
-                                    valueRange = 0.0f..1.60f,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFF64748B), IrPalette.IrAmber, IrPalette.IrCoral)
-                                    ),
-                                    onStepMinus = {
-                                        spectralBoostValue = (spectralBoostValue - 0.05f).coerceIn(0.0f, 1.60f)
-                                        updatePreviewSettings()
-                                    },
-                                    onStepPlus = {
-                                        spectralBoostValue = (spectralBoostValue + 0.05f).coerceIn(0.0f, 1.60f)
-                                        updatePreviewSettings()
-                                    },
-                                    onBadgeClick = {
-                                        spectralBoostValue = DEFAULT_SPECTRAL_BOOST
-                                        updatePreviewSettings()
-                                    },
-                                    onValueChange = {
-                                        spectralBoostValue = it
-                                        updatePreviewSettings()
-                                    }
-                                )
-
-                                ProGradientSliderRow(
                                     label = "DOYGUNLUK",
                                     valueBadge = "${"%.2f".format(saturationValue)}x",
                                     value = saturationValue,
@@ -3062,20 +2346,41 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     )
                                 }
 
-                                // Box Controls / Equalize Action Row
+                                // Highlight Protection Switch Row
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
-                                        val sizeLabel = when {
-                                            exposureBoxSizeNorm < 0.17f -> "Küçük"
-                                            exposureBoxSizeNorm < 0.25f -> "Orta"
-                                            else -> "Büyük"
+                                    ModePillButton(
+                                        label = if (highlightProtectionEnabled) "🛡 VURGU KORUMA (BEYAZI KORU): AÇIK" else "🛡 VURGU KORUMA: KAPALI",
+                                        selected = highlightProtectionEnabled,
+                                        accentColor = IrPalette.IrTeal,
+                                        enabled = cameraReady,
+                                        modifier = Modifier.weight(1f),
+                                        onClick = {
+                                            highlightProtectionEnabled = !highlightProtectionEnabled
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
                                         }
+                                    )
+                                    QuickPillAction(
+                                        text = "Eşitle ($measuredBrightnessPct%)",
+                                        highlighted = false,
+                                        compact = true,
+                                        enabled = cameraReady,
+                                        onClick = { measureAndApplyExposureMetering(applyEvAdjust = true) }
+                                    )
+                                }
+
+                                // Box Sizing & Positioning Controls
+                                if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         QuickPillAction(
-                                            text = if (isExposureBoxPicking) "Dokun..." else "Kutuyu Taşı",
+                                            text = if (isExposureBoxPicking) "Hedefe Dokun" else "Kutuyu Taşı",
                                             highlighted = isExposureBoxPicking,
                                             compact = true,
                                             enabled = cameraReady,
@@ -3084,27 +2389,52 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 isExposureBoxPicking = !isExposureBoxPicking
                                             }
                                         )
-                                        QuickPillAction(
-                                            text = "Boyut: $sizeLabel",
-                                            compact = true,
-                                            enabled = cameraReady,
-                                            onClick = {
-                                                exposureBoxSizeNorm = when {
-                                                    exposureBoxSizeNorm < 0.17f -> 0.20f
-                                                    exposureBoxSizeNorm < 0.25f -> 0.30f
-                                                    else -> 0.14f
+                                        listOf(
+                                            "%15" to 0.15f,
+                                            "%30" to 0.30f,
+                                            "%50" to 0.50f,
+                                            "%75" to 0.75f
+                                        ).forEach { (lbl, sz) ->
+                                            val isSel = abs(exposureBoxSizeNorm - sz) < 0.08f
+                                            ModePillButton(
+                                                label = lbl,
+                                                selected = isSel,
+                                                accentColor = IrPalette.IrAmber,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1f),
+                                                onClick = {
+                                                    exposureBoxSizeNorm = sz
+                                                    measureAndApplyExposureMetering(applyEvAdjust = true)
                                                 }
-                                                measureAndApplyExposureMetering(applyEvAdjust = true)
-                                            }
-                                        )
+                                            )
+                                        }
                                     }
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    QuickPillAction(
-                                        text = "Eşitle ($measuredBrightnessPct%)",
-                                        highlighted = false,
-                                        compact = true,
+
+                                    ProGradientSliderRow(
+                                        label = "KUTU BOYUTU",
+                                        valueBadge = "${(exposureBoxSizeNorm * 100f).roundToInt()}%",
+                                        value = exposureBoxSizeNorm,
+                                        valueRange = 0.10f..0.80f,
                                         enabled = cameraReady,
-                                        onClick = { measureAndApplyExposureMetering(applyEvAdjust = true) }
+                                        gradient = Brush.horizontalGradient(
+                                            colors = listOf(Color(0xFF0284C7), IrPalette.IrAmber, Color(0xFFF97316))
+                                        ),
+                                        onStepMinus = {
+                                            exposureBoxSizeNorm = (exposureBoxSizeNorm - 0.05f).coerceIn(0.10f, 0.80f)
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                        },
+                                        onStepPlus = {
+                                            exposureBoxSizeNorm = (exposureBoxSizeNorm + 0.05f).coerceIn(0.10f, 0.80f)
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                        },
+                                        onBadgeClick = {
+                                            exposureBoxSizeNorm = 0.30f
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                        },
+                                        onValueChange = {
+                                            exposureBoxSizeNorm = it
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                        }
                                     )
                                 }
 
@@ -3161,7 +2491,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         },
                                         onBadgeClick = {
                                             exposureEvIndex = 0
-                                            computedExposureGain = 1.0f
                                             updatePreviewSettings()
                                         },
                                         onValueChange = {
@@ -3194,12 +2523,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         ControlTab.RENK -> {
                                             contrastValue = DEFAULT_CONTRAST
                                             saturationValue = DEFAULT_SATURATION
-                                            spectralBoostValue = DEFAULT_SPECTRAL_BOOST
                                         }
                                         ControlTab.POZLAMA -> {
                                             exposureEvIndex = 0
                                             targetBrightnessLevel = 1.00f
-                                            computedExposureGain = 1.00f
                                             exposureBoxNorm = Offset(0.5f, 0.5f)
                                         }
                                         ControlTab.WB -> {
@@ -3243,8 +2570,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             .clip(CircleShape)
                             .border(
                                 3.dp,
-                                if (isMultiShotMode) IrPalette.IrCyan.copy(alpha = 0.95f)
-                                else Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f),
+                                Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f),
                                 CircleShape
                             )
                             .clickable(
@@ -3325,7 +2651,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "${kelvinValue.toInt()}K · Tint ${formatSigned(tintValue)} · IR ${"%.2f".format(spectralBoostValue)}x · C${"%.2f".format(contrastValue)} · S${"%.2f".format(saturationValue)}",
+                        text = "${kelvinValue.toInt()}K · Tint ${formatSigned(tintValue)} · C${"%.2f".format(contrastValue)} · S${"%.2f".format(saturationValue)}",
                         color = IrPalette.IrAmber,
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace
@@ -3360,8 +2686,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     kelvin = kelvinValue,
                                     tint = tintValue,
                                     contrast = contrastValue,
-                                    saturation = saturationValue,
-                                    spectralBoost = spectralBoostValue
+                                    saturation = saturationValue
                                 )
                             )
                             savePresetsToStorage()

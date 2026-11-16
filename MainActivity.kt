@@ -14,6 +14,8 @@ import android.graphics.Color as AndroidColor
 import android.graphics.ImageFormat
 import android.graphics.Matrix
 import android.graphics.Rect
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.ColorSpaceTransform
@@ -208,6 +210,7 @@ private class CameraHolder {
     @Volatile var currentMeteringMode: ExposureMeteringMode = ExposureMeteringMode.FULL_SCREEN
     @Volatile var currentExposureBoxNorm: Offset = Offset(0.5f, 0.5f)
     @Volatile var currentExposureBoxSizeNorm: Float = 0.28f
+    @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
 }
 
 private fun formatMegapixels(size: Size): String {
@@ -524,6 +527,308 @@ private fun buildContrastTonemapCurve(
     return TonemapCurve(curve, curve, curve)
 }
 
+data class TargetedColorConfig(
+    val targetHue: Float = 0f,
+    val targetSat: Float = 0f,
+    val targetLum: Float = 0f,
+    val deltaHue: Float = 0f,
+    val deltaSat: Float = 0f,
+    val deltaLum: Float = 0f,
+    val hueWidth: Float = 22f,
+    val hueFeather: Float = 24f,
+    val isActive: Boolean = false,
+    val previewColorInt: Int = 0
+)
+
+private fun getHueName(hue: Float): String {
+    val h = (hue % 360f + 360f) % 360f
+    return when (h) {
+        in 0f..15f -> "Kırmızı"
+        in 16f..45f -> "Turuncu / Amber"
+        in 46f..70f -> "Sarı / Yaprak"
+        in 71f..150f -> "Yeşil"
+        in 151f..195f -> "Camgöbeği (Cyan)"
+        in 196f..260f -> "Mavi / Gökyüzü"
+        in 261f..315f -> "Mor / Menekşe"
+        in 316f..345f -> "Macenta / Pembe"
+        else -> "Kırmızı"
+    }
+}
+
+/**
+ * Lightroom-style Point Color Targeted HSL processing with Hermite-cubic smoothstep feathering.
+ * Applies Hue Shift, Saturation, and Luminance changes exclusively to the target color envelope.
+ */
+private fun applyTargetedHslToBitmap(
+    bitmap: Bitmap,
+    config: TargetedColorConfig
+): Bitmap {
+    if (!config.isActive || (config.deltaHue == 0f && config.deltaSat == 0f && config.deltaLum == 0f)) {
+        return bitmap
+    }
+    val work = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
+    val w = work.width
+    val h = work.height
+    val stripHeight = 256.coerceAtMost(h)
+    val rowBuf = IntArray(w * stripHeight)
+
+    val targetHue = config.targetHue
+    val hueWidth = config.hueWidth.coerceAtLeast(4f)
+    val hueFeather = config.hueFeather.coerceAtLeast(4f)
+    val dH = config.deltaHue
+    val dS = config.deltaSat
+    val dL = config.deltaLum
+
+    val hsv = FloatArray(3)
+    var y = 0
+    while (y < h) {
+        val rows = minOf(stripHeight, h - y)
+        work.getPixels(rowBuf, 0, w, 0, y, w, rows)
+        val count = w * rows
+        for (i in 0 until count) {
+            val px = rowBuf[i]
+            val a = px and -0x1000000
+            val r = (px ushr 16) and 0xFF
+            val g = (px ushr 8) and 0xFF
+            val b = px and 0xFF
+
+            AndroidColor.RGBToHSV(r, g, b, hsv)
+            val hVal = hsv[0]
+            val sVal = hsv[1]
+            val vVal = hsv[2]
+
+            var diffH = abs(hVal - targetHue)
+            if (diffH > 180f) diffH = 360f - diffH
+
+            val wH = when {
+                diffH <= hueWidth -> 1.0f
+                diffH <= hueWidth + hueFeather -> {
+                    val t = (diffH - hueWidth) / hueFeather
+                    1.0f - t * t * (3.0f - 2.0f * t)
+                }
+                else -> 0.0f
+            }
+
+            if (wH > 0.001f) {
+                val satWeight = ((sVal - 0.06f) / 0.14f).coerceIn(0f, 1f)
+                val wS = satWeight * satWeight * (3f - 2f * satWeight)
+                val lumLow = ((vVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
+                val lumHigh = 1.0f - ((vVal - 0.92f) / 0.07f).coerceIn(0f, 1f)
+                val wL = lumLow * lumHigh
+
+                val weight = wH * wS * wL
+                if (weight > 0.001f) {
+                    var newH = (hVal + dH * weight) % 360f
+                    if (newH < 0f) newH += 360f
+                    val newS = (sVal * (1.0f + dS * weight)).coerceIn(0f, 1f)
+                    val newV = (vVal + dL * weight * 0.45f).coerceIn(0f, 1f)
+
+                    hsv[0] = newH
+                    hsv[1] = newS
+                    hsv[2] = newV
+                    val outRgb = AndroidColor.HSVToColor(a, hsv)
+                    rowBuf[i] = outRgb
+                }
+            }
+        }
+        work.setPixels(rowBuf, 0, w, 0, y, w, rows)
+        y += rows
+    }
+    return work
+}
+
+private data class AutoContrastResult(
+    val recommendedContrast: Float,
+    val recommendedEvIndexDelta: Int,
+    val blackPointPercentile: Float,
+    val whitePointPercentile: Float
+)
+
+/**
+ * Robust non-AI Auto Contrast & Color Levels using 0.8% - 99.2% cumulative histogram percentile clipping.
+ */
+private fun calculateAutoContrastFromPreview(
+    bitmap: Bitmap,
+    aeStep: Float,
+    currentEv: Int,
+    aeRange: Range<Int>
+): AutoContrastResult {
+    val w = bitmap.width
+    val h = bitmap.height
+    val hist = IntArray(256)
+    var total = 0
+
+    val stepX = maxOf(1, w / 20)
+    val stepY = maxOf(1, h / 20)
+    var y = h / 10
+    while (y < (h * 9) / 10) {
+        var x = w / 10
+        while (x < (w * 9) / 10) {
+            val c = bitmap[x, y]
+            val luma = (0.299f * AndroidColor.red(c) + 0.587f * AndroidColor.green(c) + 0.114f * AndroidColor.blue(c)).roundToInt()
+            hist[luma.coerceIn(0, 255)]++
+            total++
+            x += stepX
+        }
+        y += stepY
+    }
+
+    if (total == 0) return AutoContrastResult(1.0f, 0, 0f, 255f)
+
+    val shadowCut = (total * 0.008f).roundToInt()
+    val highlightCut = (total * 0.992f).roundToInt()
+
+    var accum = 0
+    var pLow = 0
+    var pHigh = 255
+    for (i in 0 until 256) {
+        accum += hist[i]
+        if (accum >= shadowCut && pLow == 0) {
+            pLow = i
+        }
+        if (accum >= highlightCut) {
+            pHigh = i
+            break
+        }
+    }
+
+    val dynamicRange = (pHigh - pLow).coerceAtLeast(20)
+    val idealContrast = when {
+        dynamicRange < 110 -> 1.32f
+        dynamicRange < 150 -> 1.20f
+        dynamicRange < 190 -> 1.10f
+        dynamicRange > 232 -> 0.94f
+        else -> 1.05f
+    }
+
+    val midLuma = (pLow + pHigh) * 0.5f
+    val targetMid = 128f
+    val neededRatio = targetMid / midLuma.coerceAtLeast(15f)
+    val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
+    val deltaSteps = if (aeStep > 0.05f) (deltaStops / aeStep).roundToInt() else 0
+
+    return AutoContrastResult(
+        recommendedContrast = idealContrast,
+        recommendedEvIndexDelta = deltaSteps,
+        blackPointPercentile = pLow.toFloat(),
+        whitePointPercentile = pHigh.toFloat()
+    )
+}
+
+private const val HSL_SKSL = """
+    uniform shader uContent;
+    uniform float uTargetHue;
+    uniform float uHueWidth;
+    uniform float uHueFeather;
+    uniform float uDeltaHue;
+    uniform float uDeltaSat;
+    uniform float uDeltaLum;
+    uniform float uActive;
+
+    vec3 rgb2hsl(vec3 c) {
+        float cMin = min(min(c.r, c.g), c.b);
+        float cMax = max(max(c.r, c.g), c.b);
+        float delta = cMax - cMin;
+        float l = (cMax + cMin) * 0.5;
+        float s = 0.0;
+        float h = 0.0;
+        if (delta > 0.001) {
+            s = l < 0.5 ? delta / (cMax + cMin) : delta / (2.0 - cMax - cMin);
+            if (c.r >= cMax) {
+                h = (c.g - c.b) / delta + (c.g < c.b ? 6.0 : 0.0);
+            } else if (c.g >= cMax) {
+                h = (c.b - c.r) / delta + 2.0;
+            } else {
+                h = (c.r - c.g) / delta + 4.0;
+            }
+            h *= 60.0;
+        }
+        return vec3(h, s, l);
+    }
+
+    float hue2rgb(float p, float q, float t) {
+        if (t < 0.0) t += 1.0;
+        if (t > 1.0) t -= 1.0;
+        if (t < 0.1666667) return p + (q - p) * 6.0 * t;
+        if (t < 0.5) return q;
+        if (t < 0.6666667) return p + (q - p) * (0.6666667 - t) * 6.0;
+        return p;
+    }
+
+    vec3 hsl2rgb(vec3 hsl) {
+        float h = hsl.x / 360.0;
+        float s = hsl.y;
+        float l = hsl.z;
+        if (s <= 0.001) return vec3(l);
+        float q = l < 0.5 ? l * (1.0 + s) : l + s - l * s;
+        float p = 2.0 * l - q;
+        return vec3(
+            hue2rgb(p, q, h + 0.3333333),
+            hue2rgb(p, q, h),
+            hue2rgb(p, q, h - 0.3333333)
+        );
+    }
+
+    vec4 main(vec2 fragCoord) {
+        vec4 color = uContent.eval(fragCoord);
+        if (uActive < 0.5) return color;
+        vec3 hsl = rgb2hsl(color.rgb);
+        
+        float dH = abs(hsl.x - uTargetHue);
+        dH = min(dH, 360.0 - dH);
+        
+        float wH = 0.0;
+        if (dH <= uHueWidth) {
+            wH = 1.0;
+        } else if (dH <= uHueWidth + uHueFeather) {
+            float t = (dH - uHueWidth) / uHueFeather;
+            wH = 1.0 - t * t * (3.0 - 2.0 * t);
+        }
+        
+        float satClamp = clamp((hsl.y - 0.06) / 0.14, 0.0, 1.0);
+        float wS = satClamp * satClamp * (3.0 - 2.0 * satClamp);
+        float lumLow = clamp((hsl.z - 0.04) / 0.10, 0.0, 1.0);
+        float lumHigh = 1.0 - clamp((hsl.z - 0.92) / 0.07, 0.0, 1.0);
+        float wL = lumLow * lumHigh;
+        
+        float weight = wH * wS * wL;
+        if (weight > 0.001) {
+            hsl.x = mod(hsl.x + uDeltaHue * weight + 360.0, 360.0);
+            hsl.y = clamp(hsl.y * (1.0 + uDeltaSat * weight), 0.0, 1.0);
+            hsl.z = clamp(hsl.z + uDeltaLum * weight * 0.45, 0.0, 1.0);
+            color.rgb = hsl2rgb(hsl);
+        }
+        return color;
+    }
+"""
+
+private fun updateTextureViewShader(
+    view: TextureView?,
+    config: TargetedColorConfig
+) {
+    if (view == null) return
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        try {
+            if (!config.isActive || (config.deltaHue == 0f && config.deltaSat == 0f && config.deltaLum == 0f)) {
+                view.setRenderEffect(null)
+                return
+            }
+            val shader = RuntimeShader(HSL_SKSL)
+            shader.setFloatUniform("uTargetHue", config.targetHue)
+            shader.setFloatUniform("uHueWidth", config.hueWidth)
+            shader.setFloatUniform("uHueFeather", config.hueFeather)
+            shader.setFloatUniform("uDeltaHue", config.deltaHue)
+            shader.setFloatUniform("uDeltaSat", config.deltaSat)
+            shader.setFloatUniform("uDeltaLum", config.deltaLum)
+            shader.setFloatUniform("uActive", 1.0f)
+            val effect = RenderEffect.createRuntimeShaderEffect(shader, "uContent")
+            view.setRenderEffect(effect)
+        } catch (e: Throwable) {
+            Log.e("CameraScreen", "RenderEffect not supported on this GPU/HAL", e)
+        }
+    }
+}
+
 
 
 
@@ -837,6 +1142,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var selectedResolution by remember { mutableStateOf<Size?>(null) }
 
     var isPickerActive by remember { mutableStateOf(false) }
+    var isColorPipetteActive by remember { mutableStateOf(false) }
+    var targetedColorConfig by remember { mutableStateOf(TargetedColorConfig()) }
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
 
     val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
@@ -870,11 +1177,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
-    LaunchedEffect(pickedMarkerPos, isPickerActive) {
-        if (pickedMarkerPos != null && !isPickerActive) {
+    LaunchedEffect(pickedMarkerPos, isPickerActive, isColorPipetteActive) {
+        if (pickedMarkerPos != null && !isPickerActive && !isColorPipetteActive) {
             delay(1600)
             pickedMarkerPos = null
         }
+    }
+
+    LaunchedEffect(targetedColorConfig, textureViewInstance) {
+        holder.currentTargetedColor = targetedColorConfig
+        updateTextureViewShader(textureViewInstance, targetedColorConfig)
     }
 
     fun savePresetsToStorage() {
@@ -939,6 +1251,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         holder.currentMeteringMode = meteringMode
         holder.currentExposureBoxNorm = exposureBoxNorm
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
+        holder.currentTargetedColor = targetedColorConfig
     }
 
     fun applyCamera2Settings(
@@ -1184,6 +1497,23 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             measureAndApplyExposureMetering(applyEvAdjust = true)
             updatePreviewSettings()
             showStatus("Oto-Kalibre: ${cal.kelvin.toInt()}K · ${formatSigned(cal.tint)} (${cal.foundNeutralCount} referans)")
+        } finally {
+            bmp.recycle()
+        }
+    }
+
+    fun runAutoContrast() {
+        val view = textureViewInstance ?: return
+        if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
+        val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
+        try {
+            val res = calculateAutoContrastFromPreview(bmp, aeStep, exposureEvIndex, aeRange)
+            contrastValue = res.recommendedContrast
+            if (res.recommendedEvIndexDelta != 0 && aeRange.upper > aeRange.lower) {
+                exposureEvIndex = (exposureEvIndex + res.recommendedEvIndexDelta).coerceIn(aeRange.lower, aeRange.upper)
+            }
+            updatePreviewSettings()
+            showStatus("Oto-Kontrast: C${"%.2f".format(res.recommendedContrast)} (Dinamik Aralık: ${res.blackPointPercentile.toInt()}..${res.whitePointPercentile.toInt()})")
         } finally {
             bmp.recycle()
         }
@@ -1504,8 +1834,38 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 image.close()
             }
 
-            coroutineScope.launch(Dispatchers.IO) {
-                val ok = saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+            val snapTargetedColor = holder.currentTargetedColor
+            coroutineScope.launch(Dispatchers.Default) {
+                val hasSelectiveHsl = snapTargetedColor.isActive &&
+                    (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)
+
+                val ok = if (hasSelectiveHsl) {
+                    var decoded: Bitmap? = null
+                    var graded: Bitmap? = null
+                    try {
+                        val orientation = readExifOrientation(bytes, context.cacheDir)
+                        val opts = BitmapFactory.Options().apply {
+                            inMutable = true
+                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                        }
+                        decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                        if (decoded != null) {
+                            graded = applyTargetedHslToBitmap(decoded, snapTargetedColor)
+                            saveOutputToGallery(context, null, graded, orientation)
+                        } else {
+                            saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
+                        saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                    } finally {
+                        if (graded != null && graded !== decoded) graded.recycle()
+                        decoded?.recycle()
+                    }
+                } else {
+                    saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                }
+
                 holder.isTakingPhoto = false
                 mainHandler.post {
                     showStatus(if (ok) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
@@ -1622,7 +1982,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(isPickerActive, isExposureBoxPicking, meteringMode) {
+                        .pointerInput(isPickerActive, isColorPipetteActive, isExposureBoxPicking, meteringMode) {
                             detectTapGestures(onTap = { offset ->
                                 val view = textureViewInstance ?: return@detectTapGestures
                                 if (isPickerActive) {
@@ -1650,6 +2010,38 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             bitmap.recycle()
                                         }
                                     }
+                                } else if (isColorPipetteActive) {
+                                    val sw = (view.width / 2).coerceIn(180, 480)
+                                    val sh = (view.height / 2).coerceIn(180, 480)
+                                    val bitmap = try { view.getBitmap(sw, sh) } catch (_: Exception) { null }
+                                    if (bitmap != null) {
+                                        try {
+                                            val x = (offset.x * bitmap.width / view.width.coerceAtLeast(1)).toInt().coerceIn(0, bitmap.width - 1)
+                                            val y = (offset.y * bitmap.height / view.height.coerceAtLeast(1)).toInt().coerceIn(0, bitmap.height - 1)
+                                            val pixel = bitmap[x, y]
+                                            val hsv = FloatArray(3)
+                                            AndroidColor.RGBToHSV(
+                                                AndroidColor.red(pixel),
+                                                AndroidColor.green(pixel),
+                                                AndroidColor.blue(pixel),
+                                                hsv
+                                            )
+                                            targetedColorConfig = targetedColorConfig.copy(
+                                                targetHue = hsv[0],
+                                                targetSat = hsv[1],
+                                                targetLum = hsv[2],
+                                                isActive = true,
+                                                previewColorInt = pixel
+                                            )
+                                            isColorPipetteActive = false
+                                            pickedMarkerPos = offset
+                                            syncHolderSettings()
+                                            updateTextureViewShader(view, targetedColorConfig)
+                                            showStatus("Renk Seçildi: ${getHueName(hsv[0])} (${hsv[0].toInt()}°)")
+                                        } finally {
+                                            bitmap.recycle()
+                                        }
+                                    }
                                 } else {
                                     val nx = (offset.x / view.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
                                     val ny = (offset.y / view.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
@@ -1660,8 +2052,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 }
                             })
                         }
-                        .pointerInput(meteringMode, exposureBoxSizeNorm, isPickerActive) {
-                            if (meteringMode == ExposureMeteringMode.BOX_SPOT && !isPickerActive) {
+                        .pointerInput(meteringMode, exposureBoxSizeNorm, isPickerActive, isColorPipetteActive) {
+                            if (meteringMode == ExposureMeteringMode.BOX_SPOT && !isPickerActive && !isColorPipetteActive) {
                                 detectDragGestures(
                                     onDragStart = { startOffset ->
                                         val boxCenterX = exposureBoxNorm.x * size.width
@@ -1741,10 +2133,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
                 }
 
-                if (isPickerActive || isExposureBoxPicking) {
+                if (isPickerActive || isExposureBoxPicking || isColorPipetteActive) {
                     val borderStroke = 2.dp.toPx()
                     drawRect(
-                        color = if (isPickerActive) IrPalette.IrCoral.copy(alpha = 0.65f) else IrPalette.IrAmber.copy(alpha = 0.65f),
+                        color = when {
+                            isColorPipetteActive -> IrPalette.IrTeal.copy(alpha = 0.75f)
+                            isPickerActive -> IrPalette.IrCoral.copy(alpha = 0.65f)
+                            else -> IrPalette.IrAmber.copy(alpha = 0.65f)
+                        },
                         style = Stroke(width = borderStroke)
                     )
                 }
@@ -2145,11 +2541,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                 // Animated Status / Picker Instruction Pill
                 AnimatedVisibility(
-                    visible = statusBanner != null || isPickerActive || isExposureBoxPicking,
+                    visible = statusBanner != null || isPickerActive || isExposureBoxPicking || isColorPipetteActive,
                     enter = fadeIn() + slideInVertically { -it / 2 },
                     exit = fadeOut() + slideOutVertically { -it / 2 }
                 ) {
                     val bannerText = when {
+                        isColorPipetteActive -> "🎨 Renk Pipeti Aktif — Ayarlamak istediğiniz renge dokunun"
                         isPickerActive -> "WB Seçici Aktif — Nötr bir noktaya dokunun"
                         isExposureBoxPicking -> "Pozlama Kutusu — Hedef bölgeye dokunun veya sürükleyin"
                         else -> statusBanner ?: ""
@@ -2163,6 +2560,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 .clip(RoundedCornerShape(50))
                                 .background(
                                     when {
+                                        isColorPipetteActive -> IrPalette.IrTeal.copy(alpha = 0.92f)
                                         isPickerActive -> IrPalette.IrCoral.copy(alpha = 0.9f)
                                         isExposureBoxPicking -> IrPalette.IrAmber.copy(alpha = 0.9f)
                                         else -> Color(0xE61E293B)
@@ -2377,8 +2775,243 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     }
 
                                     ControlTab.RENK -> {
+                                        // Top Row: Pipette + Auto Contrast + Reset
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            ModePillButton(
+                                                label = if (isColorPipetteActive) "🎯 PİPET AKTİF" else "🎯 RENK PİPETİ",
+                                                selected = isColorPipetteActive || targetedColorConfig.isActive,
+                                                accentColor = IrPalette.IrTeal,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1.1f),
+                                                onClick = {
+                                                    if (isColorPipetteActive) {
+                                                        isColorPipetteActive = false
+                                                    } else {
+                                                        isColorPipetteActive = true
+                                                        isPickerActive = false
+                                                        isExposureBoxPicking = false
+                                                        showStatus("Ekranda bir renge dokunun")
+                                                    }
+                                                }
+                                            )
+
+                                            ModePillButton(
+                                                label = "⚡ OTO-KONTRAST",
+                                                selected = false,
+                                                accentColor = IrPalette.IrAmber,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1.1f),
+                                                onClick = {
+                                                    runAutoContrast()
+                                                }
+                                            )
+
+                                            QuickPillAction(
+                                                text = "↺ Sıfırla",
+                                                compact = true,
+                                                enabled = cameraReady,
+                                                onClick = {
+                                                    saturationValue = DEFAULT_SATURATION
+                                                    contrastValue = DEFAULT_CONTRAST
+                                                    targetedColorConfig = TargetedColorConfig()
+                                                    isColorPipetteActive = false
+                                                    updatePreviewSettings()
+                                                    showStatus("Renkler sıfırlandı")
+                                                }
+                                            )
+                                        }
+
+                                        // Lightroom Point Color Sub-panel
+                                        if (targetedColorConfig.isActive) {
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(10.dp))
+                                                    .background(Color.White.copy(alpha = 0.05f))
+                                                    .border(1.dp, IrPalette.IrTeal.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                                                    .padding(10.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                // Header: Swatch + Hue Name + Angle + Remove Button
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(18.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(targetedColorConfig.previewColorInt))
+                                                                .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
+                                                        )
+                                                        Text(
+                                                            text = "${getHueName(targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)",
+                                                            color = IrPalette.IrTeal,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = "✕ Kaldır",
+                                                        color = IrPalette.TextTertiary,
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(4.dp))
+                                                            .clickable {
+                                                                targetedColorConfig = targetedColorConfig.copy(isActive = false)
+                                                                showStatus("Noktasal renk kaldırıldı")
+                                                            }
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+
+                                                // Tolerance (Range) Buttons
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "ARALIK:",
+                                                        color = IrPalette.TextSecondary,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                    val isNarrow = targetedColorConfig.hueWidth == 14f
+                                                    val isBalanced = targetedColorConfig.hueWidth == 22f
+                                                    val isWide = targetedColorConfig.hueWidth == 36f
+
+                                                    ModePillButton(
+                                                        label = "Dar (±14°)",
+                                                        selected = isNarrow,
+                                                        accentColor = IrPalette.IrTeal,
+                                                        enabled = cameraReady,
+                                                        modifier = Modifier.weight(1f),
+                                                        onClick = {
+                                                            targetedColorConfig = targetedColorConfig.copy(hueWidth = 14f, hueFeather = 12f)
+                                                        }
+                                                    )
+                                                    ModePillButton(
+                                                        label = "Dengeli (±22°)",
+                                                        selected = isBalanced,
+                                                        accentColor = IrPalette.IrTeal,
+                                                        enabled = cameraReady,
+                                                        modifier = Modifier.weight(1f),
+                                                        onClick = {
+                                                            targetedColorConfig = targetedColorConfig.copy(hueWidth = 22f, hueFeather = 18f)
+                                                        }
+                                                    )
+                                                    ModePillButton(
+                                                        label = "Geniş (±36°)",
+                                                        selected = isWide,
+                                                        accentColor = IrPalette.IrTeal,
+                                                        enabled = cameraReady,
+                                                        modifier = Modifier.weight(1f),
+                                                        onClick = {
+                                                            targetedColorConfig = targetedColorConfig.copy(hueWidth = 36f, hueFeather = 26f)
+                                                        }
+                                                    )
+                                                }
+
+                                                // HUE SHIFT SLIDER (-60..+60)
+                                                ProGradientSliderRow(
+                                                    label = "HUE (TON)",
+                                                    valueBadge = "${if (targetedColorConfig.deltaHue >= 0) "+" else ""}${targetedColorConfig.deltaHue.toInt()}°",
+                                                    value = targetedColorConfig.deltaHue,
+                                                    valueRange = -60f..60f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        listOf(IrPalette.IrCyan, IrPalette.IrAmber, IrPalette.IrMagenta)
+                                                    ),
+                                                    onStepMinus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaHue = (targetedColorConfig.deltaHue - 5f).coerceIn(-60f, 60f)
+                                                        )
+                                                    },
+                                                    onStepPlus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaHue = (targetedColorConfig.deltaHue + 5f).coerceIn(-60f, 60f)
+                                                        )
+                                                    },
+                                                    onBadgeClick = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaHue = 0f)
+                                                    },
+                                                    onValueChange = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaHue = it)
+                                                    }
+                                                )
+
+                                                // SATURATION SHIFT SLIDER (-1.0..+1.0)
+                                                ProGradientSliderRow(
+                                                    label = "DOYGUNLUK",
+                                                    valueBadge = "${if (targetedColorConfig.deltaSat >= 0) "+" else ""}${(targetedColorConfig.deltaSat * 100).toInt()}%",
+                                                    value = targetedColorConfig.deltaSat,
+                                                    valueRange = -1.0f..1.0f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        listOf(Color(0xFF64748B), IrPalette.IrTeal)
+                                                    ),
+                                                    onStepMinus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaSat = (targetedColorConfig.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f)
+                                                        )
+                                                    },
+                                                    onStepPlus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaSat = (targetedColorConfig.deltaSat + 0.05f).coerceIn(-1.0f, 1.0f)
+                                                        )
+                                                    },
+                                                    onBadgeClick = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaSat = 0f)
+                                                    },
+                                                    onValueChange = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaSat = it)
+                                                    }
+                                                )
+
+                                                // LUMINANCE SHIFT SLIDER (-1.0..+1.0)
+                                                ProGradientSliderRow(
+                                                    label = "PARLAKLIK",
+                                                    valueBadge = "${if (targetedColorConfig.deltaLum >= 0) "+" else ""}${(targetedColorConfig.deltaLum * 100).toInt()}%",
+                                                    value = targetedColorConfig.deltaLum,
+                                                    valueRange = -1.0f..1.0f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        listOf(Color(0xFF334155), Color.White)
+                                                    ),
+                                                    onStepMinus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaLum = (targetedColorConfig.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f)
+                                                        )
+                                                    },
+                                                    onStepPlus = {
+                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                            deltaLum = (targetedColorConfig.deltaLum + 0.05f).coerceIn(-1.0f, 1.0f)
+                                                        )
+                                                    },
+                                                    onBadgeClick = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaLum = 0f)
+                                                    },
+                                                    onValueChange = {
+                                                        targetedColorConfig = targetedColorConfig.copy(deltaLum = it)
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        // Global Saturation Slider
                                         ProGradientSliderRow(
-                                            label = "DOYGUNLUK",
+                                            label = "GENEL DOYGUNLUK",
                                             valueBadge = "${"%.2f".format(saturationValue)}x",
                                             value = saturationValue,
                                             valueRange = 0.50f..2.00f,
@@ -2404,8 +3037,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             }
                                         )
 
+                                        // Global Contrast Slider
                                         ProGradientSliderRow(
-                                            label = "KONTRAST",
+                                            label = "GENEL KONTRAST",
                                             valueBadge = "${"%.2f".format(contrastValue)}x",
                                             value = contrastValue,
                                             valueRange = 0.60f..1.80f,
@@ -2430,23 +3064,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 updatePreviewSettings()
                                             }
                                         )
-
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.End
-                                        ) {
-                                            QuickPillAction(
-                                                text = "↺ Renkleri Sıfırla (1.0x)",
-                                                compact = true,
-                                                enabled = cameraReady,
-                                                onClick = {
-                                                    saturationValue = DEFAULT_SATURATION
-                                                    contrastValue = DEFAULT_CONTRAST
-                                                    updatePreviewSettings()
-                                                    showStatus("Renkler sıfırlandı")
-                                                }
-                                            )
-                                        }
                                     }
 
                                     ControlTab.POZLAMA -> {

@@ -11,6 +11,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.*
 import android.hardware.camera2.params.ColorSpaceTransform
@@ -163,8 +164,11 @@ private class CameraHolder {
     var isDisposed: Boolean = false
 
     @Volatile var selectedResolution: Size? = null
+    @Volatile var activePreviewSize: Size? = null
+    @Volatile var activeSensorOrientation: Int = 90
     @Volatile var previewFallbackLevel: Int = 0
     @Volatile var isTakingPhoto: Boolean = false
+    @Volatile var isClosingDevice: Boolean = false
     var pendingReopenSurfaceTexture: SurfaceTexture? = null
     var cameraGeneration: Int = 0
 
@@ -229,19 +233,51 @@ private fun choosePreviewSize(
     }
     val candidates = matching.ifEmpty { previewSizes.toList() }
 
-    // Camera2 guarantees PREVIEW <= 1920x1080 alongside MAXIMUM JPEG even on LIMITED/LEGACY devices
-    val (maxLong, maxShort) = when (fallbackTier) {
-        0 -> 1920 to 1080
-        1 -> 1280 to 960
-        else -> 800 to 600
+    // Allow 1920x1080 (16:9), 1440x1080 (4:3), and 1088x1088 (1:1) while staying within LIMITED bounds
+    val (maxLong, maxPixels) = when (fallbackTier) {
+        0 -> 1920 to (1920L * 1088L)
+        1 -> 1280 to (1280L * 960L)
+        else -> 800 to (800L * 600L)
     }
 
     return candidates
-        .filter { maxOf(it.width, it.height) <= maxLong && minOf(it.width, it.height) <= maxShort }
+        .filter { maxOf(it.width, it.height) <= maxLong && (it.width.toLong() * it.height.toLong()) <= maxPixels }
         .maxByOrNull { it.width.toLong() * it.height.toLong() }
         ?: candidates.minByOrNull { it.width.toLong() * it.height.toLong() }
         ?: previewSizes.minByOrNull { it.width.toLong() * it.height.toLong() }
         ?: targetJpeg
+}
+
+private fun applyPreviewTransform(
+    view: TextureView,
+    previewSize: Size?,
+    sensorOrientation: Int
+) {
+    if (previewSize == null || view.width <= 0 || view.height <= 0 || previewSize.height <= 0) {
+        view.setTransform(null)
+        return
+    }
+    val swapped = sensorOrientation == 90 || sensorOrientation == 270
+    val bufW = (if (swapped) previewSize.height else previewSize.width).toFloat()
+    val bufH = (if (swapped) previewSize.width else previewSize.height).toFloat()
+    if (bufW <= 0f || bufH <= 0f) {
+        view.setTransform(null)
+        return
+    }
+    val viewRatio = view.width.toFloat() / view.height.toFloat()
+    val bufRatio = bufW / bufH
+    if (abs(viewRatio - bufRatio) <= 0.015f) {
+        view.setTransform(null)
+        return
+    }
+    val (scaleX, scaleY) = if (viewRatio < bufRatio) {
+        (bufRatio / viewRatio) to 1f
+    } else {
+        1f to (viewRatio / bufRatio)
+    }
+    val matrix = Matrix()
+    matrix.setScale(scaleX, scaleY, view.width / 2f, view.height / 2f)
+    view.setTransform(matrix)
 }
 
 data class CameraPreset(
@@ -497,15 +533,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var isPickerActive by remember { mutableStateOf(false) }
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
 
+    val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
+    val initialRatio = remember {
+        val w = sharedPrefs.getInt("selected_res_w", -1)
+        val h = sharedPrefs.getInt("selected_res_h", -1)
+        if (w > 0 && h > 0) {
+            (minOf(w, h).toFloat() / maxOf(w, h).toFloat()).coerceIn(0.4f, 2.0f)
+        } else {
+            3f / 4f
+        }
+    }
     var textureViewInstance by remember { mutableStateOf<TextureView?>(null) }
-    var previewAspectRatio by remember { mutableFloatStateOf(3f / 4f) }
+    var previewAspectRatio by remember { mutableFloatStateOf(initialRatio) }
+    var surfaceGeneration by remember { mutableIntStateOf(0) }
 
     var statusBanner by remember { mutableStateOf<String?>(null) }
     val shutterFlashAlpha = remember { Animatable(0f) }
     var isShutterPressed by remember { mutableStateOf(false) }
 
     val savedPresets = remember { mutableStateListOf<CameraPreset>() }
-    val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
 
     fun showStatus(message: String) {
         statusBanner = message
@@ -744,6 +790,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             holder.isTakingPhoto = false
             holder.pendingReopenSurfaceTexture = pendingReopen
             val hadDevice = holder.device != null
+            if (hadDevice) {
+                holder.isClosingDevice = true
+            }
             try { holder.session?.close() } catch (_: Exception) {}
             holder.session = null
             try { holder.device?.close() } catch (_: Exception) {}
@@ -771,6 +820,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
         val openGen = synchronized(holder) {
             if (holder.isDisposed || holder.device != null || holder.isOpening) return
+            if (holder.isClosingDevice) {
+                holder.pendingReopenSurfaceTexture = surfaceTexture
+                return
+            }
             holder.isOpening = true
             holder.cameraGeneration += 1
             holder.cameraGeneration
@@ -826,14 +879,22 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
             val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: arrayOf(chosenJpeg)
             val chosenPreview = choosePreviewSize(previewSizes, chosenJpeg, holder.previewFallbackLevel)
+            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
+            holder.activePreviewSize = chosenPreview
+            holder.activeSensorOrientation = sensorOrientation
 
             surfaceTexture.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
-            val sensorOrientation = chars.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 90
             val swapped = sensorOrientation == 90 || sensorOrientation == 270
-            val uprightW = if (swapped) chosenPreview.height else chosenPreview.width
-            val uprightH = if (swapped) chosenPreview.width else chosenPreview.height
-            val ratio = (uprightW.toFloat() / uprightH.coerceAtLeast(1).toFloat()).coerceIn(0.4f, 2.0f)
-            mainHandler.post { previewAspectRatio = ratio }
+            val uprightJpegW = if (swapped) chosenJpeg.height else chosenJpeg.width
+            val uprightJpegH = if (swapped) chosenJpeg.width else chosenJpeg.height
+            val ratio = (uprightJpegW.toFloat() / uprightJpegH.coerceAtLeast(1).toFloat()).coerceIn(0.4f, 2.0f)
+            mainHandler.post {
+                previewAspectRatio = ratio
+                textureViewInstance?.let { tv ->
+                    tv.surfaceTexture?.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
+                    applyPreviewTransform(tv, chosenPreview, sensorOrientation)
+                }
+            }
 
             val surface = Surface(surfaceTexture)
 
@@ -899,7 +960,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     }
                                     holder.session = session
                                     val started = submitRepeatingRequest(session, builder)
-                                    mainHandler.post { cameraReady = started }
+                                    mainHandler.post {
+                                        cameraReady = started
+                                        textureViewInstance?.let { tv ->
+                                            tv.surfaceTexture?.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
+                                            applyPreviewTransform(tv, chosenPreview, sensorOrientation)
+                                        }
+                                    }
                                 }
 
                                 override fun onConfigureFailed(s: CameraCaptureSession) {
@@ -938,6 +1005,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                 override fun onClosed(c: CameraDevice) {
                     val pending = synchronized(holder) {
+                        holder.isClosingDevice = false
                         val st = holder.pendingReopenSurfaceTexture
                         holder.pendingReopenSurfaceTexture = null
                         st
@@ -957,13 +1025,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         cameraHandler.post { startCameraInternal(surfaceTexture) }
     }
 
-    fun restartCamera() {
-        val st = textureViewInstance?.surfaceTexture ?: return
-        cameraHandler.post {
-            if (closeCameraInternal(releaseReader = true, pendingReopen = st)) {
-                startCameraInternal(st)
-            }
-        }
+    fun restartForResolution(res: Size) {
+        val swapped = holder.activeSensorOrientation == 90 || holder.activeSensorOrientation == 270
+        val uprightW = if (swapped) res.height else res.width
+        val uprightH = if (swapped) res.width else res.height
+        previewAspectRatio = (uprightW.toFloat() / uprightH.coerceAtLeast(1).toFloat()).coerceIn(0.4f, 2.0f)
+        cameraHandler.post { closeCameraInternal(releaseReader = true) }
+        surfaceGeneration += 1
     }
 
     fun takePhoto() {
@@ -1080,8 +1148,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
-    LaunchedEffect(hasCameraPermission, textureViewInstance) {
-        if (hasCameraPermission && holder.device == null && !holder.isOpening) {
+    LaunchedEffect(hasCameraPermission, textureViewInstance, surfaceGeneration) {
+        if (hasCameraPermission && holder.device == null && !holder.isOpening && !holder.isClosingDevice) {
             textureViewInstance?.let { tv ->
                 if (tv.isAvailable) {
                     tv.surfaceTexture?.let { startCamera(it) }
@@ -1131,62 +1199,75 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             Modifier.fillMaxWidth().aspectRatio(previewAspectRatio)
         }
 
-        // Exact aspect-ratio viewfinder box matching the camera sensor & captured JPEG framing
+        // Exact aspect-ratio viewfinder box matching the chosen JPEG resolution
         Box(
             modifier = viewfinderModifier.clipToBounds(),
             contentAlignment = Alignment.Center
         ) {
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(isPickerActive) {
-                        detectTapGestures(onTap = { offset ->
-                            if (isPickerActive) {
-                                val view = textureViewInstance
-                                if (view != null) {
-                                    val bitmap = view.bitmap
-                                    if (bitmap != null) {
-                                        val x = (offset.x * bitmap.width / view.width.coerceAtLeast(1)).toInt()
-                                        val y = (offset.y * bitmap.height / view.height.coerceAtLeast(1)).toInt()
-                                        val (newK, newT) = calculateSpotWhiteBalance(
-                                            bitmap = bitmap,
-                                            x = x,
-                                            y = y,
-                                            currentGains = holder.lastHardwareGains
-                                        )
-                                        pickedMarkerPos = offset
-                                        kelvinValue = newK
-                                        tintValue = newT
-                                        isAutoMode = false
-                                        isPickerActive = false
-                                        updatePreviewSettings()
-                                        showStatus("WB Ayarlandı: ${newK.toInt()}K · Tint ${formatSigned(newT)}")
+            key(surfaceGeneration) {
+                AndroidView(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(isPickerActive) {
+                            detectTapGestures(onTap = { offset ->
+                                if (isPickerActive) {
+                                    val view = textureViewInstance
+                                    if (view != null) {
+                                        val bitmap = view.bitmap
+                                        if (bitmap != null) {
+                                            val x = (offset.x * bitmap.width / view.width.coerceAtLeast(1)).toInt()
+                                            val y = (offset.y * bitmap.height / view.height.coerceAtLeast(1)).toInt()
+                                            val (newK, newT) = calculateSpotWhiteBalance(
+                                                bitmap = bitmap,
+                                                x = x,
+                                                y = y,
+                                                currentGains = holder.lastHardwareGains
+                                            )
+                                            pickedMarkerPos = offset
+                                            kelvinValue = newK
+                                            tintValue = newT
+                                            isAutoMode = false
+                                            isPickerActive = false
+                                            updatePreviewSettings()
+                                            showStatus("WB: ${newK.toInt()}K · ${formatSigned(newT)}")
+                                        }
                                     }
                                 }
-                            }
-                        })
-                    },
-                factory = { ctx ->
-                    TextureView(ctx).apply {
-                        textureViewInstance = this
-                        surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                            override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
-                                startCamera(st)
-                            }
+                            })
+                        },
+                    factory = { ctx ->
+                        TextureView(ctx).apply {
+                            textureViewInstance = this
+                            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                    holder.activePreviewSize?.let { preview ->
+                                        st.setDefaultBufferSize(preview.width, preview.height)
+                                    }
+                                    applyPreviewTransform(this@apply, holder.activePreviewSize, holder.activeSensorOrientation)
+                                    startCamera(st)
+                                }
 
-                            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
-                                // Keep camera stream's chosen buffer size and aspect ratio intact
-                            }
+                                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {
+                                    // Restore exact Camera2 buffer size so TextureView.onSizeChanged cannot stretch it
+                                    holder.activePreviewSize?.let { preview ->
+                                        st.setDefaultBufferSize(preview.width, preview.height)
+                                    }
+                                    applyPreviewTransform(this@apply, holder.activePreviewSize, holder.activeSensorOrientation)
+                                }
 
-                            override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
-                            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                                override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
+                                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+                            }
                         }
+                    },
+                    update = { view ->
+                        holder.activePreviewSize?.let { preview ->
+                            view.surfaceTexture?.setDefaultBufferSize(preview.width, preview.height)
+                        }
+                        applyPreviewTransform(view, holder.activePreviewSize, holder.activeSensorOrientation)
                     }
-                },
-                update = { view ->
-                    view.setTransform(null)
-                }
-            )
+                )
+            }
 
             // Optional 3x3 Rule-of-Thirds Grid & WB Picker Reticle Overlay aligned with exact photo frame
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1251,54 +1332,62 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         )
                     )
                     .statusBarsPadding()
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Brand + Resolution Switcher + Grid Row
+                // Brand + Telemetry + Resolution Switcher + Grid Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(9.dp)
+                                .size(8.dp)
                                 .clip(CircleShape)
                                 .background(if (cameraReady) IrPalette.IrCoral else Color.Gray)
                         )
                         Text(
                             text = "KAMERAS",
                             color = IrPalette.TextPrimary,
-                            fontSize = 15.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.6.sp
+                            letterSpacing = 1.2.sp,
+                            maxLines = 1
                         )
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(IrPalette.IrCoral.copy(alpha = 0.22f))
-                                .border(1.dp, IrPalette.IrCoral.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .clip(RoundedCornerShape(50))
+                                .background(IrPalette.HudCard)
+                                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
+                            val telemetry = if (isAutoMode) {
+                                "~${displayKelvin.toInt()}K · ${formatSigned(displayTint)}"
+                            } else {
+                                "${displayKelvin.toInt()}K · ${formatSigned(displayTint)} · C${"%.1f".format(Locale.US, contrastValue)} · S${"%.1f".format(Locale.US, saturationValue)}"
+                            }
                             Text(
-                                text = "IR PRO",
-                                color = IrPalette.IrCoral,
+                                text = telemetry,
+                                color = IrPalette.TextPrimary,
                                 fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.8.sp
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
 
                     Row(
+                        modifier = Modifier.padding(start = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)
                     ) {
-                        // Resolution Selector Pill
                         val activeRes = selectedResolution
                         val resLabel = if (activeRes != null) {
                             "${formatMegapixels(activeRes)} · ${formatAspectRatioTag(activeRes)} ▾"
@@ -1318,7 +1407,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 .clickable(enabled = availableResolutions.isNotEmpty()) {
                                     showResolutionDialog = true
                                 }
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
                         ) {
                             Text(
                                 text = resLabel,
@@ -1330,10 +1419,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             )
                         }
 
-                        // Grid Toggle Button
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(if (showGrid) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard)
                                 .border(
@@ -1346,53 +1434,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         ) {
                             GridIcon(
                                 tint = if (showGrid) IrPalette.IrAmber else IrPalette.TextSecondary,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                     }
                 }
 
-                // Live Telemetry & Output Size Strip
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f, fill = false)
-                            .clip(RoundedCornerShape(50))
-                            .background(IrPalette.HudCard)
-                            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        val telemetry = if (isAutoMode) {
-                            "AUTO · ~${displayKelvin.toInt()}K · T${formatSigned(displayTint)}"
-                        } else {
-                            "${displayKelvin.toInt()}K · T${formatSigned(displayTint)} · C${"%.2f".format(Locale.US, contrastValue)} · S${"%.2f".format(Locale.US, saturationValue)}"
-                        }
-                        Text(
-                            text = telemetry,
-                            color = IrPalette.TextPrimary,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    selectedResolution?.let { res ->
-                        Text(
-                            text = "${res.width}×${res.height}",
-                            color = IrPalette.TextSecondary,
-                            fontSize = 10.sp,
-                            fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.padding(start = 8.dp)
-                        )
-                    }
-                }
-
-                // Segmented Mode Selector Pill
+                // Clean 2-Tab Mode Switcher
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1403,8 +1451,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     ModePillButton(
-                        label = "AUTO",
-                        selected = isAutoMode && !isPickerActive,
+                        label = "OTOMATİK",
+                        selected = isAutoMode,
                         accentColor = IrPalette.IrEmerald,
                         enabled = cameraReady,
                         modifier = Modifier.weight(1f),
@@ -1415,27 +1463,18 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         }
                     )
                     ModePillButton(
-                        label = if (isPickerActive) "Nokta Seç..." else "WB Seçici",
-                        selected = isPickerActive,
-                        accentColor = IrPalette.IrCoral,
-                        enabled = cameraReady,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            isPickerActive = !isPickerActive
-                            if (isPickerActive) {
-                                showStatus("Önizlemede nötr veya beyaz bir noktaya dokunun")
-                            }
-                        }
-                    )
-                    ModePillButton(
                         label = "MANUEL",
-                        selected = !isAutoMode && !isPickerActive,
+                        selected = !isAutoMode,
                         accentColor = IrPalette.IrAmber,
                         enabled = cameraReady,
                         modifier = Modifier.weight(1f),
                         onClick = {
                             isPickerActive = false
-                            isAutoMode = false
+                            if (isAutoMode) {
+                                kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                                isAutoMode = false
+                            }
                             updatePreviewSettings()
                         }
                     )
@@ -1542,56 +1581,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (isAutoMode) {
-                    // Clean Auto Mode Summary Card
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(IrPalette.HudGlass)
-                            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(18.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Otomatik Beyaz Dengesi",
-                                color = IrPalette.TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Text(
-                                text = "Ölçülen: ~${liveAutoKelvin.toInt()}K · Tint ${formatSigned(liveAutoTint)}",
-                                color = IrPalette.IrEmerald,
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(IrPalette.IrAmber.copy(alpha = 0.18f))
-                                .border(1.dp, IrPalette.IrAmber.copy(alpha = 0.55f), RoundedCornerShape(50))
-                                .clickable(enabled = cameraReady) {
-                                    kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                    tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                    isPickerActive = false
-                                    isAutoMode = false
-                                    updatePreviewSettings()
-                                    showStatus("Oto ayar Manuele kilitlendi")
-                                }
-                                .padding(horizontal = 12.dp, vertical = 7.dp)
-                        ) {
-                            Text(
-                                text = "Manuele Kilitle",
-                                color = IrPalette.IrAmber,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                } else {
+                if (!isAutoMode) {
                     // Pro Manual Deck
                     Column(
                         modifier = Modifier
@@ -1781,35 +1771,21 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 ) {
                     // Left action
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                        if (isAutoMode) {
+                        if (!isAutoMode) {
                             QuickPillAction(
-                                text = "Manuele Al",
-                                enabled = cameraReady,
-                                onClick = {
-                                    kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                    tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                    isPickerActive = false
-                                    isAutoMode = false
-                                    updatePreviewSettings()
-                                }
-                            )
-                        } else {
-                            QuickPillAction(
-                                text = if (activeTab == ControlTab.TONE) "Sıfırla" else "Oto Eşitle",
+                                text = "Sıfırla",
                                 enabled = cameraReady,
                                 onClick = {
                                     if (activeTab == ControlTab.TONE) {
                                         contrastValue = DEFAULT_CONTRAST
                                         saturationValue = DEFAULT_SATURATION
                                         exposureEvIndex = 0
-                                        updatePreviewSettings()
-                                        showStatus("Kontrast ve renk sıfırlandı")
                                     } else {
                                         kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
                                         tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                        updatePreviewSettings()
-                                        showStatus("Oto değerlere eşitlendi")
                                     }
+                                    updatePreviewSettings()
+                                    showStatus("Ayarlar sıfırlandı")
                                 }
                             )
                         }
@@ -1851,12 +1827,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             text = if (isPickerActive) "İptal" else "WB Seç",
                             highlighted = isPickerActive,
                             enabled = cameraReady,
-                            onClick = {
-                                isPickerActive = !isPickerActive
-                                if (isPickerActive) {
-                                    showStatus("Nötr veya beyaz alana dokunun")
-                                }
-                            }
+                            onClick = { isPickerActive = !isPickerActive }
                         )
                     }
                 }
@@ -1993,9 +1964,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     selectedResolution = res
                                     holder.selectedResolution = res
                                     holder.previewFallbackLevel = 0
+                                    holder.activePreviewSize = null
                                     showResolutionDialog = false
                                     showStatus("Çözünürlük: ${formatMegapixels(res)} (${res.width}×${res.height})")
-                                    restartCamera()
+                                    restartForResolution(res)
                                 }
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,

@@ -50,7 +50,7 @@ jobs:
           git config user.email "alisamilaytekin@gmail.com"
           git add app-debug.apk
           if ! git diff --staged --quiet; then
-            git commit -m "Update v4.3 compiled APK [skip ci]"
+            git commit -m "Update v4.4 compiled APK [skip ci]"
             git push origin main
           fi
 
@@ -58,10 +58,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete v4.3 -y --cleanup-tag || true
-          gh release create v4.3 app/build/outputs/apk/debug/app-debug.apk \
-            --title "CameraS v4.3 (Dogal Sensor & Pozlama Korumasi)" \
-            --notes "En guncel derlenmis APK. Dogal sensor yakalama, genisletilebilir pozlama olcum kutusu (%10-%80) ve akilli beyaz/vurgu korumasi (Highlight Protection) icerir." || true
+          gh release delete v4.4 -y --cleanup-tag || true
+          gh release create v4.4 app/build/outputs/apk/debug/app-debug.apk \
+            --title "CameraS v4.4 (Katlanabilir Sade Menuler & Genis Vizor)" \
+            --notes "En guncel derlenmis APK. Kucultulebilir/gizlenebilir kompakt menuler, tam ekran vizor modu (Temiz Gorunum), dogrudan ekrana dokunarak kutu konumlandirma ve sadelestirilmis pozlama paneli icerir." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

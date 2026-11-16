@@ -818,6 +818,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var liveAutoTint by remember { mutableFloatStateOf(0f) }
 
     var activeTab by remember { mutableStateOf(ControlTab.WB) }
+    var isDeckCollapsed by remember { mutableStateOf(false) }
+    var isCleanView by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showResolutionDialog by remember { mutableStateOf(false) }
@@ -1648,7 +1650,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             bitmap.recycle()
                                         }
                                     }
-                                } else if (isExposureBoxPicking) {
+                                } else {
                                     val nx = (offset.x / view.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
                                     val ny = (offset.y / view.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
                                     exposureBoxNorm = Offset(nx, ny)
@@ -1966,151 +1968,178 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 modifier = Modifier.size(15.dp)
                             )
                         }
-                    }
-                }
 
-                // Clean 2-Tab Mode Switcher
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(50))
-                        .background(IrPalette.HudGlass)
-                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                        .padding(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    ModePillButton(
-                        label = "OTOMATİK",
-                        selected = isAutoMode,
-                        accentColor = IrPalette.IrEmerald,
-                        enabled = cameraReady,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            isPickerActive = false
-                            isExposureBoxPicking = false
-                            isAutoMode = true
-                            updatePreviewSettings()
-                        }
-                    )
-                    ModePillButton(
-                        label = "MANUEL",
-                        selected = !isAutoMode,
-                        accentColor = IrPalette.IrAmber,
-                        enabled = cameraReady,
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            isPickerActive = false
-                            isExposureBoxPicking = false
-                            if (isAutoMode) {
-                                kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                isAutoMode = false
-                            }
-                            updatePreviewSettings()
-                        }
-                    )
-                }
-
-                // Smart IR Actions + Preset Carousel
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    item {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(
-                                    if (highlightProtectionEnabled) IrPalette.IrTeal.copy(alpha = 0.22f)
-                                    else IrPalette.HudChip
-                                )
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(if (isCleanView) IrPalette.IrCyan.copy(alpha = 0.28f) else IrPalette.HudCard)
                                 .border(
                                     1.dp,
-                                    if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.BorderSubtle,
-                                    RoundedCornerShape(14.dp)
+                                    if (isCleanView) IrPalette.IrCyan else IrPalette.BorderSubtle,
+                                    CircleShape
                                 )
-                                .clickable(enabled = cameraReady) {
-                                    highlightProtectionEnabled = !highlightProtectionEnabled
-                                    measureAndApplyExposureMetering(applyEvAdjust = true)
-                                    showStatus(
-                                        if (highlightProtectionEnabled) "Vurgu Koruması Açık (Beyazlar Korunur)"
-                                        else "Vurgu Koruması Kapalı"
+                                .clickable {
+                                    isCleanView = !isCleanView
+                                    showStatus(if (isCleanView) "Tam Vizör: Menüler Gizlendi" else "Standart Menü")
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (isCleanView) "👁" else "⛶",
+                                fontSize = 13.sp,
+                                color = if (isCleanView) IrPalette.IrCyan else IrPalette.TextSecondary
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = !isCleanView) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Clean 2-Tab Mode Switcher
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(50))
+                                .background(IrPalette.HudGlass)
+                                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
+                                .padding(4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            ModePillButton(
+                                label = "OTOMATİK",
+                                selected = isAutoMode,
+                                accentColor = IrPalette.IrEmerald,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    isPickerActive = false
+                                    isExposureBoxPicking = false
+                                    isAutoMode = true
+                                    updatePreviewSettings()
+                                }
+                            )
+                            ModePillButton(
+                                label = "MANUEL",
+                                selected = !isAutoMode,
+                                accentColor = IrPalette.IrAmber,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    isPickerActive = false
+                                    isExposureBoxPicking = false
+                                    if (isAutoMode) {
+                                        kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                        tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                                        isAutoMode = false
+                                    }
+                                    updatePreviewSettings()
+                                }
+                            )
+                        }
+
+                        // Smart IR Actions + Preset Carousel
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(
+                                            if (highlightProtectionEnabled) IrPalette.IrTeal.copy(alpha = 0.22f)
+                                            else IrPalette.HudChip
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.BorderSubtle,
+                                            RoundedCornerShape(14.dp)
+                                        )
+                                        .clickable(enabled = cameraReady) {
+                                            highlightProtectionEnabled = !highlightProtectionEnabled
+                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                            showStatus(
+                                                if (highlightProtectionEnabled) "Vurgu Koruması Açık"
+                                                else "Vurgu Koruması Kapalı"
+                                            )
+                                        }
+                                        .padding(horizontal = 11.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = if (highlightProtectionEnabled) "🛡 Vurgu Koruma ●" else "🛡 Vurgu Koruma",
+                                        color = if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                 }
-                                .padding(horizontal = 11.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = if (highlightProtectionEnabled) "🛡 Vurgu Koruma ●" else "🛡 Vurgu Koruma",
-                                color = if (highlightProtectionEnabled) IrPalette.IrTeal else IrPalette.TextSecondary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
+                            }
 
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(IrPalette.IrCyan.copy(alpha = 0.16f))
-                                .border(1.dp, IrPalette.IrCyan.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
-                                .clickable(enabled = cameraReady) { runAutoCalibrate() }
-                                .padding(horizontal = 11.dp, vertical = 8.dp)
-                        ) {
-                            Text(
-                                text = "Oto-Kalibre",
-                                color = IrPalette.IrCyan,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(IrPalette.IrCyan.copy(alpha = 0.16f))
+                                        .border(1.dp, IrPalette.IrCyan.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                                        .clickable(enabled = cameraReady) { runAutoCalibrate() }
+                                        .padding(horizontal = 11.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "Oto-Kalibre",
+                                        color = IrPalette.IrCyan,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
 
-                    if (!isAutoMode) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(IrPalette.IrAmber.copy(alpha = 0.18f))
-                                    .border(1.dp, IrPalette.IrAmber.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
-                                    .clickable(enabled = cameraReady) { showSaveDialog = true }
-                                    .padding(horizontal = 11.dp, vertical = 8.dp)
-                            ) {
-                                Text(
-                                    text = "+ Kaydet",
-                                    color = IrPalette.IrAmber,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold
+                            if (!isAutoMode) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(IrPalette.IrAmber.copy(alpha = 0.18f))
+                                            .border(1.dp, IrPalette.IrAmber.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+                                            .clickable(enabled = cameraReady) { showSaveDialog = true }
+                                            .padding(horizontal = 11.dp, vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = "+ Kaydet",
+                                            color = IrPalette.IrAmber,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+
+                            items(savedPresets, key = { it.name }) { preset ->
+                                val isMatching = !isAutoMode &&
+                                    abs(kelvinValue - preset.kelvin) < 5f &&
+                                    abs(tintValue - preset.tint) < 1f
+                                PresetChip(
+                                    preset = preset,
+                                    isActive = isMatching,
+                                    onClick = {
+                                        isPickerActive = false
+                                        isExposureBoxPicking = false
+                                        isAutoMode = false
+                                        kelvinValue = preset.kelvin
+                                        tintValue = preset.tint
+                                        contrastValue = preset.contrast
+                                        saturationValue = preset.saturation
+                                        updatePreviewSettings()
+                                        showStatus("${preset.name} yüklendi")
+                                    },
+                                    onLongClick = {
+                                        savedPresets.remove(preset)
+                                        savePresetsToStorage()
+                                        showStatus("${preset.name} silindi")
+                                    }
                                 )
                             }
                         }
-                    }
-
-                    items(savedPresets, key = { it.name }) { preset ->
-                        val isMatching = !isAutoMode &&
-                            abs(kelvinValue - preset.kelvin) < 5f &&
-                            abs(tintValue - preset.tint) < 1f
-                        PresetChip(
-                            preset = preset,
-                            isActive = isMatching,
-                            onClick = {
-                                isPickerActive = false
-                                isExposureBoxPicking = false
-                                isAutoMode = false
-                                kelvinValue = preset.kelvin
-                                tintValue = preset.tint
-                                contrastValue = preset.contrast
-                                saturationValue = preset.saturation
-                                updatePreviewSettings()
-                                showStatus("${preset.name} yüklendi")
-                            },
-                            onLongClick = {
-                                savedPresets.remove(preset)
-                                savePresetsToStorage()
-                                showStatus("${preset.name} silindi")
-                            }
-                        )
                     }
                 }
 
@@ -2166,339 +2195,387 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                if (!isAutoMode) {
-                    // Pro Manual Deck (3 Tabs: WB / RENK & IR / POZLAMA)
+                AnimatedVisibility(visible = !isCleanView && !isAutoMode) {
+                    // Pro Manual Deck (3 Tabs: WB / RENK / POZLAMA) - Collapsible & Streamlined
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(22.dp))
+                            .clip(RoundedCornerShape(18.dp))
                             .background(IrPalette.HudGlass)
-                            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(22.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(18.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        // Tab Selector + Collapse/Expand Toggle
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            TabChip(
-                                title = "WB",
-                                selected = activeTab == ControlTab.WB,
-                                modifier = Modifier.weight(1f),
-                                onClick = { activeTab = ControlTab.WB }
-                            )
-                            TabChip(
-                                title = "RENK & IR",
-                                selected = activeTab == ControlTab.RENK,
-                                modifier = Modifier.weight(1f),
-                                onClick = { activeTab = ControlTab.RENK }
-                            )
-                            TabChip(
-                                title = "POZLAMA",
-                                selected = activeTab == ControlTab.POZLAMA,
-                                modifier = Modifier.weight(1f),
-                                onClick = { activeTab = ControlTab.POZLAMA }
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .padding(3.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                TabChip(
+                                    title = "WB",
+                                    selected = activeTab == ControlTab.WB && !isDeckCollapsed,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (activeTab == ControlTab.WB && !isDeckCollapsed) {
+                                            isDeckCollapsed = true
+                                        } else {
+                                            activeTab = ControlTab.WB
+                                            isDeckCollapsed = false
+                                        }
+                                    }
+                                )
+                                TabChip(
+                                    title = "RENK",
+                                    selected = activeTab == ControlTab.RENK && !isDeckCollapsed,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (activeTab == ControlTab.RENK && !isDeckCollapsed) {
+                                            isDeckCollapsed = true
+                                        } else {
+                                            activeTab = ControlTab.RENK
+                                            isDeckCollapsed = false
+                                        }
+                                    }
+                                )
+                                TabChip(
+                                    title = "POZLAMA",
+                                    selected = activeTab == ControlTab.POZLAMA && !isDeckCollapsed,
+                                    modifier = Modifier.weight(1f),
+                                    onClick = {
+                                        if (activeTab == ControlTab.POZLAMA && !isDeckCollapsed) {
+                                            isDeckCollapsed = true
+                                        } else {
+                                            activeTab = ControlTab.POZLAMA
+                                            isDeckCollapsed = false
+                                        }
+                                    }
+                                )
+                            }
+
+                            // Collapse / Expand Pill Button
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(
+                                        if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.22f)
+                                        else Color.White.copy(alpha = 0.08f)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
+                                        RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { isDeckCollapsed = !isDeckCollapsed }
+                                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (isDeckCollapsed) "▲ Aç" else "▼ Küçült",
+                                    color = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
 
-                        when (activeTab) {
-                            ControlTab.WB -> {
-                                ProGradientSliderRow(
-                                    label = "KELVİN",
-                                    valueBadge = "${kelvinValue.toInt()} K",
-                                    value = kelvinValue,
-                                    valueRange = KELVIN_MIN..KELVIN_MAX,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFFFF6B2B), Color(0xFFFFF4E6), IrPalette.IrCyan)
-                                    ),
-                                    onStepMinus = {
-                                        kelvinValue = (kelvinValue - 100f).coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                        updatePreviewSettings()
-                                    },
-                                    onStepPlus = {
-                                        kelvinValue = (kelvinValue + 100f).coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                        updatePreviewSettings()
-                                    },
-                                    onValueChange = {
-                                        kelvinValue = it
-                                        updatePreviewSettings()
-                                    }
-                                )
-
-                                ProGradientSliderRow(
-                                    label = "TİNT",
-                                    valueBadge = formatSigned(tintValue),
-                                    value = tintValue,
-                                    valueRange = -100f..100f,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(IrPalette.IrMagenta, Color(0xFFE2E8F0), IrPalette.IrEmerald)
-                                    ),
-                                    onStepMinus = {
-                                        tintValue = (tintValue - 5f).coerceIn(-100f, 100f)
-                                        updatePreviewSettings()
-                                    },
-                                    onStepPlus = {
-                                        tintValue = (tintValue + 5f).coerceIn(-100f, 100f)
-                                        updatePreviewSettings()
-                                    },
-                                    onBadgeClick = {
-                                        tintValue = 0f
-                                        updatePreviewSettings()
-                                    },
-                                    onValueChange = {
-                                        tintValue = it
-                                        updatePreviewSettings()
-                                    }
-                                )
-                            }
-
-                            ControlTab.RENK -> {
-                                ProGradientSliderRow(
-                                    label = "DOYGUNLUK",
-                                    valueBadge = "${"%.2f".format(saturationValue)}x",
-                                    value = saturationValue,
-                                    valueRange = 0.50f..2.00f,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFF64748B), IrPalette.IrCyan, IrPalette.IrMagenta)
-                                    ),
-                                    onStepMinus = {
-                                        saturationValue = (saturationValue - 0.05f).coerceIn(0.50f, 2.00f)
-                                        updatePreviewSettings()
-                                    },
-                                    onStepPlus = {
-                                        saturationValue = (saturationValue + 0.05f).coerceIn(0.50f, 2.00f)
-                                        updatePreviewSettings()
-                                    },
-                                    onBadgeClick = {
-                                        saturationValue = DEFAULT_SATURATION
-                                        updatePreviewSettings()
-                                    },
-                                    onValueChange = {
-                                        saturationValue = it
-                                        updatePreviewSettings()
-                                    }
-                                )
-
-                                ProGradientSliderRow(
-                                    label = "KONTRAST",
-                                    valueBadge = "${"%.2f".format(contrastValue)}x",
-                                    value = contrastValue,
-                                    valueRange = 0.60f..1.80f,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFF475569), Color(0xFFCBD5E1), Color.White)
-                                    ),
-                                    onStepMinus = {
-                                        contrastValue = (contrastValue - 0.05f).coerceIn(0.60f, 1.80f)
-                                        updatePreviewSettings()
-                                    },
-                                    onStepPlus = {
-                                        contrastValue = (contrastValue + 0.05f).coerceIn(0.60f, 1.80f)
-                                        updatePreviewSettings()
-                                    },
-                                    onBadgeClick = {
-                                        contrastValue = DEFAULT_CONTRAST
-                                        updatePreviewSettings()
-                                    },
-                                    onValueChange = {
-                                        contrastValue = it
-                                        updatePreviewSettings()
-                                    }
-                                )
-                            }
-
-                            ControlTab.POZLAMA -> {
-                                // Metering Mode Switcher: Full-Screen Average vs Box Spot
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    ModePillButton(
-                                        label = "TÜM EKRAN ORT.",
-                                        selected = meteringMode == ExposureMeteringMode.FULL_SCREEN,
-                                        accentColor = IrPalette.IrCyan,
-                                        enabled = cameraReady,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            isExposureBoxPicking = false
-                                            meteringMode = ExposureMeteringMode.FULL_SCREEN
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        }
-                                    )
-                                    ModePillButton(
-                                        label = "KUTU SEÇİMİ ☀",
-                                        selected = meteringMode == ExposureMeteringMode.BOX_SPOT,
-                                        accentColor = IrPalette.IrAmber,
-                                        enabled = cameraReady,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            meteringMode = ExposureMeteringMode.BOX_SPOT
-                                            isExposureBoxPicking = true
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        }
-                                    )
-                                }
-
-                                // Highlight Protection Switch Row
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    ModePillButton(
-                                        label = if (highlightProtectionEnabled) "🛡 VURGU KORUMA (BEYAZI KORU): AÇIK" else "🛡 VURGU KORUMA: KAPALI",
-                                        selected = highlightProtectionEnabled,
-                                        accentColor = IrPalette.IrTeal,
-                                        enabled = cameraReady,
-                                        modifier = Modifier.weight(1f),
-                                        onClick = {
-                                            highlightProtectionEnabled = !highlightProtectionEnabled
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        }
-                                    )
-                                    QuickPillAction(
-                                        text = "Eşitle ($measuredBrightnessPct%)",
-                                        highlighted = false,
-                                        compact = true,
-                                        enabled = cameraReady,
-                                        onClick = { measureAndApplyExposureMetering(applyEvAdjust = true) }
-                                    )
-                                }
-
-                                // Box Sizing & Positioning Controls
-                                if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        QuickPillAction(
-                                            text = if (isExposureBoxPicking) "Hedefe Dokun" else "Kutuyu Taşı",
-                                            highlighted = isExposureBoxPicking,
-                                            compact = true,
+                        // Collapsible Deck Content
+                        AnimatedVisibility(
+                            visible = !isDeckCollapsed,
+                            enter = fadeIn() + slideInVertically { it / 3 },
+                            exit = fadeOut() + slideOutVertically { it / 3 }
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                when (activeTab) {
+                                    ControlTab.WB -> {
+                                        ProGradientSliderRow(
+                                            label = "KELVİN",
+                                            valueBadge = "${kelvinValue.toInt()} K",
+                                            value = kelvinValue,
+                                            valueRange = KELVIN_MIN..KELVIN_MAX,
                                             enabled = cameraReady,
-                                            onClick = {
-                                                isPickerActive = false
-                                                isExposureBoxPicking = !isExposureBoxPicking
+                                            gradient = Brush.horizontalGradient(
+                                                colors = listOf(Color(0xFFFF6B2B), Color(0xFFFFF4E6), IrPalette.IrCyan)
+                                            ),
+                                            onStepMinus = {
+                                                kelvinValue = (kelvinValue - 100f).coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                                updatePreviewSettings()
+                                            },
+                                            onStepPlus = {
+                                                kelvinValue = (kelvinValue + 100f).coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                                updatePreviewSettings()
+                                            },
+                                            onValueChange = {
+                                                kelvinValue = it
+                                                updatePreviewSettings()
                                             }
                                         )
-                                        listOf(
-                                            "%15" to 0.15f,
-                                            "%30" to 0.30f,
-                                            "%50" to 0.50f,
-                                            "%75" to 0.75f
-                                        ).forEach { (lbl, sz) ->
-                                            val isSel = abs(exposureBoxSizeNorm - sz) < 0.08f
+
+                                        ProGradientSliderRow(
+                                            label = "TİNT",
+                                            valueBadge = formatSigned(tintValue),
+                                            value = tintValue,
+                                            valueRange = -100f..100f,
+                                            enabled = cameraReady,
+                                            gradient = Brush.horizontalGradient(
+                                                colors = listOf(IrPalette.IrMagenta, Color(0xFFE2E8F0), IrPalette.IrEmerald)
+                                            ),
+                                            onStepMinus = {
+                                                tintValue = (tintValue - 5f).coerceIn(-100f, 100f)
+                                                updatePreviewSettings()
+                                            },
+                                            onStepPlus = {
+                                                tintValue = (tintValue + 5f).coerceIn(-100f, 100f)
+                                                updatePreviewSettings()
+                                            },
+                                            onBadgeClick = {
+                                                tintValue = 0f
+                                                updatePreviewSettings()
+                                            },
+                                            onValueChange = {
+                                                tintValue = it
+                                                updatePreviewSettings()
+                                            }
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
                                             ModePillButton(
-                                                label = lbl,
-                                                selected = isSel,
-                                                accentColor = IrPalette.IrAmber,
+                                                label = if (isPickerActive) "🎯 WB SEÇİCİ: EKRANA DOKUNUN" else "🎯 NOKTASAL WB SEÇ",
+                                                selected = isPickerActive,
+                                                accentColor = IrPalette.IrCoral,
                                                 enabled = cameraReady,
                                                 modifier = Modifier.weight(1f),
+                                                onClick = { isPickerActive = !isPickerActive }
+                                            )
+                                            QuickPillAction(
+                                                text = "↺ WB Sıfırla",
+                                                compact = true,
+                                                enabled = cameraReady,
                                                 onClick = {
-                                                    exposureBoxSizeNorm = sz
-                                                    measureAndApplyExposureMetering(applyEvAdjust = true)
+                                                    kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                                    tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                                                    updatePreviewSettings()
+                                                    showStatus("WB sıfırlandı")
                                                 }
                                             )
                                         }
                                     }
 
-                                    ProGradientSliderRow(
-                                        label = "KUTU BOYUTU",
-                                        valueBadge = "${(exposureBoxSizeNorm * 100f).roundToInt()}%",
-                                        value = exposureBoxSizeNorm,
-                                        valueRange = 0.10f..0.80f,
-                                        enabled = cameraReady,
-                                        gradient = Brush.horizontalGradient(
-                                            colors = listOf(Color(0xFF0284C7), IrPalette.IrAmber, Color(0xFFF97316))
-                                        ),
-                                        onStepMinus = {
-                                            exposureBoxSizeNorm = (exposureBoxSizeNorm - 0.05f).coerceIn(0.10f, 0.80f)
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        },
-                                        onStepPlus = {
-                                            exposureBoxSizeNorm = (exposureBoxSizeNorm + 0.05f).coerceIn(0.10f, 0.80f)
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        },
-                                        onBadgeClick = {
-                                            exposureBoxSizeNorm = 0.30f
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        },
-                                        onValueChange = {
-                                            exposureBoxSizeNorm = it
-                                            measureAndApplyExposureMetering(applyEvAdjust = true)
-                                        }
-                                    )
-                                }
+                                    ControlTab.RENK -> {
+                                        ProGradientSliderRow(
+                                            label = "DOYGUNLUK",
+                                            valueBadge = "${"%.2f".format(saturationValue)}x",
+                                            value = saturationValue,
+                                            valueRange = 0.50f..2.00f,
+                                            enabled = cameraReady,
+                                            gradient = Brush.horizontalGradient(
+                                                colors = listOf(Color(0xFF64748B), IrPalette.IrCyan, IrPalette.IrMagenta)
+                                            ),
+                                            onStepMinus = {
+                                                saturationValue = (saturationValue - 0.05f).coerceIn(0.50f, 2.00f)
+                                                updatePreviewSettings()
+                                            },
+                                            onStepPlus = {
+                                                saturationValue = (saturationValue + 0.05f).coerceIn(0.50f, 2.00f)
+                                                updatePreviewSettings()
+                                            },
+                                            onBadgeClick = {
+                                                saturationValue = DEFAULT_SATURATION
+                                                updatePreviewSettings()
+                                            },
+                                            onValueChange = {
+                                                saturationValue = it
+                                                updatePreviewSettings()
+                                            }
+                                        )
 
-                                // Target Brightness Slider
-                                ProGradientSliderRow(
-                                    label = "HEDEF PARLAKLIK",
-                                    valueBadge = "${(targetBrightnessLevel * 100f).roundToInt()}%",
-                                    value = targetBrightnessLevel,
-                                    valueRange = 0.55f..1.45f,
-                                    enabled = cameraReady,
-                                    gradient = Brush.horizontalGradient(
-                                        colors = listOf(Color(0xFF334155), IrPalette.IrAmber, Color(0xFFFEF9C3))
-                                    ),
-                                    onStepMinus = {
-                                        targetBrightnessLevel = (targetBrightnessLevel - 0.05f).coerceIn(0.55f, 1.45f)
-                                        measureAndApplyExposureMetering(applyEvAdjust = true)
-                                    },
-                                    onStepPlus = {
-                                        targetBrightnessLevel = (targetBrightnessLevel + 0.05f).coerceIn(0.55f, 1.45f)
-                                        measureAndApplyExposureMetering(applyEvAdjust = true)
-                                    },
-                                    onBadgeClick = {
-                                        targetBrightnessLevel = 1.00f
-                                        measureAndApplyExposureMetering(applyEvAdjust = true)
-                                    },
-                                    onValueChange = {
-                                        targetBrightnessLevel = it
-                                        measureAndApplyExposureMetering(applyEvAdjust = true)
+                                        ProGradientSliderRow(
+                                            label = "KONTRAST",
+                                            valueBadge = "${"%.2f".format(contrastValue)}x",
+                                            value = contrastValue,
+                                            valueRange = 0.60f..1.80f,
+                                            enabled = cameraReady,
+                                            gradient = Brush.horizontalGradient(
+                                                colors = listOf(Color(0xFF475569), Color(0xFFCBD5E1), Color.White)
+                                            ),
+                                            onStepMinus = {
+                                                contrastValue = (contrastValue - 0.05f).coerceIn(0.60f, 1.80f)
+                                                updatePreviewSettings()
+                                            },
+                                            onStepPlus = {
+                                                contrastValue = (contrastValue + 0.05f).coerceIn(0.60f, 1.80f)
+                                                updatePreviewSettings()
+                                            },
+                                            onBadgeClick = {
+                                                contrastValue = DEFAULT_CONTRAST
+                                                updatePreviewSettings()
+                                            },
+                                            onValueChange = {
+                                                contrastValue = it
+                                                updatePreviewSettings()
+                                            }
+                                        )
+
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.End
+                                        ) {
+                                            QuickPillAction(
+                                                text = "↺ Renkleri Sıfırla (1.0x)",
+                                                compact = true,
+                                                enabled = cameraReady,
+                                                onClick = {
+                                                    saturationValue = DEFAULT_SATURATION
+                                                    contrastValue = DEFAULT_CONTRAST
+                                                    updatePreviewSettings()
+                                                    showStatus("Renkler sıfırlandı")
+                                                }
+                                            )
+                                        }
                                     }
-                                )
 
-                                // Manual Hardware EV Compensation
-                                if (aeRange.upper > aeRange.lower) {
-                                    val minEv = aeRange.lower.toFloat()
-                                    val maxEv = aeRange.upper.toFloat()
-                                    val evDisplay = exposureEvIndex * aeStep
-                                    val evBadge = "${if (evDisplay > 0.01f) "+" else ""}${"%.1f".format(evDisplay)} EV"
-                                    ProGradientSliderRow(
-                                        label = "MANUEL EV",
-                                        valueBadge = evBadge,
-                                        value = exposureEvIndex.toFloat(),
-                                        valueRange = minEv..maxEv,
-                                        enabled = cameraReady,
-                                        gradient = Brush.horizontalGradient(
-                                            colors = listOf(Color(0xFF1E293B), Color(0xFF94A3B8), Color(0xFFFEF08A))
-                                        ),
-                                        onStepMinus = {
-                                            exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
-                                            updatePreviewSettings()
-                                        },
-                                        onStepPlus = {
-                                            exposureEvIndex = (exposureEvIndex + 1).coerceIn(aeRange.lower, aeRange.upper)
-                                            updatePreviewSettings()
-                                        },
-                                        onBadgeClick = {
-                                            exposureEvIndex = 0
-                                            updatePreviewSettings()
-                                        },
-                                        onValueChange = {
-                                            exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
-                                            updatePreviewSettings()
+                                    ControlTab.POZLAMA -> {
+                                        // 1. Ölçüm Modu: Tüm Ekran vs Kutu
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            ModePillButton(
+                                                label = "TÜM EKRAN ORT.",
+                                                selected = meteringMode == ExposureMeteringMode.FULL_SCREEN,
+                                                accentColor = IrPalette.IrCyan,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1f),
+                                                onClick = {
+                                                    isExposureBoxPicking = false
+                                                    meteringMode = ExposureMeteringMode.FULL_SCREEN
+                                                    measureAndApplyExposureMetering(applyEvAdjust = true)
+                                                }
+                                            )
+                                            ModePillButton(
+                                                label = "KUTU ÖLÇÜM ☀",
+                                                selected = meteringMode == ExposureMeteringMode.BOX_SPOT,
+                                                accentColor = IrPalette.IrAmber,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1f),
+                                                onClick = {
+                                                    meteringMode = ExposureMeteringMode.BOX_SPOT
+                                                    measureAndApplyExposureMetering(applyEvAdjust = true)
+                                                }
+                                            )
                                         }
-                                    )
+
+                                        // 2. Kutu Boyutları (Sadece Kutu Modunda)
+                                        if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Boyut:",
+                                                    color = IrPalette.TextSecondary,
+                                                    fontSize = 11.sp,
+                                                    modifier = Modifier.padding(end = 2.dp)
+                                                )
+                                                listOf(
+                                                    "%15" to 0.15f,
+                                                    "%30" to 0.30f,
+                                                    "%50" to 0.50f,
+                                                    "%75" to 0.75f
+                                                ).forEach { (lbl, sz) ->
+                                                    val isSel = abs(exposureBoxSizeNorm - sz) < 0.08f
+                                                    ModePillButton(
+                                                        label = lbl,
+                                                        selected = isSel,
+                                                        accentColor = IrPalette.IrAmber,
+                                                        enabled = cameraReady,
+                                                        modifier = Modifier.weight(1f),
+                                                        onClick = {
+                                                            exposureBoxSizeNorm = sz
+                                                            measureAndApplyExposureMetering(applyEvAdjust = true)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // 3. Pozlama (EV) Kaydırıcısı
+                                        if (aeRange.upper > aeRange.lower) {
+                                            val minEv = aeRange.lower.toFloat()
+                                            val maxEv = aeRange.upper.toFloat()
+                                            val evDisplay = exposureEvIndex * aeStep
+                                            val evBadge = "${if (evDisplay > 0.01f) "+" else ""}${"%.1f".format(evDisplay)} EV"
+                                            ProGradientSliderRow(
+                                                label = "POZLAMA (EV)",
+                                                valueBadge = evBadge,
+                                                value = exposureEvIndex.toFloat(),
+                                                valueRange = minEv..maxEv,
+                                                enabled = cameraReady,
+                                                gradient = Brush.horizontalGradient(
+                                                    colors = listOf(Color(0xFF1E293B), Color(0xFF94A3B8), Color(0xFFFEF08A))
+                                                ),
+                                                onStepMinus = {
+                                                    exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
+                                                    updatePreviewSettings()
+                                                },
+                                                onStepPlus = {
+                                                    exposureEvIndex = (exposureEvIndex + 1).coerceIn(aeRange.lower, aeRange.upper)
+                                                    updatePreviewSettings()
+                                                },
+                                                onBadgeClick = {
+                                                    exposureEvIndex = 0
+                                                    updatePreviewSettings()
+                                                },
+                                                onValueChange = {
+                                                    exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
+                                                    updatePreviewSettings()
+                                                }
+                                            )
+                                        }
+
+                                        // 4. Vurgu Koruması ve Otomatik Eşitleme
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            ModePillButton(
+                                                label = if (highlightProtectionEnabled) "🛡 Vurgu Koruma: Açık" else "🛡 Vurgu Koruma: Kapalı",
+                                                selected = highlightProtectionEnabled,
+                                                accentColor = IrPalette.IrTeal,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1f),
+                                                onClick = {
+                                                    highlightProtectionEnabled = !highlightProtectionEnabled
+                                                    measureAndApplyExposureMetering(applyEvAdjust = true)
+                                                }
+                                            )
+                                            QuickPillAction(
+                                                text = "⚡ Eşitle (%$measuredBrightnessPct)",
+                                                highlighted = false,
+                                                compact = true,
+                                                enabled = cameraReady,
+                                                onClick = { measureAndApplyExposureMetering(applyEvAdjust = true) }
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2513,44 +2590,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Left action: Sıfırla (Manual) or Quick Exposure Mode Toggle (Auto)
+                    // Left action: Menüyü Küçült / Aç (Manuel) veya Hızlı Pozlama Modu (Oto)
                     Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
                         if (!isAutoMode) {
                             QuickPillAction(
-                                text = "Sıfırla",
+                                text = if (isDeckCollapsed) "▲ Menü" else "▼ Küçült",
+                                highlighted = isDeckCollapsed,
                                 enabled = cameraReady,
-                                onClick = {
-                                    when (activeTab) {
-                                        ControlTab.RENK -> {
-                                            contrastValue = DEFAULT_CONTRAST
-                                            saturationValue = DEFAULT_SATURATION
-                                        }
-                                        ControlTab.POZLAMA -> {
-                                            exposureEvIndex = 0
-                                            targetBrightnessLevel = 1.00f
-                                            exposureBoxNorm = Offset(0.5f, 0.5f)
-                                        }
-                                        ControlTab.WB -> {
-                                            kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                            tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                        }
-                                    }
-                                    updatePreviewSettings()
-                                    showStatus("Ayarlar sıfırlandı")
-                                }
+                                onClick = { isDeckCollapsed = !isDeckCollapsed }
                             )
                         } else {
                             QuickPillAction(
-                                text = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "☀ Kutu" else "☀ Tam",
+                                text = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "⛶ Kutu" else "⬛ Tam",
                                 highlighted = meteringMode == ExposureMeteringMode.BOX_SPOT,
                                 enabled = cameraReady,
                                 onClick = {
                                     if (meteringMode == ExposureMeteringMode.FULL_SCREEN) {
                                         meteringMode = ExposureMeteringMode.BOX_SPOT
-                                        isExposureBoxPicking = true
                                         measureAndApplyExposureMetering(applyEvAdjust = true)
                                     } else {
-                                        isExposureBoxPicking = false
                                         meteringMode = ExposureMeteringMode.FULL_SCREEN
                                         measureAndApplyExposureMetering(applyEvAdjust = true)
                                     }
@@ -2601,18 +2659,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     ) {
                         if (!isAutoMode) {
                             QuickPillAction(
-                                text = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "☀" else "Tam",
-                                highlighted = meteringMode == ExposureMeteringMode.BOX_SPOT || isExposureBoxPicking,
+                                text = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "⛶ Kutu" else "⬛ Tam",
+                                highlighted = meteringMode == ExposureMeteringMode.BOX_SPOT,
                                 compact = true,
                                 enabled = cameraReady,
                                 onClick = {
-                                    isPickerActive = false
                                     if (meteringMode == ExposureMeteringMode.FULL_SCREEN) {
                                         meteringMode = ExposureMeteringMode.BOX_SPOT
-                                        isExposureBoxPicking = true
                                         measureAndApplyExposureMetering(applyEvAdjust = true)
                                     } else {
-                                        isExposureBoxPicking = false
                                         meteringMode = ExposureMeteringMode.FULL_SCREEN
                                         measureAndApplyExposureMetering(applyEvAdjust = true)
                                     }
@@ -2620,12 +2675,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             )
                         }
                         QuickPillAction(
-                            text = if (isPickerActive) "İptal" else "WB Seç",
+                            text = if (isPickerActive) "İptal" else "🎯 WB",
                             highlighted = isPickerActive,
                             compact = !isAutoMode,
                             enabled = cameraReady,
                             onClick = {
-                                isExposureBoxPicking = false
                                 isPickerActive = !isPickerActive
                             }
                         )

@@ -121,6 +121,7 @@ private object IrPalette {
     val IrMagenta = Color(0xFFE84393)
     val TextPrimary = Color(0xFFF8FAFC)
     val TextSecondary = Color(0xFF94A3B8)
+    val TextTertiary = Color(0xFF64748B)
     val BorderSubtle = Color(0x26FFFFFF)
 }
 

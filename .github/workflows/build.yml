@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,6 +42,26 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           retention-days: 30
+
+      - name: Commit and Push APK to Repository Root
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk ./app-debug.apk
+          git config user.name "alisamilaytekin"
+          git config user.email "alisamilaytekin@gmail.com"
+          git add app-debug.apk
+          if ! git diff --staged --quiet; then
+            git commit -m "Update v4.3 compiled APK [skip ci]"
+            git push origin main
+          fi
+
+      - name: Create or Update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete v4.3 -y --cleanup-tag || true
+          gh release create v4.3 app/build/outputs/apk/debug/app-debug.apk \
+            --title "CameraS v4.3 (IRChrome & Pozlama Guncellemesi)" \
+            --notes "En guncel derlenmis APK. Pozlama kutu secimi, 3-kare sentez ve spektral kalibrasyon icerir." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

@@ -115,6 +115,7 @@ private object IrPalette {
     val IrAmber = Color(0xFFF59E0B)
     val IrCyan = Color(0xFF38BDF8)
     val IrEmerald = Color(0xFF10B981)
+    val IrTeal = Color(0xFF14B8A6)
     val IrMagenta = Color(0xFFE84393)
     val TextPrimary = Color(0xFFF8FAFC)
     val TextSecondary = Color(0xFF94A3B8)

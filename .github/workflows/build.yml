@@ -60,8 +60,8 @@ jobs:
         run: |
           gh release delete v4.3 -y --cleanup-tag || true
           gh release create v4.3 app/build/outputs/apk/debug/app-debug.apk \
-            --title "CameraS v4.3 (IRChrome & Pozlama Guncellemesi)" \
-            --notes "En guncel derlenmis APK. Pozlama kutu secimi, 3-kare sentez ve spektral kalibrasyon icerir." || true
+            --title "CameraS v4.3 (Dogal Sensor & Pozlama Korumasi)" \
+            --notes "En guncel derlenmis APK. Dogal sensor yakalama, genisletilebilir pozlama olcum kutusu (%10-%80) ve akilli beyaz/vurgu korumasi (Highlight Protection) icerir." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

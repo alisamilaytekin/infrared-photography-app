@@ -25,6 +25,7 @@ import android.hardware.camera2.params.TonemapCurve
 import android.media.ExifInterface
 import android.media.ImageReader
 import android.media.MediaActionSound
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment

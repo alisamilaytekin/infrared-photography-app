@@ -1,4 +1,8 @@
-# 📸 Kameras - Advanced Infrared (IR) Camera
+<p align="center">
+  <img src="logo.jpg" width="180" height="180" alt="CameraS Logo" style="border-radius: 22%;" />
+</p>
+
+# 📸 CameraS - Advanced Infrared (IR) Camera
 
 **Kameras** is a custom Android camera application designed specifically for near-infrared (NIR) photography enthusiasts. It provides real-time color correction to balance out aggressive color casts caused by specialized filters like **Kolari IRChrome**, **590nm (Gold)**, or other IR-pass filters directly on your live preview screen[cite: 1].
 

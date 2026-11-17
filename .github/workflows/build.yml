@@ -50,7 +50,7 @@ jobs:
           git config user.email "alisamilaytekin@gmail.com"
           git add app-debug.apk
           if ! git diff --staged --quiet; then
-            git commit -m "Update v4.5 compiled APK [skip ci]"
+            git commit -m "Update v4.6 compiled APK [skip ci]"
             git push origin main
           fi
 
@@ -58,10 +58,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete v4.5 -y --cleanup-tag || true
-          gh release create v4.5 app/build/outputs/apk/debug/app-debug.apk \
-            --title "CameraS v4.5 (Lightroom Noktasal Renk & Akıllı Oto-Kontrast)" \
-            --notes "Lightroom Point Color (Noktasal Renk Seçimi): Ekrana dokunarak istenen rengi pipetle seçebilme, Hermite cubic smoothstep ile renk geçişi (bantlaşma/halo önleyici), Hue/Doygunluk/Parlaklık kaydırıcıları. Yapay zekasız kümülatif histogram persentil kırpma tabanlı Akıllı Oto-Kontrast ve Canlı GPU AGSL RuntimeShader önizleme desteği." || true
+          gh release delete v4.6 -y --cleanup-tag || true
+          gh release create v4.6 app/build/outputs/apk/debug/app-debug.apk \
+            --title "CameraS v4.6 (Sade ve Kolay Anlaşılır Arayüz & Geniş Vizör)" \
+            --notes "Kullanıcı dostu, sadeleştirilmiş ve ferah yeni arayüz tasarımı. Tek satırlık üst bar (OTO/PRO geçişi, telemetri, çözünürlük), derli toplu 3 sekmeli alt panel (WB, Renk, Işık), odaklı kaydırıcılar, bağımsız Preset penceresi ve vizörü kapatmayan ferah ekran yerleşimi." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

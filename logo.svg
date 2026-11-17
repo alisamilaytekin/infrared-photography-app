@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#181D2A" />
+      <stop offset="50%" stop-color="#0E121A" />
+      <stop offset="100%" stop-color="#06080C" />
+    </linearGradient>
+
+    <!-- Outer Rim Metallic Gradient -->
+    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3A4459" />
+      <stop offset="25%" stop-color="#1A202C" />
+      <stop offset="50%" stop-color="#4A5568" />
+      <stop offset="75%" stop-color="#151922" />
+      <stop offset="100%" stop-color="#2D3748" />
+    </linearGradient>
+
+    <!-- Infrared Aerochrome Core Gradient (Crimson -> Magenta -> Cyan) -->
+    <linearGradient id="irCoreGrad" x1="15%" y1="15%" x2="85%" y2="85%">
+      <stop offset="0%" stop-color="#FF1744" />
+      <stop offset="30%" stop-color="#FF5252" />
+      <stop offset="55%" stop-color="#E040FB" />
+      <stop offset="80%" stop-color="#00E5FF" />
+      <stop offset="100%" stop-color="#00B0FF" />
+    </linearGradient>
+
+    <!-- Glowing IR Ring Gradient -->
+    <linearGradient id="irRingGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF1744" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#D500F9" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.9" />
+    </linearGradient>
+
+    <!-- Glass Reflection Gradient -->
+    <linearGradient id="glassReflect" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35" />
+      <stop offset="60%" stop-color="#FFFFFF" stop-opacity="0.05" />
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Subtle Secondary Glare -->
+    <linearGradient id="secondaryGlare" x1="100%" y1="100%" x2="30%" y2="30%">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#00E5FF" stop-opacity="0.0" />
+    </linearGradient>
+
+    <!-- Glow Filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- 1. Squircle App Background -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="#263044" stroke-width="3" />
+
+  <!-- 2. Concentric Outer Lens Barrel Grooves -->
+  <circle cx="256" cy="256" r="196" fill="#0A0D14" stroke="url(#rimGrad)" stroke-width="7" />
+  <circle cx="256" cy="256" r="182" fill="none" stroke="#1E2638" stroke-width="2" stroke-dasharray="3, 4" />
+  <circle cx="256" cy="256" r="172" fill="#0C0F17" stroke="#121824" stroke-width="4" />
+  <circle cx="256" cy="256" r="158" fill="#080A10" stroke="#1A2234" stroke-width="2" />
+
+  <!-- 3. Glowing Spectral Aperture Ring -->
+  <circle cx="256" cy="256" r="146" fill="none" stroke="url(#irRingGrad)" stroke-width="4.5" filter="url(#neonGlow)" />
+  <circle cx="256" cy="256" r="138" fill="#06080E" />
+
+  <!-- 4. Deep IR Aerochrome Core -->
+  <circle cx="256" cy="256" r="128" fill="url(#irCoreGrad)" />
+
+  <!-- 5. Optical Lens Blades / Stylized "S" Contour Overlay -->
+  <!-- Blade 1 (Top Left) -->
+  <path d="M 256 128 C 290 128, 330 150, 348 180 C 310 186, 260 200, 220 220 C 230 180, 240 145, 256 128 Z" 
+        fill="#0A0C14" fill-opacity="0.72" />
+  <!-- Blade 2 (Right) -->
+  <path d="M 384 256 C 384 290, 362 330, 332 348 C 326 310, 312 260, 292 220 C 332 230, 367 240, 384 256 Z" 
+        fill="#0A0C14" fill-opacity="0.68" />
+  <!-- Blade 3 (Bottom Right) -->
+  <path d="M 256 384 C 222 384, 182 362, 164 332 C 202 326, 252 312, 292 292 C 282 332, 272 367, 256 384 Z" 
+        fill="#0A0C14" fill-opacity="0.75" />
+  <!-- Blade 4 (Left) -->
+  <path d="M 128 256 C 128 222, 150 182, 180 164 C 186 202, 200 252, 220 292 C 180 282, 145 272, 128 256 Z" 
+        fill="#0A0C14" fill-opacity="0.70" />
+
+  <!-- Central Dynamic "S" Ribbon Streamline -->
+  <path d="M 292 168 
+           C 230 168, 196 198, 196 230 
+           C 196 270, 240 280, 272 292 
+           C 310 306, 320 326, 320 348 
+           C 320 380, 280 400, 234 394 
+           C 204 390, 182 374, 168 356
+           M 224 344
+           C 278 344, 314 316, 314 284
+           C 314 246, 272 234, 240 222
+           C 204 208, 194 190, 194 168
+           C 194 138, 234 116, 282 120
+           C 310 124, 332 140, 346 158" 
+        fill="none" 
+        stroke="#FFFFFF" 
+        stroke-width="13" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"
+        stroke-opacity="0.94" 
+        filter="url(#neonGlow)" />
+
+  <!-- 6. Optical Lens Center Pupil & Iris Aperture Pin -->
+  <circle cx="256" cy="256" r="30" fill="#06080F" stroke="#00E5FF" stroke-width="2.5" stroke-opacity="0.8" />
+  <circle cx="256" cy="256" r="14" fill="#FF1744" opacity="0.85" />
+  <circle cx="256" cy="256" r="6" fill="#FFFFFF" opacity="0.95" />
+
+  <!-- 7. Spherical Glass Lens Reflections -->
+  <!-- Main Top-Left Crescent Reflection -->
+  <path d="M 148 210 C 160 160, 200 135, 256 135 C 312 135, 352 160, 364 210 C 330 175, 295 160, 256 160 C 217 160, 182 175, 148 210 Z" 
+        fill="url(#glassReflect)" />
+
+  <!-- Bottom-Right Subtle Glow Reflection -->
+  <path d="M 364 302 C 352 352, 312 377, 256 377 C 200 377, 160 352, 148 302 C 182 337, 217 352, 256 352 C 295 352, 330 337, 364 302 Z" 
+        fill="url(#secondaryGlare)" />
+
+  <!-- Micro Lens Glint -->
+  <circle cx="198" cy="190" r="4.5" fill="#FFFFFF" opacity="0.75" />
+  <circle cx="210" cy="178" r="2.5" fill="#FFFFFF" opacity="0.45" />
+</svg>

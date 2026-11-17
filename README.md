@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.jpg" width="180" height="180" alt="CameraS Logo" style="border-radius: 22%;" />
+  <img src="logo.svg" width="180" height="180" alt="CameraS Logo" style="border-radius: 22%;" />
 </p>
 
 # 📸 CameraS - Advanced Infrared (IR) Camera

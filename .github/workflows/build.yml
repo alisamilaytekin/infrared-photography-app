@@ -50,7 +50,7 @@ jobs:
           git config user.email "alisamilaytekin@gmail.com"
           git add app-debug.apk
           if ! git diff --staged --quiet; then
-            git commit -m "Update v4.8 compiled APK [skip ci]"
+            git commit -m "Update v4.9 compiled APK [skip ci]"
             git push origin main
           fi
 
@@ -58,10 +58,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete v4.8 -y --cleanup-tag || true
-          gh release create v4.8 app/build/outputs/apk/debug/app-debug.apk \
-            --title "CameraS v4.8 (SVG Vektörel Logo & Uyarlanabilir İkon)" \
-            --notes "W3C SVG formatında logo.svg ve Android 8.0+ (API 26+) cihazlar için tam vektörel uyarlanabilir (adaptive) launcher ikonu entegre edildi." || true
+          gh release delete v4.9 -y --cleanup-tag || true
+          gh release create v4.9 app/build/outputs/apk/debug/app-debug.apk \
+            --title "CameraS v4.9 (Temiz Vizör, Dokunsal Yeşil Efekt & Kalite/Performans Optimizasyonu)" \
+            --notes "Ekrandaki tüm yazı baloncukları ve kutu pozlama/kalibre bildirimleri kaldırıldı (Sıfır görsel kalabalık). Basılan her butona yumuşak yeşil dokunsal renk animasyonu eklendi. Görüntü işleme döngüleri ana UI iş parçacığından arkaplana taşındı ve galeri kayıt güvenliği artırıldı." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

@@ -47,6 +47,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -79,6 +80,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -97,6 +99,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -1040,6 +1043,7 @@ private fun saveOutputToGallery(
     exifOrientation: Int
 ): Boolean {
     var tempOut: File? = null
+    var uri: Uri? = null
     return try {
         val timestamp = System.currentTimeMillis()
         val contentValues = ContentValues().apply {
@@ -1053,7 +1057,7 @@ private fun saveOutputToGallery(
         }
 
         val resolver = context.contentResolver
-        val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+        uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
             ?: return false
 
         if (processedBitmap != null) {
@@ -1091,10 +1095,32 @@ private fun saveOutputToGallery(
         true
     } catch (e: Exception) {
         Log.e("CameraScreen", "Failed to save image", e)
+        if (uri != null) {
+            try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+        }
         false
     } finally {
         try { tempOut?.delete() } catch (_: Exception) {}
     }
+}
+
+@Composable
+private fun rememberGreenFade(
+    decayDurationMs: Int = 650
+): Pair<Float, (onClick: () -> Unit) -> Unit> {
+    val anim = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val trigger: (() -> Unit) -> Unit = { action ->
+        scope.launch {
+            anim.snapTo(1f)
+            anim.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = decayDurationMs, easing = LinearOutSlowInEasing)
+            )
+        }
+        action()
+    }
+    return Pair(anim.value, trigger)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1162,21 +1188,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var previewAspectRatio by remember { mutableFloatStateOf(initialRatio) }
     var surfaceGeneration by remember { mutableIntStateOf(0) }
 
-    var statusBanner by remember { mutableStateOf<String?>(null) }
     val shutterFlashAlpha = remember { Animatable(0f) }
     var isShutterPressed by remember { mutableStateOf(false) }
 
     val savedPresets = remember { mutableStateListOf<CameraPreset>() }
 
     fun showStatus(message: String) {
-        statusBanner = message
-    }
-
-    LaunchedEffect(statusBanner) {
-        if (statusBanner != null) {
-            delay(2000)
-            statusBanner = null
-        }
+        Log.d("CameraScreen", message)
     }
 
     LaunchedEffect(pickedMarkerPos, isPickerActive, isColorPipetteActive) {
@@ -1441,45 +1459,43 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
         val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
-        try {
-            val stats = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
-            measuredRegionBrightness = stats.avgLuma.roundToInt()
+        coroutineScope.launch(Dispatchers.Default) {
+            try {
+                val stats = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
+                withContext(Dispatchers.Main) {
+                    measuredRegionBrightness = stats.avgLuma.roundToInt()
 
-            if (applyEvAdjust) {
-                val targetLuma = (128f * targetBrightnessLevel).coerceIn(55f, 205f)
-                var neededRatio = (targetLuma / stats.avgLuma.coerceAtLeast(14f)).coerceIn(0.35f, 2.75f)
+                    if (applyEvAdjust) {
+                        val targetLuma = (128f * targetBrightnessLevel).coerceIn(55f, 205f)
+                        var neededRatio = (targetLuma / stats.avgLuma.coerceAtLeast(14f)).coerceIn(0.35f, 2.75f)
 
-                // Highlight protection: if bright white areas exist in the scene,
-                // prevent exposure from pushing highlights into pure burnout clipping (>226)
-                if (highlightProtectionEnabled && stats.maxLuma > 200f) {
-                    val safeRatio = (226f / stats.maxLuma).coerceAtMost(1.0f)
-                    if (stats.highlightRatio > 0.03f || stats.maxLuma > 228f) {
-                        neededRatio = minOf(neededRatio, safeRatio)
-                    } else if (neededRatio > 1.0f) {
-                        neededRatio = minOf(neededRatio, 235f / stats.maxLuma)
+                        // Highlight protection: if bright white areas exist in the scene,
+                        // prevent exposure from pushing highlights into pure burnout clipping (>226)
+                        if (highlightProtectionEnabled && stats.maxLuma > 200f) {
+                            val safeRatio = (226f / stats.maxLuma).coerceAtMost(1.0f)
+                            if (stats.highlightRatio > 0.03f || stats.maxLuma > 228f) {
+                                neededRatio = minOf(neededRatio, safeRatio)
+                            } else if (neededRatio > 1.0f) {
+                                neededRatio = minOf(neededRatio, 235f / stats.maxLuma)
+                            }
+                        }
+
+                        val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
+                        val hasAeRange = aeRange.upper > aeRange.lower
+                        val step = aeStep.coerceAtLeast(0.1f)
+                        val newEv = if (hasAeRange) {
+                            val deltaSteps = (deltaStops / step).roundToInt()
+                            (exposureEvIndex + deltaSteps).coerceIn(aeRange.lower, aeRange.upper)
+                        } else {
+                            exposureEvIndex
+                        }
+                        exposureEvIndex = newEv
+                        updatePreviewSettings()
                     }
                 }
-
-                val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
-                val hasAeRange = aeRange.upper > aeRange.lower
-                val step = aeStep.coerceAtLeast(0.1f)
-                val newEv = if (hasAeRange) {
-                    val deltaSteps = (deltaStops / step).roundToInt()
-                    (exposureEvIndex + deltaSteps).coerceIn(aeRange.lower, aeRange.upper)
-                } else {
-                    exposureEvIndex
-                }
-                exposureEvIndex = newEv
-                updatePreviewSettings()
-
-                val pct = (stats.avgLuma * 100f / 255f).roundToInt()
-                val evDisplay = exposureEvIndex * step
-                val modeLabel = if (meteringMode == ExposureMeteringMode.BOX_SPOT) "Kutu" else "Tam Ekran"
-                val protBadge = if (highlightProtectionEnabled && stats.maxLuma > 220f) " 🛡 Beyaz Korundu" else ""
-                showStatus("$modeLabel Pozlama: $pct% · ${if (evDisplay > 0.01f) "+" else ""}${"%.1f".format(evDisplay)} EV$protBadge")
+            } finally {
+                bmp.recycle()
             }
-        } finally {
-            bmp.recycle()
         }
     }
 
@@ -1487,20 +1503,23 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
         val bmp = try { view.getBitmap(240, 240) } catch (_: Exception) { null } ?: return
-        try {
-            val cal = autoCalibrateSceneFromPreview(bmp, holder.lastHardwareGains)
-            isPickerActive = false
-            isExposureBoxPicking = false
-            isAutoMode = false
-            kelvinValue = cal.kelvin
-            tintValue = cal.tint
-            contrastValue = DEFAULT_CONTRAST
-            saturationValue = DEFAULT_SATURATION
-            measureAndApplyExposureMetering(applyEvAdjust = true)
-            updatePreviewSettings()
-            showStatus("Oto-Kalibre: ${cal.kelvin.toInt()}K · ${formatSigned(cal.tint)} (${cal.foundNeutralCount} referans)")
-        } finally {
-            bmp.recycle()
+        coroutineScope.launch(Dispatchers.Default) {
+            try {
+                val cal = autoCalibrateSceneFromPreview(bmp, holder.lastHardwareGains)
+                withContext(Dispatchers.Main) {
+                    isPickerActive = false
+                    isExposureBoxPicking = false
+                    isAutoMode = false
+                    kelvinValue = cal.kelvin
+                    tintValue = cal.tint
+                    contrastValue = DEFAULT_CONTRAST
+                    saturationValue = DEFAULT_SATURATION
+                    measureAndApplyExposureMetering(applyEvAdjust = true)
+                    updatePreviewSettings()
+                }
+            } finally {
+                bmp.recycle()
+            }
         }
     }
 
@@ -1508,16 +1527,19 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
         val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
-        try {
-            val res = calculateAutoContrastFromPreview(bmp, aeStep, exposureEvIndex, aeRange)
-            contrastValue = res.recommendedContrast
-            if (res.recommendedEvIndexDelta != 0 && aeRange.upper > aeRange.lower) {
-                exposureEvIndex = (exposureEvIndex + res.recommendedEvIndexDelta).coerceIn(aeRange.lower, aeRange.upper)
+        coroutineScope.launch(Dispatchers.Default) {
+            try {
+                val res = calculateAutoContrastFromPreview(bmp, aeStep, exposureEvIndex, aeRange)
+                withContext(Dispatchers.Main) {
+                    contrastValue = res.recommendedContrast
+                    if (res.recommendedEvIndexDelta != 0 && aeRange.upper > aeRange.lower) {
+                        exposureEvIndex = (exposureEvIndex + res.recommendedEvIndexDelta).coerceIn(aeRange.lower, aeRange.upper)
+                    }
+                    updatePreviewSettings()
+                }
+            } finally {
+                bmp.recycle()
             }
-            updatePreviewSettings()
-            showStatus("Oto-Kontrast: C${"%.2f".format(res.recommendedContrast)} (Dinamik Aralık: ${res.blackPointPercentile.toInt()}..${res.whitePointPercentile.toInt()})")
-        } finally {
-            bmp.recycle()
         }
     }
 
@@ -1821,6 +1843,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             shutterFlashAlpha.snapTo(0.45f)
             shutterFlashAlpha.animateTo(0f, animationSpec = tween(220))
             isShutterPressed = false
+            delay(5000)
+            if (holder.isTakingPhoto) {
+                holder.isTakingPhoto = false
+            }
         }
 
         reader.setOnImageAvailableListener({ imageReader ->
@@ -1841,37 +1867,37 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 val hasSelectiveHsl = snapTargetedColor.isActive &&
                     (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)
 
-                val ok = if (hasSelectiveHsl) {
-                    var decoded: Bitmap? = null
-                    var graded: Bitmap? = null
-                    try {
-                        val orientation = readExifOrientation(bytes, context.cacheDir)
-                        val opts = BitmapFactory.Options().apply {
-                            inMutable = true
-                            inPreferredConfig = Bitmap.Config.ARGB_8888
-                        }
-                        decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
-                        if (decoded != null) {
-                            graded = applyTargetedHslToBitmap(decoded, snapTargetedColor)
-                            saveOutputToGallery(context, null, graded, orientation)
-                        } else {
+                val ok = withContext(Dispatchers.IO) {
+                    if (hasSelectiveHsl) {
+                        var decoded: Bitmap? = null
+                        var graded: Bitmap? = null
+                        try {
+                            val orientation = readExifOrientation(bytes, context.cacheDir)
+                            val opts = BitmapFactory.Options().apply {
+                                inMutable = true
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                            }
+                            decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+                            if (decoded != null) {
+                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor)
+                                saveOutputToGallery(context, null, graded, orientation)
+                            } else {
+                                saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
                             saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                        } finally {
+                            if (graded != null && graded !== decoded) graded.recycle()
+                            decoded?.recycle()
                         }
-                    } catch (e: Exception) {
-                        Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
+                    } else {
                         saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
-                    } finally {
-                        if (graded != null && graded !== decoded) graded.recycle()
-                        decoded?.recycle()
                     }
-                } else {
-                    saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
                 }
 
                 holder.isTakingPhoto = false
-                mainHandler.post {
-                    showStatus(if (ok) "Fotoğraf galeriye kaydedildi" else "Fotoğraf kaydedilemedi")
-                }
+                Log.d("CameraScreen", if (ok) "Photo saved to gallery" else "Failed to save photo")
             }
         }, cameraHandler)
 
@@ -2007,7 +2033,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             isAutoMode = false
                                             isPickerActive = false
                                             updatePreviewSettings()
-                                            showStatus("WB: ${newK.toInt()}K · ${formatSigned(newT)}")
                                         } finally {
                                             bitmap.recycle()
                                         }
@@ -2039,7 +2064,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             pickedMarkerPos = offset
                                             syncHolderSettings()
                                             updateTextureViewShader(view, targetedColorConfig)
-                                            showStatus("Renk Seçildi: ${getHueName(hsv[0])} (${hsv[0].toInt()}°)")
                                         } finally {
                                             bitmap.recycle()
                                         }
@@ -2204,38 +2228,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 }
             }
 
-            // Live brightness badge anchored near the Exposure Box
-            if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
-                val boxSidePx = minOf(vfWidthPx, vfHeightPx) * exposureBoxSizeNorm
-                val badgeOffsetX = ((exposureBoxNorm.x - 0.5f) * vfWidthPx)
-                    .roundToInt()
-                    .coerceIn(-(vfWidthPx * 0.40f).roundToInt(), (vfWidthPx * 0.40f).roundToInt())
-                val rawBadgeY = if (exposureBoxNorm.y < 0.22f) {
-                    (exposureBoxNorm.y - 0.5f) * vfHeightPx + boxSidePx * 0.5f + 26f
-                } else {
-                    (exposureBoxNorm.y - 0.5f) * vfHeightPx - boxSidePx * 0.5f - 26f
-                }
-                val badgeOffsetY = rawBadgeY
-                    .roundToInt()
-                    .coerceIn(-(vfHeightPx * 0.45f).roundToInt(), (vfHeightPx * 0.45f).roundToInt())
-                Box(
-                    modifier = Modifier
-                        .offset { androidx.compose.ui.unit.IntOffset(badgeOffsetX, badgeOffsetY) }
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.Black.copy(alpha = 0.72f))
-                        .border(1.dp, IrPalette.IrAmber.copy(alpha = 0.75f), RoundedCornerShape(50))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "☀ $measuredBrightnessPct%",
-                        color = IrPalette.IrAmber,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
             // Shutter Capture Flash Overlay
             if (shutterFlashAlpha.value > 0.01f) {
                 Box(
@@ -2280,46 +2272,65 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val (otoFlash, triggerOto) = rememberGreenFade()
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(if (isAutoMode) IrPalette.IrEmerald else Color.Transparent)
+                                .background(
+                                    lerp(
+                                        if (isAutoMode) IrPalette.IrEmerald else Color.Transparent,
+                                        Color(0xFF00E676).copy(alpha = 0.85f),
+                                        otoFlash
+                                    )
+                                )
                                 .clickable(enabled = cameraReady) {
-                                    isPickerActive = false
-                                    isColorPipetteActive = false
-                                    isExposureBoxPicking = false
-                                    isAutoMode = true
-                                    updatePreviewSettings()
+                                    triggerOto {
+                                        isPickerActive = false
+                                        isColorPipetteActive = false
+                                        isExposureBoxPicking = false
+                                        isAutoMode = true
+                                        updatePreviewSettings()
+                                    }
                                 }
                                 .padding(horizontal = 9.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "OTO",
-                                color = if (isAutoMode) Color.Black else IrPalette.TextSecondary,
+                                color = lerp(if (isAutoMode) Color.Black else IrPalette.TextSecondary, Color.Black, otoFlash),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
+
+                        val (proFlash, triggerPro) = rememberGreenFade()
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(if (!isAutoMode) IrPalette.IrAmber else Color.Transparent)
+                                .background(
+                                    lerp(
+                                        if (!isAutoMode) IrPalette.IrAmber else Color.Transparent,
+                                        Color(0xFF00E676).copy(alpha = 0.85f),
+                                        proFlash
+                                    )
+                                )
                                 .clickable(enabled = cameraReady) {
-                                    isPickerActive = false
-                                    isColorPipetteActive = false
-                                    isExposureBoxPicking = false
-                                    if (isAutoMode) {
-                                        kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                        tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                        isAutoMode = false
+                                    triggerPro {
+                                        isPickerActive = false
+                                        isColorPipetteActive = false
+                                        isExposureBoxPicking = false
+                                        if (isAutoMode) {
+                                            kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                            tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                                            isAutoMode = false
+                                        }
+                                        updatePreviewSettings()
                                     }
-                                    updatePreviewSettings()
                                 }
                                 .padding(horizontal = 9.dp, vertical = 4.dp)
                         ) {
                             Text(
                                 text = "PRO",
-                                color = if (!isAutoMode) Color.Black else IrPalette.TextSecondary,
+                                color = lerp(if (!isAutoMode) Color.Black else IrPalette.TextSecondary, Color.Black, proFlash),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold
                             )
@@ -2354,13 +2365,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Resolution pill
+                        val (resFlash, triggerRes) = rememberGreenFade()
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(IrPalette.HudCard)
-                                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
+                                .background(lerp(IrPalette.HudCard, Color(0xFF00E676).copy(alpha = 0.85f), resFlash))
+                                .border(1.dp, lerp(IrPalette.BorderSubtle, Color(0xFF00E676), resFlash), RoundedCornerShape(50))
                                 .clickable(enabled = availableResolutions.isNotEmpty()) {
-                                    showResolutionDialog = true
+                                    triggerRes { showResolutionDialog = true }
                                 }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
@@ -2368,7 +2380,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             val resLabel = if (activeRes != null) "${formatMegapixels(activeRes)}" else "RES"
                             Text(
                                 text = resLabel,
-                                color = IrPalette.IrCyan,
+                                color = lerp(IrPalette.IrCyan, Color.Black, resFlash),
                                 fontSize = 10.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold
@@ -2376,78 +2388,59 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         }
 
                         // Grid toggle
+                        val (gridFlash, triggerGrid) = rememberGreenFade()
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
                                 .clip(CircleShape)
-                                .background(if (showGrid) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard)
-                                .border(1.dp, if (showGrid) IrPalette.IrAmber else IrPalette.BorderSubtle, CircleShape)
-                                .clickable { showGrid = !showGrid },
+                                .background(
+                                    lerp(
+                                        if (showGrid) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard,
+                                        Color(0xFF00E676).copy(alpha = 0.85f),
+                                        gridFlash
+                                    )
+                                )
+                                .border(
+                                    1.dp,
+                                    lerp(if (showGrid) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), gridFlash),
+                                    CircleShape
+                                )
+                                .clickable { triggerGrid { showGrid = !showGrid } },
                             contentAlignment = Alignment.Center
                         ) {
                             GridIcon(
-                                tint = if (showGrid) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                tint = lerp(if (showGrid) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, gridFlash),
                                 modifier = Modifier.size(14.dp)
                             )
                         }
 
                         // Clean View toggle
+                        val (cleanFlash, triggerClean) = rememberGreenFade()
                         Box(
                             modifier = Modifier
                                 .size(28.dp)
                                 .clip(CircleShape)
-                                .background(if (isCleanView) IrPalette.IrCyan.copy(alpha = 0.28f) else IrPalette.HudCard)
-                                .border(1.dp, if (isCleanView) IrPalette.IrCyan else IrPalette.BorderSubtle, CircleShape)
+                                .background(
+                                    lerp(
+                                        if (isCleanView) IrPalette.IrCyan.copy(alpha = 0.28f) else IrPalette.HudCard,
+                                        Color(0xFF00E676).copy(alpha = 0.85f),
+                                        cleanFlash
+                                    )
+                                )
+                                .border(
+                                    1.dp,
+                                    lerp(if (isCleanView) IrPalette.IrCyan else IrPalette.BorderSubtle, Color(0xFF00E676), cleanFlash),
+                                    CircleShape
+                                )
                                 .clickable {
-                                    isCleanView = !isCleanView
-                                    showStatus(if (isCleanView) "Tam Vizör" else "Menüler Açık")
+                                    triggerClean { isCleanView = !isCleanView }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = if (isCleanView) "👁" else "⛶",
                                 fontSize = 12.sp,
-                                color = if (isCleanView) IrPalette.IrCyan else IrPalette.TextSecondary
-                            )
-                        }
-                    }
-                }
-
-                // Animated Status / Picker Instruction Pill
-                AnimatedVisibility(
-                    visible = statusBanner != null || isPickerActive || isExposureBoxPicking || isColorPipetteActive,
-                    enter = fadeIn() + slideInVertically { -it / 2 },
-                    exit = fadeOut() + slideOutVertically { -it / 2 }
-                ) {
-                    val bannerText = when {
-                        isColorPipetteActive -> "🎨 Renk Pipeti Aktif — Ayarlamak istediğiniz renge dokunun"
-                        isPickerActive -> "WB Seçici Aktif — Nötr bir noktaya dokunun"
-                        isExposureBoxPicking -> "Pozlama Kutusu — Hedef bölgeye dokunun veya sürükleyin"
-                        else -> statusBanner ?: ""
-                    }
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    when {
-                                        isColorPipetteActive -> IrPalette.IrTeal.copy(alpha = 0.92f)
-                                        isPickerActive -> IrPalette.IrCoral.copy(alpha = 0.9f)
-                                        isExposureBoxPicking -> IrPalette.IrAmber.copy(alpha = 0.9f)
-                                        else -> Color(0xE61E293B)
-                                    }
-                                )
-                                .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
-                                .padding(horizontal = 14.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = bannerText,
-                                color = if (isExposureBoxPicking) Color.Black else Color.White,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
+                                color = lerp(if (isCleanView) IrPalette.IrCyan else IrPalette.TextSecondary, Color.Black, cleanFlash)
                             )
                         }
                     }
@@ -2534,25 +2527,29 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
 
                             // Collapse / Expand Pill Button
+                            val (collapseFlash, triggerCollapse) = rememberGreenFade()
+                            val collapseBg = lerp(
+                                if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f),
+                                Color(0xFF00E676).copy(alpha = 0.85f),
+                                collapseFlash
+                            )
+                            val collapseBorder = lerp(
+                                if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
+                                Color(0xFF00E676),
+                                collapseFlash
+                            )
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(
-                                        if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.22f)
-                                        else Color.White.copy(alpha = 0.08f)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { isDeckCollapsed = !isDeckCollapsed }
+                                    .background(collapseBg)
+                                    .border(1.dp, collapseBorder, RoundedCornerShape(10.dp))
+                                    .clickable { triggerCollapse { isDeckCollapsed = !isDeckCollapsed } }
                                     .padding(horizontal = 9.dp, vertical = 7.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = if (isDeckCollapsed) "▲ Aç" else "▼ Küçült",
-                                    color = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                    color = lerp(if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, collapseFlash),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
                                 )
@@ -2742,37 +2739,48 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 ) {
                                                     listOf("Dar" to 14f, "Dengeli" to 22f, "Geniş" to 36f).forEach { (lbl, w) ->
                                                         val isSel = targetedColorConfig.hueWidth == w
+                                                        val (wFlash, triggerW) = rememberGreenFade(decayDurationMs = 500)
+                                                        val wBg = lerp(
+                                                            if (isSel) IrPalette.IrTeal else Color.White.copy(alpha = 0.08f),
+                                                            Color(0xFF00E676).copy(alpha = 0.85f),
+                                                            wFlash
+                                                        )
                                                         Box(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(6.dp))
-                                                                .background(if (isSel) IrPalette.IrTeal else Color.White.copy(alpha = 0.08f))
+                                                                .background(wBg)
                                                                 .clickable {
-                                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                                        hueWidth = w,
-                                                                        hueFeather = if (w == 14f) 12f else if (w == 22f) 18f else 26f
-                                                                    )
+                                                                    triggerW {
+                                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                                            hueWidth = w,
+                                                                            hueFeather = if (w == 14f) 12f else if (w == 22f) 18f else 26f
+                                                                        )
+                                                                    }
                                                                 }
                                                                 .padding(horizontal = 6.dp, vertical = 3.dp)
                                                         ) {
                                                             Text(
                                                                 text = lbl,
-                                                                color = if (isSel) Color.Black else IrPalette.TextSecondary,
+                                                                color = lerp(if (isSel) Color.Black else IrPalette.TextSecondary, Color.Black, wFlash),
                                                                 fontSize = 10.sp,
                                                                 fontWeight = FontWeight.Bold
                                                             )
                                                         }
                                                     }
 
+                                                    val (delFlash, triggerDel) = rememberGreenFade(decayDurationMs = 500)
                                                     Text(
                                                         text = "✕ Kaldır",
-                                                        color = IrPalette.IrCoral,
+                                                        color = lerp(IrPalette.IrCoral, Color(0xFF00E676), delFlash),
                                                         fontSize = 10.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(6.dp))
+                                                            .background(lerp(Color.Transparent, Color(0xFF00E676).copy(alpha = 0.2f), delFlash))
                                                             .clickable {
-                                                                targetedColorConfig = targetedColorConfig.copy(isActive = false)
-                                                                showStatus("Noktasal renk kaldırıldı")
+                                                                triggerDel {
+                                                                    targetedColorConfig = targetedColorConfig.copy(isActive = false)
+                                                                }
                                                             }
                                                             .padding(horizontal = 6.dp, vertical = 3.dp)
                                                     )
@@ -3076,36 +3084,38 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
 
                     // Concentric Pro Shutter Button
+                    val (shutterFlash, triggerShutter) = rememberGreenFade(decayDurationMs = 750)
                     val innerSize by animateDpAsState(
                         targetValue = if (isShutterPressed) 50.dp else 58.dp,
                         animationSpec = tween(100),
                         label = "shutterSize"
                     )
+                    val baseShutterColor = if (!cameraReady) Color.Gray else if (isAutoMode) Color.White else IrPalette.IrCoral
+                    val shutterInnerColor = lerp(baseShutterColor, Color(0xFF00E676), shutterFlash)
+                    val shutterBorderColor = lerp(Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f), Color(0xFF00E676), shutterFlash)
                     Box(
                         modifier = Modifier
                             .size(74.dp)
                             .clip(CircleShape)
                             .border(
                                 3.dp,
-                                Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f),
+                                shutterBorderColor,
                                 CircleShape
                             )
                             .clickable(
                                 enabled = cameraReady,
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
-                            ) { takePhoto() },
+                            ) {
+                                triggerShutter { takePhoto() }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
                                 .size(innerSize)
                                 .clip(CircleShape)
-                                .background(
-                                    if (!cameraReady) Color.Gray
-                                    else if (isAutoMode) Color.White
-                                    else IrPalette.IrCoral
-                                )
+                                .background(shutterInnerColor)
                         )
                     }
 
@@ -3470,22 +3480,27 @@ private fun ModePillButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val (greenPulse, triggerClick) = rememberGreenFade()
     val bgAlpha by animateFloatAsState(if (selected) 0.24f else 0f, label = "modeBg")
+    val baseBg = accentColor.copy(alpha = bgAlpha)
+    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
+    val baseBorder = if (selected) accentColor.copy(alpha = 0.7f) else Color.Transparent
+    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(50))
-            .background(accentColor.copy(alpha = bgAlpha))
-            .then(
-                if (selected) Modifier.border(1.dp, accentColor.copy(alpha = 0.7f), RoundedCornerShape(50))
-                else Modifier
-            )
-            .clickable(enabled = enabled, onClick = onClick)
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(50))
+            .clickable(enabled = enabled) { triggerClick(onClick) }
             .padding(vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
+        val baseText = if (selected) accentColor else IrPalette.TextSecondary
+        val textColor = lerp(baseText, Color.Black, greenPulse)
         Text(
             text = label,
-            color = if (selected) accentColor else IrPalette.TextSecondary,
+            color = textColor,
             fontSize = 12.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1,
@@ -3502,17 +3517,21 @@ private fun PresetChip(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
+    val (greenPulse, triggerClick) = rememberGreenFade()
     val indicatorColor = if (preset.kelvin < 4500f) IrPalette.IrCoral else IrPalette.IrCyan
+    val baseBg = if (isActive) IrPalette.IrAmber.copy(alpha = 0.22f) else IrPalette.HudChip
+    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
+    val baseBorder = if (isActive) IrPalette.IrAmber else IrPalette.BorderSubtle
+    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(14.dp))
-            .background(if (isActive) IrPalette.IrAmber.copy(alpha = 0.22f) else IrPalette.HudChip)
-            .border(
-                1.dp,
-                if (isActive) IrPalette.IrAmber else IrPalette.BorderSubtle,
-                RoundedCornerShape(14.dp)
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = { triggerClick(onClick) },
+                onLongClick = onLongClick
             )
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 11.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp)
@@ -3526,14 +3545,14 @@ private fun PresetChip(
         Column {
             Text(
                 text = preset.name,
-                color = IrPalette.TextPrimary,
+                color = lerp(IrPalette.TextPrimary, Color.Black, greenPulse),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
             )
             Text(
                 text = "${preset.kelvin.toInt()}K · T${formatSigned(preset.tint)}",
-                color = IrPalette.TextSecondary,
+                color = lerp(IrPalette.TextSecondary, Color.Black, greenPulse),
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
@@ -3548,17 +3567,23 @@ private fun TabChip(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val (greenPulse, triggerClick) = rememberGreenFade()
+    val baseBg = if (selected) Color.White.copy(alpha = 0.14f) else Color.Transparent
+    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
+    val baseText = if (selected) IrPalette.TextPrimary else IrPalette.TextSecondary
+    val textColor = lerp(baseText, Color.Black, greenPulse)
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(9.dp))
-            .background(if (selected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
-            .clickable(onClick = onClick)
+            .background(bg)
+            .border(1.dp, lerp(Color.Transparent, Color(0xFF00E676), greenPulse), RoundedCornerShape(9.dp))
+            .clickable { triggerClick(onClick) }
             .padding(vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = title,
-            color = if (selected) IrPalette.TextPrimary else IrPalette.TextSecondary,
+            color = textColor,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.7.sp
@@ -3596,20 +3621,39 @@ private fun ProGradientSliderRow(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 0.9.sp
                 )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .then(if (onBadgeClick != null) Modifier.clickable(onClick = onBadgeClick) else Modifier)
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = valueBadge,
-                        color = IrPalette.TextPrimary,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                if (onBadgeClick != null) {
+                    val (badgeFlash, triggerBadge) = rememberGreenFade(decayDurationMs = 500)
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(lerp(Color.White.copy(alpha = 0.08f), Color(0xFF00E676).copy(alpha = 0.85f), badgeFlash))
+                            .border(1.dp, lerp(Color.Transparent, Color(0xFF00E676), badgeFlash), RoundedCornerShape(6.dp))
+                            .clickable { triggerBadge(onBadgeClick) }
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = valueBadge,
+                            color = lerp(IrPalette.TextPrimary, Color.Black, badgeFlash),
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = valueBadge,
+                            color = IrPalette.TextPrimary,
+                            fontSize = 11.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -3653,17 +3697,21 @@ private fun ProGradientSliderRow(
 
 @Composable
 private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    val (greenPulse, triggerClick) = rememberGreenFade(decayDurationMs = 450)
+    val bg = lerp(Color.White.copy(alpha = 0.1f), Color(0xFF00E676).copy(alpha = 0.9f), greenPulse)
+    val textColor = lerp(IrPalette.TextPrimary, Color.Black, greenPulse)
     Box(
         modifier = Modifier
             .size(width = 28.dp, height = 22.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(Color.White.copy(alpha = 0.1f))
-            .clickable(enabled = enabled, onClick = onClick),
+            .background(bg)
+            .border(1.dp, lerp(Color.Transparent, Color(0xFF00E676), greenPulse), RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled) { triggerClick(onClick) },
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = symbol,
-            color = IrPalette.TextPrimary,
+            color = textColor,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
         )
@@ -3678,21 +3726,25 @@ private fun QuickPillAction(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
+    val (greenPulse, triggerClick) = rememberGreenFade()
+    val baseBg = if (highlighted) IrPalette.IrCoral.copy(alpha = 0.28f) else IrPalette.HudCard
+    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
+    val baseBorder = if (highlighted) IrPalette.IrCoral else IrPalette.BorderSubtle
+    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
+    val baseText = if (highlighted) IrPalette.IrCoral else IrPalette.TextPrimary
+    val textColor = lerp(baseText, Color.Black, greenPulse)
+
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (highlighted) IrPalette.IrCoral.copy(alpha = 0.28f) else IrPalette.HudCard)
-            .border(
-                1.dp,
-                if (highlighted) IrPalette.IrCoral else IrPalette.BorderSubtle,
-                RoundedCornerShape(50)
-            )
-            .clickable(enabled = enabled, onClick = onClick)
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(50))
+            .clickable(enabled = enabled) { triggerClick(onClick) }
             .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = 9.dp)
     ) {
         Text(
             text = text,
-            color = if (highlighted) IrPalette.IrCoral else IrPalette.TextPrimary,
+            color = textColor,
             fontSize = if (compact) 11.sp else 12.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,

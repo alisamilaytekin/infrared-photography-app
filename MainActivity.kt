@@ -1223,11 +1223,14 @@ private fun saveRawDngToGallery(
         }
         val resolver = context.contentResolver
         uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-        DngCreator(characteristics, result).use { dngCreator ->
+        val dngCreator = DngCreator(characteristics, result)
+        try {
             resolver.openOutputStream(uri)?.use { out ->
                 dngCreator.writeImage(out, rawImage)
                 out.flush()
             }
+        } finally {
+            dngCreator.close()
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
@@ -2979,31 +2982,34 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                 // Geçici bildirim veya OTO karşılaştırma rozeti
                 val topBannerMsg = if (isComparingAuto) strCompareBanner else statusBannerText
-                AnimatedVisibility(
-                    visible = topBannerMsg != null,
-                    enter = fadeIn(tween(150)),
-                    exit = fadeOut(tween(250)),
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 10.dp)
                 ) {
-                    topBannerMsg?.let { msg ->
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
-                                    else Color.Black.copy(alpha = 0.72f)
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = topBannerMsg != null,
+                        enter = fadeIn(tween(150)),
+                        exit = fadeOut(tween(250))
+                    ) {
+                        topBannerMsg?.let { msg ->
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
+                                        else Color.Black.copy(alpha = 0.72f)
+                                    )
+                                    .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = msg,
+                                    color = if (isComparingAuto) Color.Black else IrPalette.TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
-                                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                                .padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Text(
-                                text = msg,
-                                color = if (isComparingAuto) Color.Black else IrPalette.TextPrimary,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            }
                         }
                     }
                 }

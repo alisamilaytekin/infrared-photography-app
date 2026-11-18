@@ -742,23 +742,18 @@ private fun calculateAutoContrastFromPreview(
     }
 
     val dynamicRange = (pHigh - pLow).coerceAtLeast(20)
+    // Yumuşak ve doğal kontrast önerisi; agresif bozulmayı ve pozlama patlamasını önler
     val idealContrast = when {
-        dynamicRange < 110 -> 1.32f
-        dynamicRange < 150 -> 1.20f
-        dynamicRange < 190 -> 1.10f
-        dynamicRange > 232 -> 0.94f
-        else -> 1.05f
+        dynamicRange < 115 -> 1.16f
+        dynamicRange < 155 -> 1.10f
+        dynamicRange < 195 -> 1.04f
+        dynamicRange > 225 -> 0.96f
+        else -> 1.00f
     }
-
-    val midLuma = (pLow + pHigh) * 0.5f
-    val targetMid = 128f
-    val neededRatio = targetMid / midLuma.coerceAtLeast(15f)
-    val deltaStops = (ln(neededRatio.toDouble()) / ln(2.0)).toFloat()
-    val deltaSteps = if (aeStep > 0.05f) (deltaStops / aeStep).roundToInt() else 0
 
     return AutoContrastResult(
         recommendedContrast = idealContrast,
-        recommendedEvIndexDelta = deltaSteps,
+        recommendedEvIndexDelta = 0,
         blackPointPercentile = pLow.toFloat(),
         whitePointPercentile = pHigh.toFloat()
     )
@@ -2891,7 +2886,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         val cx = size.width * 0.5f
                         val cy = size.height * 0.5f
                         val halfLen = minOf(size.width, size.height) * 0.22f
-                        val rad = Math.toRadians((-levelAngleDeg).toDouble())
+                        val rad = Math.toRadians(levelAngleDeg.toDouble())
                         val dx = (cos(rad) * halfLen).toFloat()
                         val dy = (sin(rad) * halfLen).toFloat()
                         val strokeW = if (isFlat) 2.2.dp.toPx() else 1.5.dp.toPx()
@@ -4016,7 +4011,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 Button(
                     onClick = {
                         kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                        tintValue = 0f
+                        tintValue = liveAutoTint.coerceIn(-100f, 100f)
                         exposureEvIndex = 0
                         saturationValue = DEFAULT_SATURATION
                         contrastValue = DEFAULT_CONTRAST

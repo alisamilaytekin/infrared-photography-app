@@ -7,6 +7,7 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -62,6 +63,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -85,12 +87,15 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
@@ -244,8 +249,17 @@ private class CameraHolder {
     @Volatile var currentExposureEv: Int = 0
     @Volatile var currentMeteringMode: ExposureMeteringMode = ExposureMeteringMode.FULL_SCREEN
     @Volatile var currentExposureBoxNorm: Offset = Offset(0.5f, 0.5f)
-    @Volatile var currentExposureBoxSizeNorm: Float = 0.28f
+    @Volatile var currentExposureBoxSizeNorm: Float = 0.32f
     @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
+
+    // Mercek / yakınlaştırma ve RAW/DNG durumu
+    @Volatile var zoomRange: Range<Float> = Range(1f, 1f)
+    @Volatile var currentZoomRatio: Float = 1f
+    @Volatile var supportsRaw: Boolean = false
+    @Volatile var rawSize: Size? = null
+    @Volatile var rawCaptureEnabled: Boolean = false
+    var rawImageReader: ImageReader? = null
+    @Volatile var lastStillCaptureResult: TotalCaptureResult? = null
 }
 
 private fun formatMegapixels(size: Size): String {
@@ -1122,7 +1136,8 @@ private fun saveOutputToGallery(
     context: Context,
     rawBytes: ByteArray?,
     processedBitmap: Bitmap?,
-    exifOrientation: Int
+    exifOrientation: Int,
+    onSavedUri: ((Uri) -> Unit)? = null
 ): Boolean {
     var tempOut: File? = null
     var uri: Uri? = null
@@ -1174,6 +1189,7 @@ private fun saveOutputToGallery(
             val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
             resolver.update(uri, done, null, null)
         }
+        onSavedUri?.invoke(uri)
         true
     } catch (e: Exception) {
         Log.e("CameraScreen", "Failed to save image", e)
@@ -1183,6 +1199,57 @@ private fun saveOutputToGallery(
         false
     } finally {
         try { tempOut?.delete() } catch (_: Exception) {}
+    }
+}
+
+// RAW sensör görüntüsünü DngCreator ile galeriye (.dng) kaydeder
+private fun saveRawDngToGallery(
+    context: Context,
+    characteristics: CameraCharacteristics,
+    result: TotalCaptureResult,
+    rawImage: android.media.Image
+): Boolean {
+    var uri: Uri? = null
+    return try {
+        val timestamp = System.currentTimeMillis()
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "RAW_$timestamp.dng")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+        }
+        val resolver = context.contentResolver
+        uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        DngCreator(characteristics, result).use { dngCreator ->
+            resolver.openOutputStream(uri)?.use { out ->
+                dngCreator.writeImage(out, rawImage)
+                out.flush()
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+        }
+        true
+    } catch (e: Exception) {
+        Log.e("CameraScreen", "RAW/DNG kaydedilemedi", e)
+        if (uri != null) {
+            try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+        }
+        false
+    }
+}
+
+// JPEG baytlarından düşük bellekli küçük önizleme resmi üretir
+private fun decodeThumbnailFromBytes(bytes: ByteArray): Bitmap? {
+    return try {
+        val opts = BitmapFactory.Options().apply { inSampleSize = 8 }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+    } catch (_: Exception) {
+        null
     }
 }
 
@@ -1260,6 +1327,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var timerSeconds by remember { mutableIntStateOf(0) }
     var timerCountdown by remember { mutableIntStateOf(0) }
     var timerJob by remember { mutableStateOf<Job?>(null) }
+    var zoomRatio by remember { mutableFloatStateOf(1f) }
+    var availableZoomOptions by remember { mutableStateOf(listOf(1f)) }
+    var supportsRaw by remember { mutableStateOf(false) }
+    var rawEnabled by remember { mutableStateOf(false) }
+    var lastCapturedUri by remember { mutableStateOf<Uri?>(null) }
+    var lastCapturedThumb by remember { mutableStateOf<ImageBitmap?>(null) }
 
     // Yalnızca kullanıcı bir ayarı değiştirdiğinde kısa süre gösterilen bildirim metni
     var statusBannerText by remember { mutableStateOf<String?>(null) }
@@ -1409,6 +1482,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         holder.currentExposureBoxNorm = exposureBoxNorm
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
         holder.currentTargetedColor = targetedColorConfig
+        holder.currentZoomRatio = zoomRatio
+        holder.rawCaptureEnabled = rawEnabled
     }
 
     fun applyCamera2Settings(
@@ -1443,6 +1518,19 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 boxSizeNorm = boxSizeNorm
             )?.let { rects ->
                 builder.set(CaptureRequest.CONTROL_AE_REGIONS, rects)
+            }
+        }
+        // Mercek / yakınlaştırma oranı (Android 11+ CONTROL_ZOOM_RATIO, altı SCALER_CROP_REGION)
+        val clampedZoom = holder.currentZoomRatio.coerceIn(holder.zoomRange.lower, holder.zoomRange.upper)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedZoom)
+        } else if (clampedZoom > 1.01f) {
+            holder.activeSensorArray?.let { active ->
+                val cropW = (active.width() / clampedZoom).roundToInt().coerceAtLeast(1)
+                val cropH = (active.height() / clampedZoom).roundToInt().coerceAtLeast(1)
+                val dx = (active.width() - cropW) / 2
+                val dy = (active.height() - cropH) / 2
+                builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(dx, dy, dx + cropW, dy + cropH))
             }
         }
 
@@ -1691,6 +1779,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             if (releaseReader) {
                 try { holder.imageReader?.close() } catch (_: Exception) {}
                 holder.imageReader = null
+                try { holder.rawImageReader?.close() } catch (_: Exception) {}
+                holder.rawImageReader = null
             }
             if (!hadDevice && pendingReopen != null && !holder.isDisposed) {
                 holder.pendingReopenSurfaceTexture = null
@@ -1798,14 +1888,50 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             val step = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toFloat() ?: 0.5f
             holder.aeCompensationRange = range
             holder.aeCompensationStep = step
+
+            // Desteklenen yakınlaştırma / mercek aralığı (0.5x / 1x / 2x)
+            val zRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) ?: Range(1f, 1f)
+            } else {
+                val maxDigital = (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).coerceAtLeast(1f)
+                Range(1f, maxDigital)
+            }
+            holder.zoomRange = zRange
+            val zoomOpts = buildList {
+                if (zRange.lower <= 0.65f) add(0.5f)
+                add(1f)
+                if (zRange.upper >= 2.0f) add(2f)
+            }
+
+            // RAW/DNG sensör desteği kontrolü
+            val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+            val rawSizes = if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
+                map.getOutputSizes(ImageFormat.RAW_SENSOR)
+            } else null
+            val chosenRaw = rawSizes?.maxByOrNull { it.width.toLong() * it.height.toLong() }
+            holder.supportsRaw = chosenRaw != null
+            holder.rawSize = chosenRaw
+
             mainHandler.post {
                 aeRange = range
                 aeStep = step
+                availableZoomOptions = zoomOpts
+                supportsRaw = chosenRaw != null
+                if (chosenRaw == null && rawEnabled) {
+                    rawEnabled = false
+                    holder.rawCaptureEnabled = false
+                }
             }
 
             synchronized(holder) {
                 holder.imageReader?.close()
                 holder.imageReader = ImageReader.newInstance(chosenJpeg.width, chosenJpeg.height, ImageFormat.JPEG, 4)
+                holder.rawImageReader?.close()
+                holder.rawImageReader = if (holder.rawCaptureEnabled && chosenRaw != null) {
+                    ImageReader.newInstance(chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 2)
+                } else {
+                    null
+                }
                 holder.activeSurface = surface
             }
 
@@ -1842,9 +1968,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             )
                         }
                         holder.previewBuilder = builder
+                        val sessionSurfaces = buildList {
+                            add(surface)
+                            add(readerSurface)
+                            holder.rawImageReader?.surface?.let { add(it) }
+                        }
                         @Suppress("DEPRECATION")
                         camera.createCaptureSession(
-                            listOf(surface, readerSurface),
+                            sessionSurfaces,
                             object : CameraCaptureSession.StateCallback() {
                                 override fun onConfigured(session: CameraCaptureSession) {
                                     if (holder.isDisposed || holder.device !== camera) {
@@ -1993,6 +2124,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 val hasSelectiveHsl = snapTargetedColor.isActive &&
                     (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)
 
+                val onSaved: (Uri) -> Unit = { savedUri ->
+                    mainHandler.post { lastCapturedUri = savedUri }
+                }
+                val thumbBmp = decodeThumbnailFromBytes(bytes)
+                if (thumbBmp != null) {
+                    val imgBmp = thumbBmp.asImageBitmap()
+                    withContext(Dispatchers.Main) { lastCapturedThumb = imgBmp }
+                }
+
                 val ok = withContext(Dispatchers.IO) {
                     if (hasSelectiveHsl) {
                         var decoded: Bitmap? = null
@@ -2006,19 +2146,19 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
                                 graded = applyTargetedHslToBitmap(decoded, snapTargetedColor)
-                                saveOutputToGallery(context, null, graded, orientation)
+                                saveOutputToGallery(context, null, graded, orientation, onSaved)
                             } else {
-                                saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                                saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                             }
                         } catch (e: Exception) {
                             Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
-                            saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                            saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                         } finally {
                             if (graded != null && graded !== decoded) graded.recycle()
                             decoded?.recycle()
                         }
                     } else {
-                        saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL)
+                        saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                     }
                 }
 
@@ -2027,8 +2167,34 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             }
         }, cameraHandler)
 
+        val activeRawReader = if (holder.rawCaptureEnabled) holder.rawImageReader else null
+        holder.lastStillCaptureResult = null
+        activeRawReader?.setOnImageAvailableListener({ rawImgReader ->
+            val rawImg = try { rawImgReader.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    // CaptureResult gelene kadar kısa süre bekle
+                    var waitMs = 0
+                    while (holder.lastStillCaptureResult == null && waitMs < 1500) {
+                        delay(50)
+                        waitMs += 50
+                    }
+                    val capRes = holder.lastStillCaptureResult
+                    if (capRes != null) {
+                        val savedRaw = saveRawDngToGallery(context, characteristics, capRes, rawImg)
+                        if (savedRaw) {
+                            withContext(Dispatchers.Main) { showStatus("RAW (DNG) kaydedildi") }
+                        }
+                    }
+                } finally {
+                    rawImg.close()
+                }
+            }
+        }, cameraHandler)
+
         val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
             addTarget(reader.surface)
+            activeRawReader?.surface?.let { addTarget(it) }
             applyCamera2Settings(
                 builder = this,
                 auto = snapAuto,
@@ -2048,6 +2214,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         try {
             shutterSound.play(MediaActionSound.SHUTTER_CLICK)
             session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureCompleted(
+                    s: CameraCaptureSession,
+                    r: CaptureRequest,
+                    result: TotalCaptureResult
+                ) {
+                    holder.lastStillCaptureResult = result
+                }
+
                 override fun onCaptureFailed(
                     s: CameraCaptureSession,
                     r: CaptureRequest,
@@ -2138,6 +2312,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val strTimer10s = stringResource(R.string.timer_10s)
     val strCompare = stringResource(R.string.action_compare)
     val strCompareBanner = stringResource(R.string.banner_compare_auto)
+    val strRaw = stringResource(R.string.action_raw)
+    val strRawOn = stringResource(R.string.status_raw_on)
+    val strRawOff = stringResource(R.string.status_raw_off)
+    val strGalleryCd = stringResource(R.string.cd_gallery)
 
     fun triggerCaptureWithTimer() {
         if (timerCountdown > 0) {
@@ -2356,6 +2534,52 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+
+                // RAW/DNG anahtarı (yalnızca RAW sensör destekleyen cihazlarda görünür)
+                if (supportsRaw) {
+                    val (rawFlash, triggerRaw) = rememberGreenFade()
+                    Box(
+                        modifier = Modifier
+                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                            .clip(RoundedCornerShape(50))
+                            .clickable(enabled = cameraReady) {
+                                triggerRaw {
+                                    rawEnabled = !rawEnabled
+                                    holder.rawCaptureEnabled = rawEnabled
+                                    showStatus(if (rawEnabled) strRawOn else strRawOff)
+                                    cameraHandler.post { closeCameraInternal(releaseReader = true) }
+                                    surfaceGeneration += 1
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    lerp(
+                                        if (rawEnabled) IrPalette.IrAmber.copy(alpha = 0.28f) else IrPalette.HudCard,
+                                        Color(0xFF00E676).copy(alpha = 0.85f),
+                                        rawFlash
+                                    )
+                                )
+                                .border(
+                                    1.dp,
+                                    lerp(if (rawEnabled) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), rawFlash),
+                                    RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 7.dp, vertical = 5.dp)
+                        ) {
+                            Text(
+                                text = strRaw,
+                                color = lerp(if (rawEnabled) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, rawFlash),
+                                fontSize = 11.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
@@ -2843,6 +3067,45 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
+                        }
+                    }
+                }
+
+                // Önizleme alt ortasında mercek / yakınlaştırma seçici (0.5x · 1x · 2x)
+                if (cameraReady && availableZoomOptions.size > 1) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.56f))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        availableZoomOptions.forEach { z ->
+                            val isSelected = abs(zoomRatio - z) < 0.08f
+                            val zLabel = if (z == 0.5f) "0,5x" else "${z.toInt()}x"
+                            Box(
+                                modifier = Modifier
+                                    .sizeIn(minWidth = 36.dp, minHeight = 36.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isSelected) IrPalette.IrAmber else Color.Transparent)
+                                    .clickable {
+                                        zoomRatio = z
+                                        updatePreviewSettings()
+                                    }
+                                    .padding(horizontal = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = zLabel,
+                                    color = if (isSelected) Color.Black else Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -3592,11 +3855,58 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Sol: Ön ayarlar düğmesi
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                // Sol: Galeri küçük resmi + Ön ayarlar düğmesi
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .semantics { contentDescription = strGalleryCd }
+                            .clip(CircleShape)
+                            .background(IrPalette.HudCard)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                            .clickable {
+                                val targetUri = lastCapturedUri
+                                val intent = if (targetUri != null) {
+                                    Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(targetUri, "image/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                } else {
+                                    Intent(Intent.ACTION_VIEW, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                                }
+                                try {
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {
+                                    showStatus("Galeri açılamadı")
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val thumb = lastCapturedThumb
+                        if (thumb != null) {
+                            Image(
+                                bitmap = thumb,
+                                contentDescription = strGalleryCd,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize().clip(CircleShape)
+                            )
+                        } else {
+                            Text(
+                                text = "▣",
+                                color = IrPalette.TextSecondary,
+                                fontSize = 18.sp
+                            )
+                        }
+                    }
+
                     QuickPillAction(
                         text = stringResource(R.string.action_presets),
                         highlighted = showPresetsListDialog,
+                        compact = true,
                         enabled = cameraReady,
                         onClick = { showPresetsListDialog = true }
                     )

@@ -112,4 +112,11 @@
     <string name="guide_next">İleri</string>
     <string name="guide_done">Başla</string>
     <string name="guide_skip">Atla</string>
+
+    <!-- Galeri, mercek ve RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">RAW + JPEG kayıt açıldı</string>
+    <string name="status_raw_off">Yalnızca JPEG kayıt</string>
+    <string name="status_raw_saved">RAW (DNG) kaydedildi</string>
+    <string name="cd_gallery">Son fotoğrafı galeride aç</string>
 </resources>

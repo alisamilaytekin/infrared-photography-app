@@ -1,3 +1,90 @@
 <resources>
     <string name="app_name">CameraS</string>
+
+    <!-- Modlar ve üst çubuk -->
+    <string name="mode_auto">Oto</string>
+    <string name="mode_pro">Pro</string>
+    <string name="label_wb_short">BD</string>
+    <string name="label_tint">Ton</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">Çözünürlük</string>
+    <string name="cd_grid_toggle">Izgarayı aç veya kapat</string>
+    <string name="cd_panel_toggle">Ayar panelini aç veya kapat</string>
+
+    <!-- Ana çipler -->
+    <string name="chip_wb">BD</string>
+    <string name="chip_exposure">Poz</string>
+    <string name="chip_color">Renk</string>
+    <string name="chip_metering">Ölçüm</string>
+
+    <!-- Kaydırıcı etiketleri -->
+    <string name="slider_kelvin">Kelvin</string>
+    <string name="slider_tint">Ton (yeşil–macenta)</string>
+    <string name="slider_exposure">Pozlama (EV)</string>
+    <string name="slider_saturation">Doygunluk</string>
+    <string name="slider_contrast">Kontrast</string>
+    <string name="slider_point_hue">Renk tonu</string>
+    <string name="slider_point_sat">Renk doygunluğu</string>
+    <string name="slider_point_lum">Renk parlaklığı</string>
+
+    <!-- Hızlı eylemler -->
+    <string name="action_auto_calibrate">Oto-kalibre</string>
+    <string name="action_spot_wb">Noktasal BD</string>
+    <string name="action_spot_wb_active">BD seçici açık</string>
+    <string name="action_color_pipette">Renk pipeti</string>
+    <string name="action_color_pipette_active">Pipet açık</string>
+    <string name="action_auto_contrast">Oto-kontrast</string>
+    <string name="action_reset_all">Tümünü sıfırla</string>
+    <string name="action_remove">Kaldır</string>
+    <string name="action_highlight_guard">Vurgu koruma</string>
+    <string name="action_center_box">Merkeze al</string>
+
+    <!-- Ölçüm -->
+    <string name="metering_full">Tüm ekran</string>
+    <string name="metering_box">Kutu ölçüm</string>
+    <string name="metering_size_label">Kutu boyutu</string>
+    <string name="metering_size_small">Küçük</string>
+    <string name="metering_size_medium">Orta</string>
+    <string name="metering_size_large">Büyük</string>
+    <string name="metering_pinch_hint">Önizlemede dokunarak taşıyın, iki parmakla boyutlandırın</string>
+
+    <!-- Renk genişliği -->
+    <string name="range_narrow">Dar</string>
+    <string name="range_balanced">Dengeli</string>
+    <string name="range_wide">Geniş</string>
+
+    <!-- Alt çubuk -->
+    <string name="action_presets">Ön ayar</string>
+    <string name="cd_shutter">Fotoğraf çek</string>
+
+    <!-- Diyaloglar -->
+    <string name="dialog_presets_title">Ön ayarlar</string>
+    <string name="dialog_presets_new">+ Yeni kaydet</string>
+    <string name="dialog_presets_empty">Kayıtlı ön ayar bulunamadı. Mevcut ayarlarınızı kaydetmek için “+ Yeni kaydet” düğmesine dokunun.</string>
+    <string name="dialog_save_preset_title">Ön ayar kaydet</string>
+    <string name="dialog_preset_name_label">Ön ayar adı</string>
+    <string name="dialog_preset_name_hint">Örn. Sarı ışıklı oda, Gün ışığı</string>
+    <string name="dialog_save">Kaydet</string>
+    <string name="dialog_cancel">Vazgeç</string>
+    <string name="dialog_close">Kapat</string>
+    <string name="dialog_confirm">Sıfırla</string>
+
+    <string name="dialog_reset_all_title">Tüm ayarlar sıfırlansın mı?</string>
+    <string name="dialog_reset_all_message">Beyaz dengesi, ton, pozlama, doygunluk, kontrast ve renk pipeti ayarları varsayılan değerlere döndürülecek.</string>
+
+    <!-- Çözünürlük seçici -->
+    <string name="dialog_resolution_title">Fotoğraf çözünürlüğü</string>
+    <string name="dialog_resolution_subtitle">Önce en-boy oranını, ardından çözünürlüğü seçin</string>
+    <string name="dialog_resolution_advanced">Gelişmiş çözünürlükler</string>
+    <string name="dialog_resolution_recommended">Önerilen</string>
+
+    <!-- Bildirimler -->
+    <string name="status_camera_permission">Kamera izni gerekli</string>
+    <string name="status_all_reset">Tüm ayarlar sıfırlandı</string>
+    <string name="status_highlight_on">Vurgu koruma açıldı</string>
+    <string name="status_highlight_off">Vurgu koruma kapatıldı</string>
+    <string name="status_tap_color">Önizlemede bir renge dokunun</string>
+    <string name="status_tap_wb">Önizlemede beyaz/gri bir alana dokunun</string>
+    <string name="status_enter_name">Lütfen bir ad girin</string>
+    <string name="status_box_centered">Ölçüm kutusu merkeze alındı</string>
 </resources>

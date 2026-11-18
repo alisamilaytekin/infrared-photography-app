@@ -87,4 +87,29 @@
     <string name="status_tap_wb">Önizlemede beyaz/gri bir alana dokunun</string>
     <string name="status_enter_name">Lütfen bir ad girin</string>
     <string name="status_box_centered">Ölçüm kutusu merkeze alındı</string>
+
+    <!-- Ek özellikler -->
+    <string name="action_compare">Karşılaştır</string>
+    <string name="banner_compare_auto">Oto önizleme (karşılaştırma)</string>
+    <string name="action_zebra">Zebra</string>
+    <string name="action_level">Terazi</string>
+    <string name="timer_off">Kapalı</string>
+    <string name="timer_3s">3 sn</string>
+    <string name="timer_10s">10 sn</string>
+    <string name="status_zebra_on">Parlak alan uyarısı (zebra) açıldı</string>
+    <string name="status_zebra_off">Parlak alan uyarısı kapatıldı</string>
+    <string name="status_level_on">Su terazisi açıldı</string>
+    <string name="status_level_off">Su terazisi kapatıldı</string>
+    <string name="status_timer_set">Zamanlayıcı: %1$s</string>
+
+    <!-- İlk açılış rehberi (3 adım) -->
+    <string name="guide_step_1_title">1/3 · Noktasal Beyaz Dengesi</string>
+    <string name="guide_step_1_body">Pro modda “BD → Noktasal BD” düğmesine dokunun, ardından önizlemede beyaz veya gri olması gereken bir alana dokunun. Renk sıcaklığı anında dengelenir.</string>
+    <string name="guide_step_2_title">2/3 · Oto-kalibre ve Ön Ayarlar</string>
+    <string name="guide_step_2_body">“Oto-kalibre” ile sahneyi tek dokunuşla dengeleyin. Beğendiğiniz ayarları “Ön ayar” menüsünden örn. “Sarı ışıklı oda” veya “Gün ışığı” adıyla kaydedin.</string>
+    <string name="guide_step_3_title">3/3 · Ölçüm Kutusu ve Pozlama</string>
+    <string name="guide_step_3_body">Önizlemede herhangi bir noktaya dokunarak ölçüm kutusunu taşıyabilir, iki parmakla büyütüp küçültebilirsiniz. Kaydırıcıya çift dokunmak yalnızca o ayarı sıfırlar.</string>
+    <string name="guide_next">İleri</string>
+    <string name="guide_done">Başla</string>
+    <string name="guide_skip">Atla</string>
 </resources>

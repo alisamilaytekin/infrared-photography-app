@@ -17,6 +17,10 @@ import android.graphics.Rect
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.SurfaceTexture
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.hardware.camera2.*
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.MeteringRectangle
@@ -106,6 +110,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -116,9 +121,12 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 private object IrPalette {
     val VoidBlack = Color(0xFF07080C)
@@ -951,6 +959,25 @@ private fun computeLuminanceHistogram(bitmap: Bitmap, bins: Int = 32): FloatArra
     return result
 }
 
+// Önizleme görüntüsünde aşırı parlak (yanık) bölgeleri 32x32 ızgara olarak işaretler (zebra uyarısı)
+private fun computeZebraGrid(bitmap: Bitmap, cols: Int = 32, rows: Int = 32, threshold: Float = 240f): BooleanArray {
+    val grid = BooleanArray(cols * rows)
+    val w = bitmap.width
+    val h = bitmap.height
+    if (w <= 0 || h <= 0) return grid
+
+    for (r in 0 until rows) {
+        val py = ((r + 0.5f) * h / rows).toInt().coerceIn(0, h - 1)
+        for (c in 0 until cols) {
+            val px = ((c + 0.5f) * w / cols).toInt().coerceIn(0, w - 1)
+            val color = bitmap[px, py]
+            val luma = 0.299f * AndroidColor.red(color) + 0.587f * AndroidColor.green(color) + 0.114f * AndroidColor.blue(color)
+            grid[r * cols + c] = luma >= threshold
+        }
+    }
+    return grid
+}
+
 /**
  * Maps normalized portrait viewfinder exposure box coordinates onto the camera sensor active array.
  */
@@ -1224,6 +1251,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var measuredRegionBrightness by remember { mutableIntStateOf(128) }
     var liveHistogram by remember { mutableStateOf(FloatArray(32)) }
 
+    // Ek özellik durumları: OTO karşılaştırma, zebra, su terazisi, zamanlayıcı ve ilk açılış rehberi
+    var isComparingAuto by remember { mutableStateOf(false) }
+    var showZebra by remember { mutableStateOf(false) }
+    var zebraGrid by remember { mutableStateOf(BooleanArray(32 * 32)) }
+    var showLevel by remember { mutableStateOf(false) }
+    var levelAngleDeg by remember { mutableFloatStateOf(0f) }
+    var timerSeconds by remember { mutableIntStateOf(0) }
+    var timerCountdown by remember { mutableIntStateOf(0) }
+    var timerJob by remember { mutableStateOf<Job?>(null) }
+
     // Yalnızca kullanıcı bir ayarı değiştirdiğinde kısa süre gösterilen bildirim metni
     var statusBannerText by remember { mutableStateOf<String?>(null) }
     var statusBannerNonce by remember { mutableIntStateOf(0) }
@@ -1237,6 +1274,35 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
 
     val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
+    var showOnboardingGuide by remember { mutableStateOf(!sharedPrefs.getBoolean("onboarding_v1_done", false)) }
+    var onboardingStep by remember { mutableIntStateOf(0) }
+
+    // Su terazisi açıkken cihazın eğimini ivmeölçerden düşük güçle okur
+    DisposableEffect(showLevel) {
+        if (!showLevel) {
+            onDispose { }
+        } else {
+            val sensorManager = context.getSystemService<SensorManager>()
+            val accel = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+            var smoothedAngle = 0f
+            val listener = object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent) {
+                    val ax = event.values[0]
+                    val ay = event.values[1]
+                    val rawDeg = Math.toDegrees(atan2(ax.toDouble(), ay.toDouble())).toFloat()
+                    smoothedAngle = smoothedAngle * 0.82f + rawDeg * 0.18f
+                    levelAngleDeg = smoothedAngle.coerceIn(-45f, 45f)
+                }
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            }
+            if (accel != null) {
+                sensorManager.registerListener(listener, accel, SensorManager.SENSOR_DELAY_UI)
+            }
+            onDispose {
+                sensorManager?.unregisterListener(listener)
+            }
+        }
+    }
     val initialRatio = remember {
         val w = sharedPrefs.getInt("selected_res_w", -1)
         val h = sharedPrefs.getInt("selected_res_h", -1)
@@ -1512,7 +1578,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val session = holder.session ?: return
         applyCamera2Settings(
             builder = builder,
-            auto = holder.currentAutoMode,
+            auto = holder.currentAutoMode || isComparingAuto,
             kVal = holder.currentKelvin,
             tVal = holder.currentTint,
             contrastVal = holder.currentContrast,
@@ -1530,13 +1596,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
         val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
+        val captureZebra = showZebra
         coroutineScope.launch(Dispatchers.Default) {
             try {
                 val stats = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
                 val hist = computeLuminanceHistogram(bmp, 32)
+                val zGrid = if (captureZebra) computeZebraGrid(bmp, 32, 32) else null
                 withContext(Dispatchers.Main) {
                     measuredRegionBrightness = stats.avgLuma.roundToInt()
                     liveHistogram = hist
+                    if (zGrid != null) zebraGrid = zGrid
 
                     if (applyEvAdjust) {
                         // Donanımsal AE ölçüm bölgesi (CONTROL_AE_REGIONS) doğal pozlamayı yönetir.
@@ -2060,6 +2129,37 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val strTapWb = stringResource(R.string.status_tap_wb)
     val strEnterName = stringResource(R.string.status_enter_name)
     val strBoxCentered = stringResource(R.string.status_box_centered)
+    val strZebraOn = stringResource(R.string.status_zebra_on)
+    val strZebraOff = stringResource(R.string.status_zebra_off)
+    val strLevelOn = stringResource(R.string.status_level_on)
+    val strLevelOff = stringResource(R.string.status_level_off)
+    val strTimerOff = stringResource(R.string.timer_off)
+    val strTimer3s = stringResource(R.string.timer_3s)
+    val strTimer10s = stringResource(R.string.timer_10s)
+    val strCompare = stringResource(R.string.action_compare)
+    val strCompareBanner = stringResource(R.string.banner_compare_auto)
+
+    fun triggerCaptureWithTimer() {
+        if (timerCountdown > 0) {
+            timerJob?.cancel()
+            timerJob = null
+            timerCountdown = 0
+            return
+        }
+        if (timerSeconds <= 0) {
+            takePhoto()
+        } else {
+            timerJob?.cancel()
+            timerJob = coroutineScope.launch {
+                for (sec in timerSeconds downTo 1) {
+                    timerCountdown = sec
+                    delay(1000)
+                }
+                timerCountdown = 0
+                takePhoto()
+            }
+        }
+    }
 
     fun openProControl(tab: ControlTab) {
         isPickerActive = false
@@ -2292,6 +2392,56 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         )
                     }
                 }
+
+                // Zamanlayıcı (Kapalı -> 3 sn -> 10 sn)
+                val (timerFlash, triggerTimer) = rememberGreenFade()
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .clickable {
+                            triggerTimer {
+                                timerSeconds = when (timerSeconds) {
+                                    0 -> 3
+                                    3 -> 10
+                                    else -> 0
+                                }
+                                val lbl = when (timerSeconds) {
+                                    3 -> strTimer3s
+                                    10 -> strTimer10s
+                                    else -> strTimerOff
+                                }
+                                showStatus("Zamanlayıcı: $lbl")
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(
+                                lerp(
+                                    if (timerSeconds > 0) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard,
+                                    Color(0xFF00E676).copy(alpha = 0.85f),
+                                    timerFlash
+                                )
+                            )
+                            .border(
+                                1.dp,
+                                lerp(if (timerSeconds > 0) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), timerFlash),
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (timerSeconds > 0) "${timerSeconds}s" else "⏱",
+                            color = lerp(if (timerSeconds > 0) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, timerFlash),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
             }
         }
 
@@ -2490,6 +2640,56 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
                     }
 
+                    // Parlak alan uyarısı (zebra çizgileri)
+                    if (showZebra && zebraGrid.size == 32 * 32) {
+                        val cellW = size.width / 32f
+                        val cellH = size.height / 32f
+                        val zebraColor = Color(0xCCFF3B30)
+                        val zStroke = 1.3.dp.toPx()
+                        for (r in 0 until 32) {
+                            for (c in 0 until 32) {
+                                if (zebraGrid[r * 32 + c]) {
+                                    val x0 = c * cellW
+                                    val y0 = r * cellH
+                                    drawLine(zebraColor, Offset(x0, y0 + cellH), Offset(x0 + cellW, y0), strokeWidth = zStroke)
+                                }
+                            }
+                        }
+                    }
+
+                    // Su terazisi (ufuk çizgisi): ±1.5° içinde yeşil yanar
+                    if (showLevel) {
+                        val isFlat = abs(levelAngleDeg) <= 1.5f
+                        val levelColor = if (isFlat) IrPalette.IrEmerald else Color.White.copy(alpha = 0.80f)
+                        val cx = size.width * 0.5f
+                        val cy = size.height * 0.5f
+                        val halfLen = minOf(size.width, size.height) * 0.22f
+                        val rad = Math.toRadians((-levelAngleDeg).toDouble())
+                        val dx = (cos(rad) * halfLen).toFloat()
+                        val dy = (sin(rad) * halfLen).toFloat()
+                        val strokeW = if (isFlat) 2.2.dp.toPx() else 1.5.dp.toPx()
+                        // Sabit referans yan çentikleri
+                        drawLine(
+                            Color.White.copy(alpha = 0.35f),
+                            Offset(cx - halfLen - 16.dp.toPx(), cy),
+                            Offset(cx - halfLen - 6.dp.toPx(), cy),
+                            strokeWidth = 1.5.dp.toPx()
+                        )
+                        drawLine(
+                            Color.White.copy(alpha = 0.35f),
+                            Offset(cx + halfLen + 6.dp.toPx(), cy),
+                            Offset(cx + halfLen + 16.dp.toPx(), cy),
+                            strokeWidth = 1.5.dp.toPx()
+                        )
+                        // Eğime göre dönen ufuk çizgisi
+                        drawLine(
+                            color = levelColor,
+                            start = Offset(cx - dx, cy - dy),
+                            end = Offset(cx + dx, cy + dy),
+                            strokeWidth = strokeW
+                        )
+                    }
+
                     if (isPickerActive || isExposureBoxPicking || isColorPipetteActive) {
                         val borderStroke = 2.dp.toPx()
                         drawRect(
@@ -2553,28 +2753,95 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Geçici bildirim (yalnızca kullanıcı bir değer değiştirdiğinde kısa süre görünür)
+                // Geçici bildirim veya OTO karşılaştırma rozeti
+                val topBannerMsg = if (isComparingAuto) strCompareBanner else statusBannerText
                 AnimatedVisibility(
-                    visible = statusBannerText != null,
+                    visible = topBannerMsg != null,
                     enter = fadeIn(tween(150)),
                     exit = fadeOut(tween(250)),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 10.dp)
                 ) {
-                    statusBannerText?.let { msg ->
+                    topBannerMsg?.let { msg ->
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
-                                .background(Color.Black.copy(alpha = 0.72f))
+                                .background(
+                                    if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
+                                    else Color.Black.copy(alpha = 0.72f)
+                                )
                                 .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = msg,
-                                color = IrPalette.TextPrimary,
+                                color = if (isComparingAuto) Color.Black else IrPalette.TextPrimary,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                // Zamanlayıcı geri sayım göstergesi
+                if (timerCountdown > 0) {
+                    Box(
+                        modifier = Modifier
+                            .size(92.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.62f))
+                            .border(2.dp, IrPalette.IrAmber, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "$timerCountdown",
+                            color = Color.White,
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                // PRO modda sol alt köşede basılı tutunca OTO önizlemesi gösteren "Karşılaştır" düğmesi
+                if (cameraReady && !isAutoMode) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(8.dp)
+                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+                            .pointerInput(cameraReady) {
+                                detectTapGestures(
+                                    onPress = {
+                                        isComparingAuto = true
+                                        updatePreviewSettings()
+                                        tryAwaitRelease()
+                                        isComparingAuto = false
+                                        updatePreviewSettings()
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
+                                    else Color.Black.copy(alpha = 0.56f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isComparingAuto) IrPalette.IrEmerald else Color.White.copy(alpha = 0.22f),
+                                    RoundedCornerShape(50)
+                                )
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = strCompare,
+                                color = if (isComparingAuto) Color.Black else IrPalette.TextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -2584,7 +2851,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 if (cameraReady) {
                     LiveHistogramOverlay(
                         bins = liveHistogram,
-                        accentColor = if (isAutoMode) IrPalette.IrEmerald else IrPalette.IrAmber,
+                        accentColor = if (isAutoMode || isComparingAuto) IrPalette.IrEmerald else IrPalette.IrAmber,
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(8.dp)
@@ -2610,6 +2877,49 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
+            // OTO Modda kompakt Pozlama (EV) kaydırıcısı
+            AnimatedVisibility(visible = isAutoMode && aeRange.upper > aeRange.lower) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(IrPalette.HudGlass)
+                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                ) {
+                    val evBadge = "${formatSignedDecimal(evDisplayVal, turkishLocale)} $strEvShort"
+                    ProGradientSliderRow(
+                        label = stringResource(R.string.slider_exposure),
+                        valueBadge = evBadge,
+                        value = exposureEvIndex.toFloat(),
+                        defaultValue = 0f,
+                        snapTolerance = 0.45f,
+                        valueRange = aeRange.lower.toFloat()..aeRange.upper.toFloat(),
+                        enabled = cameraReady,
+                        gradient = Brush.horizontalGradient(
+                            colors = listOf(Color(0xFF1E293B), Color(0xFF94A3B8), Color(0xFFFEF08A))
+                        ),
+                        onStepMinus = {
+                            exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
+                            updatePreviewSettings()
+                        },
+                        onStepPlus = {
+                            exposureEvIndex = (exposureEvIndex + 1).coerceIn(aeRange.lower, aeRange.upper)
+                            updatePreviewSettings()
+                        },
+                        onReset = {
+                            exposureEvIndex = 0
+                            updatePreviewSettings()
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        },
+                        onValueChange = {
+                            exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
+                            updatePreviewSettings()
+                        }
+                    )
+                }
+            }
+
             // PRO Mod Çip Tabanlı Tek Kaydırıcı Paneli
             AnimatedVisibility(visible = !isAutoMode) {
                 Column(
@@ -2768,6 +3078,34 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             onValueChange = {
                                                 exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
                                                 updatePreviewSettings()
+                                            }
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        ModePillButton(
+                                            label = stringResource(R.string.action_zebra),
+                                            selected = showZebra,
+                                            accentColor = IrPalette.IrCoral,
+                                            enabled = cameraReady,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                showZebra = !showZebra
+                                                showStatus(if (showZebra) strZebraOn else strZebraOff)
+                                            }
+                                        )
+                                        ModePillButton(
+                                            label = stringResource(R.string.action_level),
+                                            selected = showLevel,
+                                            accentColor = IrPalette.IrEmerald,
+                                            enabled = cameraReady,
+                                            modifier = Modifier.weight(1f),
+                                            onClick = {
+                                                showLevel = !showLevel
+                                                showStatus(if (showLevel) strLevelOn else strLevelOff)
                                             }
                                         )
                                     }
@@ -3289,7 +3627,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) {
-                            triggerShutter { takePhoto() }
+                            triggerShutter { triggerCaptureWithTimer() }
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -3609,6 +3947,90 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 restartForResolution(res)
             },
             onDismiss = { showResolutionDialog = false }
+        )
+    }
+
+    // 3 Adımlı İlk Açılış Rehberi (Noktasal BD, Oto-kalibre & Ölçüm Kutusu)
+    if (showOnboardingGuide) {
+        val stepTitles = listOf(
+            stringResource(R.string.guide_step_1_title),
+            stringResource(R.string.guide_step_2_title),
+            stringResource(R.string.guide_step_3_title)
+        )
+        val stepBodies = listOf(
+            stringResource(R.string.guide_step_1_body),
+            stringResource(R.string.guide_step_2_body),
+            stringResource(R.string.guide_step_3_body)
+        )
+        val safeStep = onboardingStep.coerceIn(0, 2)
+        AlertDialog(
+            onDismissRequest = {
+                sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
+                showOnboardingGuide = false
+            },
+            containerColor = Color(0xFF141822),
+            titleContentColor = IrPalette.TextPrimary,
+            textContentColor = IrPalette.TextSecondary,
+            title = {
+                Text(
+                    text = stepTitles[safeStep],
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = IrPalette.IrAmber
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        text = stepBodies[safeStep],
+                        fontSize = 14.sp,
+                        color = IrPalette.TextPrimary
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        for (i in 0..2) {
+                            Box(
+                                modifier = Modifier
+                                    .height(6.dp)
+                                    .width(if (i == safeStep) 22.dp else 8.dp)
+                                    .clip(CircleShape)
+                                    .background(if (i == safeStep) IrPalette.IrAmber else Color.White.copy(alpha = 0.22f))
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (safeStep < 2) {
+                            onboardingStep = safeStep + 1
+                        } else {
+                            sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
+                            showOnboardingGuide = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = IrPalette.IrAmber)
+                ) {
+                    Text(
+                        text = if (safeStep < 2) stringResource(R.string.guide_next) else stringResource(R.string.guide_done),
+                        color = Color.Black,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
+                        showOnboardingGuide = false
+                    }
+                ) {
+                    Text(stringResource(R.string.guide_skip), color = IrPalette.TextSecondary)
+                }
+            }
         )
     }
 }

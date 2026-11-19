@@ -119,4 +119,9 @@
     <string name="status_raw_off">Yalnızca JPEG kayıt</string>
     <string name="status_raw_saved">RAW (DNG) kaydedildi</string>
     <string name="cd_gallery">Son fotoğrafı galeride aç</string>
+    <string name="cd_level_toggle">Su terazisini aç veya kapat</string>
+    <string name="cd_timer_toggle">Zamanlayıcıyı değiştir</string>
+    <string name="cd_reset_all">Tüm ayarları sıfırla</string>
+    <string name="action_pipette_short">Pipet</string>
+    <string name="action_auto_short">Oto</string>
 </resources>

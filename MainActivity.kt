@@ -84,11 +84,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -134,10 +138,12 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 private object IrPalette {
-    val VoidBlack = Color(0xFF07080C)
-    val HudGlass = Color(0xCC0D1017)
-    val HudCard = Color(0xD9141822)
-    val HudChip = Color(0xCC1C2230)
+    val VoidBlack = Color(0xFF050609)
+    val HudGlass = Color(0xE60E121B)
+    val HudCard = Color(0xEB151A26)
+    val HudChip = Color(0xD91D2434)
+    val SurfaceElevated = Color(0xFF1A202E)
+    val SurfaceSubtle = Color(0x14FFFFFF)
     val IrCoral = Color(0xFFFF5722)
     val IrAmber = Color(0xFFF59E0B)
     val IrCyan = Color(0xFF38BDF8)
@@ -147,7 +153,8 @@ private object IrPalette {
     val TextPrimary = Color(0xFFF8FAFC)
     val TextSecondary = Color(0xFFB8C4D6)
     val TextTertiary = Color(0xFF94A3B8)
-    val BorderSubtle = Color(0x2EFFFFFF)
+    val BorderSubtle = Color(0x26FFFFFF)
+    val BorderBright = Color(0x47FFFFFF)
 }
 
 class MainActivity : ComponentActivity() {
@@ -2284,7 +2291,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val haptic = LocalHapticFeedback.current
     val turkishLocale = remember { Locale("tr", "TR") }
 
-    // Durum çubuğu metin kaynakları
+    // Her ayar kategorisinde varsayılan dışına çıkılıp çıkılmadığını gösteren durumlar
+    val isWbModified = !isAutoMode && (abs(kelvinValue - liveAutoKelvin) > 120f || abs(tintValue - liveAutoTint) > 3f)
+    val isEvModified = exposureEvIndex != 0
+    val isColorModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f ||
+        abs(contrastValue - DEFAULT_CONTRAST) > 0.02f ||
+        targetedColorConfig.isActive
+    val isMeteringModified = meteringMode == ExposureMeteringMode.BOX_SPOT
+    val hasAnyManualChange = isWbModified || isEvModified || isColorModified || isMeteringModified
+
+    // Arayüz metin kaynakları
     val strModeAuto = stringResource(R.string.mode_auto)
     val strModePro = stringResource(R.string.mode_pro)
     val strWbShort = stringResource(R.string.label_wb_short)
@@ -2314,6 +2330,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val strRawOn = stringResource(R.string.status_raw_on)
     val strRawOff = stringResource(R.string.status_raw_off)
     val strGalleryCd = stringResource(R.string.cd_gallery)
+    val strLevelCd = stringResource(R.string.cd_level_toggle)
+    val strTimerCd = stringResource(R.string.cd_timer_toggle)
+    val strResetAllCd = stringResource(R.string.cd_reset_all)
 
     fun triggerCaptureWithTimer() {
         if (timerCountdown > 0) {
@@ -2351,7 +2370,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         isDeckCollapsed = false
     }
 
-    // Ana dikey yerleşim: Üst durum çubuğu → Önizleme (panel asla üstüne binmez) → Alt kontroller
+    // Ana dikey yerleşim: Üst araç çubuğu → Önizleme (panel asla üstüne binmez) → Alt kontrol alanı
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2359,7 +2378,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // 1) ÜST DURUM ÇUBUĞU: Okunur, etiketli ve dokunulabilir değerler
+        // 1) ÜST ARAÇ ÇUBUĞU: Ferah, sıkışmayan mod anahtarı + keskin vektör hızlı araçlar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -2367,301 +2386,127 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Sol: Oto / Pro mod anahtarı (Oto yeşil, Pro amber)
+            // Sol: Zarif Oto / Pro kapsül anahtarı (Oto yeşil, Pro amber)
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(IrPalette.HudGlass)
+                    .background(IrPalette.HudCard)
                     .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                    .padding(2.dp),
+                    .padding(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val (otoFlash, triggerOto) = rememberGreenFade()
-                Box(
-                    modifier = Modifier
-                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(enabled = cameraReady) {
-                            triggerOto {
-                                isPickerActive = false
-                                isColorPipetteActive = false
-                                isExposureBoxPicking = false
-                                isAutoMode = true
-                                updatePreviewSettings()
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                lerp(
-                                    if (isAutoMode) IrPalette.IrEmerald else Color.Transparent,
-                                    Color(0xFF00E676).copy(alpha = 0.85f),
-                                    otoFlash
-                                )
-                            )
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = strModeAuto,
-                            color = lerp(if (isAutoMode) Color.Black else IrPalette.TextSecondary, Color.Black, otoFlash),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-
-                val (proFlash, triggerPro) = rememberGreenFade()
-                Box(
-                    modifier = Modifier
-                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(enabled = cameraReady) {
-                            triggerPro {
-                                isPickerActive = false
-                                isColorPipetteActive = false
-                                isExposureBoxPicking = false
-                                if (isAutoMode) {
-                                    kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                                    tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                                    isAutoMode = false
-                                }
-                                updatePreviewSettings()
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(
-                                lerp(
-                                    if (!isAutoMode) IrPalette.IrAmber else Color.Transparent,
-                                    Color(0xFF00E676).copy(alpha = 0.85f),
-                                    proFlash
-                                )
-                            )
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = strModePro,
-                            color = lerp(if (!isAutoMode) Color.Black else IrPalette.TextSecondary, Color.Black, proFlash),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-
-            // Orta: Etiketli, dokunulabilir durum değerleri (BD · Ton · EV)
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                StatusTelemetryChip(
-                    text = "$strWbShort ${displayKelvin.toInt()}K",
-                    accentColor = if (!isAutoMode && activeTab == ControlTab.BD && !isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
+                ModeSegmentItem(
+                    text = strModeAuto,
+                    selected = isAutoMode,
+                    activeColor = IrPalette.IrEmerald,
                     enabled = cameraReady,
-                    onClick = { openProControl(ControlTab.BD) }
+                    onClick = {
+                        isPickerActive = false
+                        isColorPipetteActive = false
+                        isExposureBoxPicking = false
+                        isAutoMode = true
+                        updatePreviewSettings()
+                    }
                 )
-                if (!isAutoMode) {
-                    Text(
-                        text = "·",
-                        color = IrPalette.TextTertiary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 1.dp)
-                    )
-                    StatusTelemetryChip(
-                        text = "$strTintShort ${formatSigned(displayTint)}",
-                        accentColor = if (activeTab == ControlTab.BD && !isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
-                        enabled = cameraReady,
-                        onClick = { openProControl(ControlTab.BD) }
-                    )
-                }
-                if (aeRange.upper > aeRange.lower) {
-                    Text(
-                        text = "·",
-                        color = IrPalette.TextTertiary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 1.dp)
-                    )
-                    val evFormatted = formatSignedDecimal(evDisplayVal, turkishLocale)
-                    StatusTelemetryChip(
-                        text = "$strEvShort $evFormatted",
-                        accentColor = if (!isAutoMode && activeTab == ControlTab.POZ && !isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
-                        enabled = cameraReady,
-                        onClick = { openProControl(ControlTab.POZ) }
-                    )
-                }
+                ModeSegmentItem(
+                    text = strModePro,
+                    selected = !isAutoMode,
+                    activeColor = IrPalette.IrAmber,
+                    enabled = cameraReady,
+                    onClick = {
+                        isPickerActive = false
+                        isColorPipetteActive = false
+                        isExposureBoxPicking = false
+                        if (isAutoMode) {
+                            kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                            tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                            isAutoMode = false
+                        }
+                        updatePreviewSettings()
+                    }
+                )
             }
 
-            // Sağ: Çözünürlük + Izgara düğmeleri (en az 48x48dp dokunma alanı)
+            // Sağ: Çözünürlük · RAW · Izgara · Terazi · Zamanlayıcı (her biri 48dp dokunma hedefi)
             Row(
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                val (resFlash, triggerRes) = rememberGreenFade()
-                Box(
-                    modifier = Modifier
-                        .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(enabled = availableResolutions.isNotEmpty()) {
-                            triggerRes { showResolutionDialog = true }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(lerp(IrPalette.HudCard, Color(0xFF00E676).copy(alpha = 0.85f), resFlash))
-                            .border(1.dp, lerp(IrPalette.BorderSubtle, Color(0xFF00E676), resFlash), RoundedCornerShape(50))
-                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                    ) {
-                        val activeRes = selectedResolution
-                        val resLabel = if (activeRes != null) formatMegapixels(activeRes) else strResFallback
-                        Text(
-                            text = resLabel,
-                            color = lerp(IrPalette.IrCyan, Color.Black, resFlash),
-                            fontSize = 12.sp,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                val activeRes = selectedResolution
+                val resLabel = if (activeRes != null) formatMegapixels(activeRes) else strResFallback
+                TopBadgeButton(
+                    text = resLabel,
+                    active = false,
+                    accentColor = IrPalette.IrCyan,
+                    enabled = availableResolutions.isNotEmpty(),
+                    onClick = { showResolutionDialog = true }
+                )
 
-                // RAW/DNG anahtarı (yalnızca RAW sensör destekleyen cihazlarda görünür)
                 if (supportsRaw) {
-                    val (rawFlash, triggerRaw) = rememberGreenFade()
-                    Box(
-                        modifier = Modifier
-                            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                            .clip(RoundedCornerShape(50))
-                            .clickable(enabled = cameraReady) {
-                                triggerRaw {
-                                    rawEnabled = !rawEnabled
-                                    holder.rawCaptureEnabled = rawEnabled
-                                    showStatus(if (rawEnabled) strRawOn else strRawOff)
-                                    cameraHandler.post { closeCameraInternal(releaseReader = true) }
-                                    surfaceGeneration += 1
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    lerp(
-                                        if (rawEnabled) IrPalette.IrAmber.copy(alpha = 0.28f) else IrPalette.HudCard,
-                                        Color(0xFF00E676).copy(alpha = 0.85f),
-                                        rawFlash
-                                    )
-                                )
-                                .border(
-                                    1.dp,
-                                    lerp(if (rawEnabled) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), rawFlash),
-                                    RoundedCornerShape(50)
-                                )
-                                .padding(horizontal = 7.dp, vertical = 5.dp)
-                        ) {
-                            Text(
-                                text = strRaw,
-                                color = lerp(if (rawEnabled) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, rawFlash),
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold
-                            )
+                    TopBadgeButton(
+                        text = strRaw,
+                        active = rawEnabled,
+                        accentColor = IrPalette.IrAmber,
+                        enabled = cameraReady,
+                        onClick = {
+                            rawEnabled = !rawEnabled
+                            holder.rawCaptureEnabled = rawEnabled
+                            showStatus(if (rawEnabled) strRawOn else strRawOff)
+                            cameraHandler.post { closeCameraInternal(releaseReader = true) }
+                            surfaceGeneration += 1
                         }
-                    }
+                    )
                 }
 
-                val (gridFlash, triggerGrid) = rememberGreenFade()
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .semantics { contentDescription = strGridCd }
-                        .clip(CircleShape)
-                        .clickable { triggerGrid { showGrid = !showGrid } },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(
-                                lerp(
-                                    if (showGrid) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard,
-                                    Color(0xFF00E676).copy(alpha = 0.85f),
-                                    gridFlash
-                                )
-                            )
-                            .border(
-                                1.dp,
-                                lerp(if (showGrid) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), gridFlash),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        GridIcon(
-                            tint = lerp(if (showGrid) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, gridFlash),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                TopIconButton(
+                    active = showGrid,
+                    accentColor = IrPalette.IrAmber,
+                    contentDesc = strGridCd,
+                    onClick = { showGrid = !showGrid }
+                ) { tint ->
+                    GridIcon(tint = tint, modifier = Modifier.size(16.dp))
                 }
 
-                // Zamanlayıcı (Kapalı -> 3 sn -> 10 sn)
-                val (timerFlash, triggerTimer) = rememberGreenFade()
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .clickable {
-                            triggerTimer {
-                                timerSeconds = when (timerSeconds) {
-                                    0 -> 3
-                                    3 -> 10
-                                    else -> 0
-                                }
-                                val lbl = when (timerSeconds) {
-                                    3 -> strTimer3s
-                                    10 -> strTimer10s
-                                    else -> strTimerOff
-                                }
-                                showStatus("Zamanlayıcı: $lbl")
-                            }
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(CircleShape)
-                            .background(
-                                lerp(
-                                    if (timerSeconds > 0) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard,
-                                    Color(0xFF00E676).copy(alpha = 0.85f),
-                                    timerFlash
-                                )
-                            )
-                            .border(
-                                1.dp,
-                                lerp(if (timerSeconds > 0) IrPalette.IrAmber else IrPalette.BorderSubtle, Color(0xFF00E676), timerFlash),
-                                CircleShape
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
+                TopIconButton(
+                    active = showLevel,
+                    accentColor = IrPalette.IrEmerald,
+                    contentDesc = strLevelCd,
+                    onClick = {
+                        showLevel = !showLevel
+                        showStatus(if (showLevel) strLevelOn else strLevelOff)
+                    }
+                ) { tint ->
+                    LevelIcon(tint = tint, modifier = Modifier.size(17.dp))
+                }
+
+                TopIconButton(
+                    active = timerSeconds > 0,
+                    accentColor = IrPalette.IrAmber,
+                    contentDesc = strTimerCd,
+                    onClick = {
+                        timerSeconds = when (timerSeconds) {
+                            0 -> 3
+                            3 -> 10
+                            else -> 0
+                        }
+                        val lbl = when (timerSeconds) {
+                            3 -> strTimer3s
+                            10 -> strTimer10s
+                            else -> strTimerOff
+                        }
+                        showStatus("Zamanlayıcı: $lbl")
+                    }
+                ) { tint ->
+                    if (timerSeconds > 0) {
                         Text(
-                            text = if (timerSeconds > 0) "${timerSeconds}s" else "⏱",
-                            color = lerp(if (timerSeconds > 0) IrPalette.IrAmber else IrPalette.TextSecondary, Color.Black, timerFlash),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            text = "${timerSeconds}s",
+                            color = tint,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
                         )
+                    } else {
+                        TimerIcon(tint = tint, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -2684,7 +2529,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
             BoxWithConstraints(
                 modifier = viewfinderModifier
-                    .clip(RoundedCornerShape(10.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .clipToBounds(),
                 contentAlignment = Alignment.Center
             ) {
@@ -2756,8 +2601,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             }
                                         }
                                     } else {
-                                        // Dokunulan noktaya ölçüm kutusunu taşı ve donanımsal AE bölgesini güncelle
-                                        // (Yazılımsal EV sıçraması yapılmaz, pozlama stabil kalır)
                                         val nx = (offset.x / view.width.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
                                         val ny = (offset.y / view.height.coerceAtLeast(1)).coerceIn(0.08f, 0.92f)
                                         exposureBoxNorm = Offset(nx, ny)
@@ -2804,7 +2647,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     )
                                 }
                             }
-                            // İki parmakla büyütme/küçültme: Ölçüm kutusu boyutunu ayarlama
+                            // İki parmakla boyutlandırma: Ölçüm kutusu boyutunu ayarlama
                             .pointerInput(isPickerActive, isColorPipetteActive) {
                                 if (!isPickerActive && !isColorPipetteActive) {
                                     detectTransformGestures { _, _, zoom, _ ->
@@ -2849,7 +2692,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     )
                 }
 
-                // Izgara, ölçüm kutusu ve seçici işareti
+                // Izgara, zebra, su terazisi, ölçüm kutusu ve seçici işareti
                 Canvas(modifier = Modifier.fillMaxSize()) {
                     if (showGrid) {
                         val gridColor = Color.White.copy(alpha = 0.24f)
@@ -2879,36 +2722,37 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         }
                     }
 
-                    // Su terazisi (ufuk çizgisi): ±1.5° içinde yeşil yanar
+                    // Su terazisi (ufuk çizgisi): ±1,5° içinde yeşil yanar
                     if (showLevel) {
                         val isFlat = abs(levelAngleDeg) <= 1.5f
-                        val levelColor = if (isFlat) IrPalette.IrEmerald else Color.White.copy(alpha = 0.80f)
+                        val levelColor = if (isFlat) IrPalette.IrEmerald else Color.White.copy(alpha = 0.85f)
                         val cx = size.width * 0.5f
                         val cy = size.height * 0.5f
-                        val halfLen = minOf(size.width, size.height) * 0.22f
+                        val halfLen = minOf(size.width, size.height) * 0.20f
                         val rad = Math.toRadians(levelAngleDeg.toDouble())
                         val dx = (cos(rad) * halfLen).toFloat()
                         val dy = (sin(rad) * halfLen).toFloat()
                         val strokeW = if (isFlat) 2.2.dp.toPx() else 1.5.dp.toPx()
-                        // Sabit referans yan çentikleri
                         drawLine(
                             Color.White.copy(alpha = 0.35f),
                             Offset(cx - halfLen - 16.dp.toPx(), cy),
                             Offset(cx - halfLen - 6.dp.toPx(), cy),
-                            strokeWidth = 1.5.dp.toPx()
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
                         )
                         drawLine(
                             Color.White.copy(alpha = 0.35f),
                             Offset(cx + halfLen + 6.dp.toPx(), cy),
                             Offset(cx + halfLen + 16.dp.toPx(), cy),
-                            strokeWidth = 1.5.dp.toPx()
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round
                         )
-                        // Eğime göre dönen ufuk çizgisi
                         drawLine(
                             color = levelColor,
                             start = Offset(cx - dx, cy - dy),
                             end = Offset(cx + dx, cy + dy),
-                            strokeWidth = strokeW
+                            strokeWidth = strokeW,
+                            cap = StrokeCap.Round
                         )
                     }
 
@@ -2938,21 +2782,21 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         val strokeW = 2.2.dp.toPx()
 
                         drawRect(
-                            color = boxColor.copy(alpha = 0.08f),
+                            color = boxColor.copy(alpha = 0.07f),
                             topLeft = Offset(left, top),
                             size = androidx.compose.ui.geometry.Size(boxSide, boxSide)
                         )
-                        drawLine(boxColor, Offset(left, top), Offset(left + corner, top), strokeW)
-                        drawLine(boxColor, Offset(left, top), Offset(left, top + corner), strokeW)
-                        drawLine(boxColor, Offset(right, top), Offset(right - corner, top), strokeW)
-                        drawLine(boxColor, Offset(right, top), Offset(right, top + corner), strokeW)
-                        drawLine(boxColor, Offset(left, bottom), Offset(left + corner, bottom), strokeW)
-                        drawLine(boxColor, Offset(left, bottom), Offset(left, bottom - corner), strokeW)
-                        drawLine(boxColor, Offset(right, bottom), Offset(right - corner, bottom), strokeW)
-                        drawLine(boxColor, Offset(right, bottom), Offset(right, bottom - corner), strokeW)
+                        drawLine(boxColor, Offset(left, top), Offset(left + corner, top), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(left, top), Offset(left, top + corner), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(right, top), Offset(right - corner, top), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(right, top), Offset(right, top + corner), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(left, bottom), Offset(left + corner, bottom), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(left, bottom), Offset(left, bottom - corner), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(right, bottom), Offset(right - corner, bottom), strokeW, cap = StrokeCap.Round)
+                        drawLine(boxColor, Offset(right, bottom), Offset(right, bottom - corner), strokeW, cap = StrokeCap.Round)
                         drawCircle(
-                            color = boxColor.copy(alpha = 0.85f),
-                            radius = 4.dp.toPx(),
+                            color = boxColor.copy(alpha = 0.90f),
+                            radius = 3.5.dp.toPx(),
                             center = Offset(cx, cy),
                             style = Stroke(width = 1.6.dp.toPx())
                         )
@@ -2975,13 +2819,60 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Geçici bildirim veya OTO karşılaştırma rozeti
-                val topBannerMsg = if (isComparingAuto) strCompareBanner else statusBannerText
-                Box(
+                // Önizleme üst ortada: Sıkışmayan, okunaklı, dokunulabilir durum hapı + geçici bildirim
+                Column(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 10.dp)
+                        .padding(top = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.Black.copy(alpha = 0.56f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(50))
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusTelemetryChip(
+                            text = "$strWbShort ${displayKelvin.toInt()}K",
+                            accentColor = if (!isAutoMode && activeTab == ControlTab.BD && !isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
+                            enabled = cameraReady,
+                            onClick = { openProControl(ControlTab.BD) }
+                        )
+                        if (!isAutoMode) {
+                            Text(
+                                text = "·",
+                                color = IrPalette.TextTertiary,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                            StatusTelemetryChip(
+                                text = "$strTintShort ${formatSigned(displayTint)}",
+                                accentColor = if (activeTab == ControlTab.BD && !isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
+                                enabled = cameraReady,
+                                onClick = { openProControl(ControlTab.BD) }
+                            )
+                        }
+                        if (aeRange.upper > aeRange.lower) {
+                            Text(
+                                text = "·",
+                                color = IrPalette.TextTertiary,
+                                fontSize = 12.sp,
+                                modifier = Modifier.padding(horizontal = 2.dp)
+                            )
+                            val evFormatted = formatSignedDecimal(evDisplayVal, turkishLocale)
+                            StatusTelemetryChip(
+                                text = "$strEvShort $evFormatted",
+                                accentColor = if ((!isAutoMode && activeTab == ControlTab.POZ && !isDeckCollapsed) || isEvModified) IrPalette.IrAmber else IrPalette.TextPrimary,
+                                enabled = cameraReady,
+                                onClick = { openProControl(ControlTab.POZ) }
+                            )
+                        }
+                    }
+
+                    val topBannerMsg = if (isComparingAuto) strCompareBanner else statusBannerText
                     androidx.compose.animation.AnimatedVisibility(
                         visible = topBannerMsg != null,
                         enter = fadeIn(tween(150)),
@@ -2992,11 +2883,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(
-                                        if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
-                                        else Color.Black.copy(alpha = 0.72f)
+                                        if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.92f)
+                                        else Color.Black.copy(alpha = 0.76f)
                                     )
-                                    .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .border(
+                                        1.dp,
+                                        if (isComparingAuto) IrPalette.IrEmerald else IrPalette.BorderBright,
+                                        RoundedCornerShape(50)
+                                    )
+                                    .padding(horizontal = 12.dp, vertical = 5.dp)
                             ) {
                                 Text(
                                     text = msg,
@@ -3013,9 +2908,9 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 if (timerCountdown > 0) {
                     Box(
                         modifier = Modifier
-                            .size(92.dp)
+                            .size(94.dp)
                             .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.62f))
+                            .background(Color.Black.copy(alpha = 0.68f))
                             .border(2.dp, IrPalette.IrAmber, CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
@@ -3028,7 +2923,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // PRO modda sol alt köşede basılı tutunca OTO önizlemesi gösteren "Karşılaştır" düğmesi
+                // PRO modda sol alt köşe: Basılı tutunca OTO önizlemesi gösteren "Karşılaştır" hapı
                 if (cameraReady && !isAutoMode) {
                     Box(
                         modifier = Modifier
@@ -3046,13 +2941,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     }
                                 )
                             },
-                        contentAlignment = Alignment.CenterStart
+                        contentAlignment = Alignment.BottomStart
                     ) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(50))
                                 .background(
-                                    if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.88f)
+                                    if (isComparingAuto) IrPalette.IrEmerald.copy(alpha = 0.92f)
                                     else Color.Black.copy(alpha = 0.56f)
                                 )
                                 .border(
@@ -3060,7 +2955,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     if (isComparingAuto) IrPalette.IrEmerald else Color.White.copy(alpha = 0.22f),
                                     RoundedCornerShape(50)
                                 )
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(horizontal = 11.dp, vertical = 7.dp)
                         ) {
                             Text(
                                 text = strCompare,
@@ -3072,16 +2967,16 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Önizleme alt ortasında mercek / yakınlaştırma seçici (0.5x · 1x · 2x)
+                // Önizleme alt ortada: Mercek / yakınlaştırma kapsülü (0,5x · 1x · 2x)
                 if (cameraReady && availableZoomOptions.size > 1) {
                     Row(
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
-                            .padding(bottom = 8.dp)
+                            .padding(bottom = 10.dp)
                             .clip(RoundedCornerShape(50))
-                            .background(Color.Black.copy(alpha = 0.56f))
+                            .background(Color.Black.copy(alpha = 0.58f))
                             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                            .padding(3.dp),
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -3090,20 +2985,20 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             val zLabel = if (z == 0.5f) "0,5x" else "${z.toInt()}x"
                             Box(
                                 modifier = Modifier
-                                    .sizeIn(minWidth = 36.dp, minHeight = 36.dp)
+                                    .sizeIn(minWidth = 38.dp, minHeight = 36.dp)
                                     .clip(CircleShape)
                                     .background(if (isSelected) IrPalette.IrAmber else Color.Transparent)
                                     .clickable {
                                         zoomRatio = z
                                         updatePreviewSettings()
                                     }
-                                    .padding(horizontal = 6.dp),
+                                    .padding(horizontal = 7.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = zLabel,
                                     color = if (isSelected) Color.Black else Color.White,
-                                    fontSize = 11.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -3111,7 +3006,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Önizleme sağ alt köşesinde küçük, yarı saydam canlı histogram
+                // Önizleme sağ alt köşede: İnce ızgaralı yarı saydam canlı histogram
                 if (cameraReady) {
                     LiveHistogramOverlay(
                         bins = liveHistogram,
@@ -3139,22 +3034,23 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 .fillMaxWidth()
                 .background(IrPalette.VoidBlack)
                 .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // OTO Modda kompakt Pozlama (EV) kaydırıcısı
+            // OTO Modda kompakt, önizlemeyi kapatmayan Pozlama (EV) kaydırıcısı
             AnimatedVisibility(visible = isAutoMode && aeRange.upper > aeRange.lower) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(16.dp))
                         .background(IrPalette.HudGlass)
-                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(14.dp))
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(16.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     val evBadge = "${formatSignedDecimal(evDisplayVal, turkishLocale)} $strEvShort"
                     ProGradientSliderRow(
                         label = stringResource(R.string.slider_exposure),
                         valueBadge = evBadge,
+                        isModified = isEvModified,
                         value = exposureEvIndex.toFloat(),
                         defaultValue = 0f,
                         snapTolerance = 0.45f,
@@ -3189,11 +3085,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .background(IrPalette.HudGlass)
-                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(16.dp))
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     // Seçili çipin tek/kompakt kaydırıcı alanı
                     AnimatedVisibility(
@@ -3203,14 +3099,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     ) {
                         Column(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             when (activeTab) {
                                 ControlTab.BD -> {
-                                    // Beyaz Dengesi: Kelvin ve Ton alt alta, kompakt
                                     ProGradientSliderRow(
                                         label = stringResource(R.string.slider_kelvin),
                                         valueBadge = "${kelvinValue.toInt()} K",
+                                        isModified = abs(kelvinValue - liveAutoKelvin) > 120f,
                                         value = kelvinValue,
                                         defaultValue = 5500f,
                                         snapTolerance = 140f,
@@ -3241,6 +3137,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     ProGradientSliderRow(
                                         label = stringResource(R.string.slider_tint),
                                         valueBadge = formatSigned(tintValue),
+                                        isModified = abs(tintValue - liveAutoTint) > 3f,
                                         value = tintValue,
                                         defaultValue = 0f,
                                         snapTolerance = 4f,
@@ -3258,7 +3155,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             updatePreviewSettings()
                                         },
                                         onReset = {
-                                            tintValue = 0f
+                                            tintValue = liveAutoTint.coerceIn(-100f, 100f)
                                             updatePreviewSettings()
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
@@ -3270,23 +3167,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ModePillButton(
+                                        ActionPillButton(
                                             label = stringResource(R.string.action_auto_calibrate),
                                             selected = false,
                                             accentColor = IrPalette.IrAmber,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
+                                            leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(15.dp)) },
                                             onClick = { runAutoCalibrate() }
                                         )
-                                        ModePillButton(
+                                        ActionPillButton(
                                             label = if (isPickerActive) stringResource(R.string.action_spot_wb_active) else stringResource(R.string.action_spot_wb),
                                             selected = isPickerActive,
                                             accentColor = IrPalette.IrAmber,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
+                                            leadingIcon = { tint -> TargetCrosshairIcon(tint = tint, modifier = Modifier.size(15.dp)) },
                                             onClick = {
                                                 isPickerActive = !isPickerActive
                                                 if (isPickerActive) {
@@ -3299,7 +3198,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 }
 
                                 ControlTab.POZ -> {
-                                    // Pozlama (EV) tek kaydırıcı + kalkan ikonlu kompakt Vurgu Koruma anahtarı
                                     if (aeRange.upper > aeRange.lower) {
                                         val minEv = aeRange.lower.toFloat()
                                         val maxEv = aeRange.upper.toFloat()
@@ -3307,6 +3205,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         ProGradientSliderRow(
                                             label = stringResource(R.string.slider_exposure),
                                             valueBadge = evBadge,
+                                            isModified = isEvModified,
                                             value = exposureEvIndex.toFloat(),
                                             defaultValue = 0f,
                                             snapTolerance = 0.45f,
@@ -3345,40 +3244,31 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             }
                                         )
                                     }
+
+                                    // Kompakt tek satır: Parlak alan uyarısı (Zebra)
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        ModePillButton(
+                                        ActionPillButton(
                                             label = stringResource(R.string.action_zebra),
                                             selected = showZebra,
                                             accentColor = IrPalette.IrCoral,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
+                                            leadingIcon = { tint -> ZebraIcon(tint = tint, modifier = Modifier.size(15.dp)) },
                                             onClick = {
                                                 showZebra = !showZebra
                                                 showStatus(if (showZebra) strZebraOn else strZebraOff)
-                                            }
-                                        )
-                                        ModePillButton(
-                                            label = stringResource(R.string.action_level),
-                                            selected = showLevel,
-                                            accentColor = IrPalette.IrEmerald,
-                                            enabled = cameraReady,
-                                            modifier = Modifier.weight(1f),
-                                            onClick = {
-                                                showLevel = !showLevel
-                                                showStatus(if (showLevel) strLevelOn else strLevelOff)
                                             }
                                         )
                                     }
                                 }
 
                                 ControlTab.RENK -> {
-                                    // Renk: Ekranda yalnızca tek kaydırıcı
                                     if (targetedColorConfig.isActive) {
-                                        // Noktasal renk seçili: renk başlığı + genişlik + tekil alt kaydırıcı seçici
+                                        // Noktasal renk başlığı + genişlik + kaldır
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
@@ -3415,7 +3305,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     Box(
                                                         modifier = Modifier
                                                             .clip(RoundedCornerShape(8.dp))
-                                                            .background(if (isSel) IrPalette.IrAmber else Color.White.copy(alpha = 0.08f))
+                                                            .background(if (isSel) IrPalette.IrAmber else IrPalette.SurfaceSubtle)
                                                             .clickable {
                                                                 targetedColorConfig = targetedColorConfig.copy(
                                                                     hueWidth = w,
@@ -3447,41 +3337,23 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             }
                                         }
 
-                                        // Tekil noktasal renk kaydırıcı seçici
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            ModePillButton(
-                                                label = stringResource(R.string.slider_point_hue),
-                                                selected = activePointColorSubSlider == PointColorSubSlider.TON,
-                                                accentColor = IrPalette.IrAmber,
-                                                enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { activePointColorSubSlider = PointColorSubSlider.TON }
-                                            )
-                                            ModePillButton(
-                                                label = stringResource(R.string.slider_saturation),
-                                                selected = activePointColorSubSlider == PointColorSubSlider.DOYGUNLUK,
-                                                accentColor = IrPalette.IrAmber,
-                                                enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { activePointColorSubSlider = PointColorSubSlider.DOYGUNLUK }
-                                            )
-                                            ModePillButton(
-                                                label = stringResource(R.string.slider_point_lum),
-                                                selected = activePointColorSubSlider == PointColorSubSlider.PARLAKLIK,
-                                                accentColor = IrPalette.IrAmber,
-                                                enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { activePointColorSubSlider = PointColorSubSlider.PARLAKLIK }
-                                            )
-                                        }
+                                        // Tekil noktasal renk seçici
+                                        SegmentedChoiceRow(
+                                            options = listOf(
+                                                PointColorSubSlider.TON to stringResource(R.string.slider_point_hue),
+                                                PointColorSubSlider.DOYGUNLUK to stringResource(R.string.slider_saturation),
+                                                PointColorSubSlider.PARLAKLIK to stringResource(R.string.slider_point_lum)
+                                            ),
+                                            selected = activePointColorSubSlider,
+                                            enabled = cameraReady,
+                                            onSelect = { activePointColorSubSlider = it }
+                                        )
 
                                         when (activePointColorSubSlider) {
                                             PointColorSubSlider.TON -> ProGradientSliderRow(
                                                 label = stringResource(R.string.slider_point_hue),
                                                 valueBadge = "${formatSigned(targetedColorConfig.deltaHue)}°",
+                                                isModified = abs(targetedColorConfig.deltaHue) > 0.5f,
                                                 value = targetedColorConfig.deltaHue,
                                                 defaultValue = 0f,
                                                 snapTolerance = 3f,
@@ -3512,6 +3384,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
                                                 label = stringResource(R.string.slider_point_sat),
                                                 valueBadge = "${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
+                                                isModified = abs(targetedColorConfig.deltaSat) > 0.02f,
                                                 value = targetedColorConfig.deltaSat,
                                                 defaultValue = 0f,
                                                 snapTolerance = 0.05f,
@@ -3542,6 +3415,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
                                                 label = stringResource(R.string.slider_point_lum),
                                                 valueBadge = "${formatSigned(targetedColorConfig.deltaLum * 100f)}%",
+                                                isModified = abs(targetedColorConfig.deltaLum) > 0.02f,
                                                 value = targetedColorConfig.deltaLum,
                                                 defaultValue = 0f,
                                                 snapTolerance = 0.05f,
@@ -3570,17 +3444,17 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             )
                                         }
                                     } else {
-                                        // Genel renk ayarları: Doygunluk / Kontrast seçicisi + tek kaydırıcı
+                                        // Tek kaydırıcı: Doygunluk veya Kontrast
                                         if (activeColorSubSlider == ColorSubSlider.DOYGUNLUK) {
                                             ProGradientSliderRow(
                                                 label = stringResource(R.string.slider_saturation),
                                                 valueBadge = "${String.format(turkishLocale, "%.2f", saturationValue)}x",
+                                                isModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f,
                                                 value = saturationValue,
                                                 defaultValue = DEFAULT_SATURATION,
                                                 snapTolerance = 0.04f,
                                                 valueRange = 0.50f..2.00f,
                                                 enabled = cameraReady,
-                                                // Gri → canlı renk geçişi
                                                 gradient = Brush.horizontalGradient(
                                                     colors = listOf(
                                                         Color(0xFF64748B),
@@ -3612,6 +3486,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             ProGradientSliderRow(
                                                 label = stringResource(R.string.slider_contrast),
                                                 valueBadge = "${String.format(turkishLocale, "%.2f", contrastValue)}x",
+                                                isModified = abs(contrastValue - DEFAULT_CONTRAST) > 0.02f,
                                                 value = contrastValue,
                                                 defaultValue = DEFAULT_CONTRAST,
                                                 snapTolerance = 0.04f,
@@ -3640,33 +3515,29 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             )
                                         }
 
+                                        // Ferah 2+2 satır: [Doygunluk | Kontrast] + [Pipet] + [Oto]
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            ModePillButton(
-                                                label = stringResource(R.string.slider_saturation),
-                                                selected = activeColorSubSlider == ColorSubSlider.DOYGUNLUK,
-                                                accentColor = IrPalette.IrAmber,
+                                            SegmentedChoiceRow(
+                                                options = listOf(
+                                                    ColorSubSlider.DOYGUNLUK to stringResource(R.string.slider_saturation),
+                                                    ColorSubSlider.KONTRAST to stringResource(R.string.slider_contrast)
+                                                ),
+                                                selected = activeColorSubSlider,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { activeColorSubSlider = ColorSubSlider.DOYGUNLUK }
+                                                modifier = Modifier.weight(1.6f),
+                                                onSelect = { activeColorSubSlider = it }
                                             )
-                                            ModePillButton(
-                                                label = stringResource(R.string.slider_contrast),
-                                                selected = activeColorSubSlider == ColorSubSlider.KONTRAST,
-                                                accentColor = IrPalette.IrAmber,
-                                                enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                onClick = { activeColorSubSlider = ColorSubSlider.KONTRAST }
-                                            )
-                                            ModePillButton(
-                                                label = if (isColorPipetteActive) stringResource(R.string.action_color_pipette_active) else stringResource(R.string.action_color_pipette),
+                                            ActionPillButton(
+                                                label = stringResource(R.string.action_pipette_short),
                                                 selected = isColorPipetteActive,
                                                 accentColor = IrPalette.IrTeal,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
+                                                modifier = Modifier.weight(0.85f),
+                                                leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(14.dp)) },
                                                 onClick = {
                                                     isColorPipetteActive = !isColorPipetteActive
                                                     if (isColorPipetteActive) {
@@ -3676,12 +3547,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     }
                                                 }
                                             )
-                                            ModePillButton(
-                                                label = stringResource(R.string.action_auto_contrast),
+                                            ActionPillButton(
+                                                label = stringResource(R.string.action_auto_short),
                                                 selected = false,
                                                 accentColor = IrPalette.IrAmber,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
+                                                modifier = Modifier.weight(0.75f),
+                                                leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(14.dp)) },
                                                 onClick = { runAutoContrast() }
                                             )
                                         }
@@ -3689,40 +3561,21 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 }
 
                                 ControlTab.OLCUM -> {
-                                    // Ölçüm modu: Tüm ekran / Kutu ölçüm
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        ModePillButton(
-                                            label = stringResource(R.string.metering_full),
-                                            selected = meteringMode == ExposureMeteringMode.FULL_SCREEN,
-                                            accentColor = IrPalette.IrAmber,
-                                            enabled = cameraReady,
-                                            modifier = Modifier.weight(1f),
-                                            onClick = {
-                                                isExposureBoxPicking = false
-                                                meteringMode = ExposureMeteringMode.FULL_SCREEN
-                                                updatePreviewSettings()
-                                                measureAndApplyExposureMetering(applyEvAdjust = false)
-                                            }
-                                        )
-                                        ModePillButton(
-                                            label = stringResource(R.string.metering_box),
-                                            selected = meteringMode == ExposureMeteringMode.BOX_SPOT,
-                                            accentColor = IrPalette.IrAmber,
-                                            enabled = cameraReady,
-                                            modifier = Modifier.weight(1f),
-                                            onClick = {
-                                                meteringMode = ExposureMeteringMode.BOX_SPOT
-                                                updatePreviewSettings()
-                                                measureAndApplyExposureMetering(applyEvAdjust = false)
-                                            }
-                                        )
-                                    }
+                                    SegmentedChoiceRow(
+                                        options = listOf(
+                                            ExposureMeteringMode.FULL_SCREEN to stringResource(R.string.metering_full),
+                                            ExposureMeteringMode.BOX_SPOT to stringResource(R.string.metering_box)
+                                        ),
+                                        selected = meteringMode,
+                                        enabled = cameraReady,
+                                        onSelect = { mode ->
+                                            isExposureBoxPicking = false
+                                            meteringMode = mode
+                                            updatePreviewSettings()
+                                            measureAndApplyExposureMetering(applyEvAdjust = false)
+                                        }
+                                    )
 
-                                    // Kutu modundaysa tek seçimli (radio) boyut seçimi + merkeze al + iki parmak ipucu
                                     if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
                                         val selectedBoxSize = MeteringBoxSize.entries.minByOrNull {
                                             abs(exposureBoxSizeNorm - it.norm)
@@ -3733,30 +3586,27 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            listOf(
-                                                MeteringBoxSize.KUCUK to stringResource(R.string.metering_size_small),
-                                                MeteringBoxSize.ORTA to stringResource(R.string.metering_size_medium),
-                                                MeteringBoxSize.BUYUK to stringResource(R.string.metering_size_large)
-                                            ).forEach { (sizeEnum, label) ->
-                                                ModePillButton(
-                                                    label = label,
-                                                    selected = selectedBoxSize == sizeEnum,
-                                                    accentColor = IrPalette.IrAmber,
-                                                    enabled = cameraReady,
-                                                    modifier = Modifier.weight(1f),
-                                                    onClick = {
-                                                        exposureBoxSizeNorm = sizeEnum.norm
-                                                        updatePreviewSettings()
-                                                        measureAndApplyExposureMetering(applyEvAdjust = false)
-                                                    }
-                                                )
-                                            }
-                                            ModePillButton(
+                                            SegmentedChoiceRow(
+                                                options = listOf(
+                                                    MeteringBoxSize.KUCUK to stringResource(R.string.metering_size_small),
+                                                    MeteringBoxSize.ORTA to stringResource(R.string.metering_size_medium),
+                                                    MeteringBoxSize.BUYUK to stringResource(R.string.metering_size_large)
+                                                ),
+                                                selected = selectedBoxSize,
+                                                enabled = cameraReady,
+                                                modifier = Modifier.weight(1.7f),
+                                                onSelect = { sizeEnum ->
+                                                    exposureBoxSizeNorm = sizeEnum.norm
+                                                    updatePreviewSettings()
+                                                    measureAndApplyExposureMetering(applyEvAdjust = false)
+                                                }
+                                            )
+                                            ActionPillButton(
                                                 label = stringResource(R.string.action_center_box),
                                                 selected = false,
                                                 accentColor = IrPalette.IrCyan,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
+                                                modifier = Modifier.weight(0.95f),
                                                 onClick = {
                                                     exposureBoxNorm = Offset(0.5f, 0.5f)
                                                     updatePreviewSettings()
@@ -3776,29 +3626,32 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         }
                     }
 
-                    // Yatay Çip Satırı: [BD] [Poz] [Renk] [Ölçüm] + tek panel aç/kapa ikonu (⌄ / ⌃)
+                    // Yatay Çip Satırı: [BD •] [Poz •] [Renk •] [Ölçüm •] + dönen vektör panel aç/kapa oku
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
                                 .padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
-                            listOf(
-                                ControlTab.BD to stringResource(R.string.chip_wb),
-                                ControlTab.POZ to stringResource(R.string.chip_exposure),
-                                ControlTab.RENK to stringResource(R.string.chip_color),
-                                ControlTab.OLCUM to stringResource(R.string.chip_metering)
-                            ).forEach { (tab, title) ->
+                            val chips = listOf(
+                                Triple(ControlTab.BD, stringResource(R.string.chip_wb), isWbModified),
+                                Triple(ControlTab.POZ, stringResource(R.string.chip_exposure), isEvModified),
+                                Triple(ControlTab.RENK, stringResource(R.string.chip_color), isColorModified),
+                                Triple(ControlTab.OLCUM, stringResource(R.string.chip_metering), isMeteringModified)
+                            )
+                            chips.forEach { (tab, title, modified) ->
                                 TabChip(
                                     title = title,
                                     selected = activeTab == tab && !isDeckCollapsed,
+                                    hasActiveIndicator = modified,
                                     modifier = Modifier.weight(1f),
                                     onClick = {
                                         if (activeTab == tab && !isDeckCollapsed) {
@@ -3812,7 +3665,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Paneli açma/kapatma için tek ⌄ / ⌃ ikonu (48x48dp dokunma alanı)
+                        // Tek panel açma/kapatma vektör ikonu (48x48dp dokunma alanı, pürüzsüz 180° dönüş)
+                        val chevronRotation by animateFloatAsState(
+                            targetValue = if (isDeckCollapsed) 180f else 0f,
+                            animationSpec = tween(220),
+                            label = "chevronRot"
+                        )
                         Box(
                             modifier = Modifier
                                 .size(48.dp)
@@ -3823,24 +3681,24 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(11.dp))
                                     .background(
                                         if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.22f)
-                                        else Color.White.copy(alpha = 0.08f)
+                                        else Color.White.copy(alpha = 0.07f)
                                     )
                                     .border(
                                         1.dp,
                                         if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
-                                        RoundedCornerShape(10.dp)
+                                        RoundedCornerShape(11.dp)
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(
-                                    text = if (isDeckCollapsed) "⌃" else "⌄",
-                                    color = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
+                                ChevronIcon(
+                                    tint = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .rotate(chevronRotation)
                                 )
                             }
                         }
@@ -3848,27 +3706,26 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 }
             }
 
-            // ALT DEKLANŞÖR ÇUBUĞU: Simetrik, temiz, her modda beyaz deklanşör
+            // ALT DEKLANŞÖR ÇUBUĞU: Kusursuz 3 bölgeli simetrik düzen
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 2.dp),
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Sol: Galeri küçük resmi + Ön ayarlar düğmesi
-                Row(
+                // Sol bölge: 52dp dairesel Galeri küçük resmi
+                Box(
                     modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    contentAlignment = Alignment.CenterStart
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(52.dp)
                             .semantics { contentDescription = strGalleryCd }
                             .clip(CircleShape)
                             .background(IrPalette.HudCard)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                            .border(1.5.dp, Color.White.copy(alpha = 0.34f), CircleShape)
                             .clickable {
                                 val targetUri = lastCapturedUri
                                 val intent = if (targetUri != null) {
@@ -3896,40 +3753,22 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 modifier = Modifier.fillMaxSize().clip(CircleShape)
                             )
                         } else {
-                            Text(
-                                text = "▣",
-                                color = IrPalette.TextSecondary,
-                                fontSize = 18.sp
-                            )
+                            GalleryIcon(tint = IrPalette.TextSecondary, modifier = Modifier.size(20.dp))
                         }
                     }
-
-                    QuickPillAction(
-                        text = stringResource(R.string.action_presets),
-                        highlighted = showPresetsListDialog,
-                        compact = true,
-                        enabled = cameraReady,
-                        onClick = { showPresetsListDialog = true }
-                    )
                 }
 
-                // Orta: Her modda beyaz halkalı beyaz daire deklanşör
-                val (shutterFlash, triggerShutter) = rememberGreenFade(decayDurationMs = 750)
+                // Orta: Her modda beyaz halkalı saf beyaz profesyonel deklanşör
                 val innerSize by animateDpAsState(
-                    targetValue = if (isShutterPressed) 48.dp else 56.dp,
-                    animationSpec = tween(100),
+                    targetValue = if (isShutterPressed) 50.dp else 58.dp,
+                    animationSpec = tween(90),
                     label = "shutterSize"
                 )
-                val baseShutterColor = if (!cameraReady) Color.Gray else Color.White
-                val shutterInnerColor = lerp(baseShutterColor, Color(0xFF00E676), shutterFlash)
-                val shutterBorderColor = lerp(
-                    Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f),
-                    Color(0xFF00E676),
-                    shutterFlash
-                )
+                val shutterInnerColor = if (!cameraReady) Color.Gray else Color.White
+                val shutterBorderColor = Color.White.copy(alpha = if (cameraReady) 0.95f else 0.35f)
                 Box(
                     modifier = Modifier
-                        .size(72.dp)
+                        .size(74.dp)
                         .semantics { contentDescription = strShutterCd }
                         .clip(CircleShape)
                         .border(3.dp, shutterBorderColor, CircleShape)
@@ -3938,7 +3777,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null
                         ) {
-                            triggerShutter { triggerCaptureWithTimer() }
+                            triggerCaptureWithTimer()
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -3946,41 +3785,66 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         modifier = Modifier
                             .size(innerSize)
                             .clip(CircleShape)
-                            .background(shutterInnerColor)
-                    )
+                            .background(shutterInnerColor),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (timerCountdown > 0) {
+                            Text(
+                                text = "✕",
+                                color = Color.Black,
+                                fontSize = 22.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
 
-                // Sağ: PRO modda Tümünü sıfırla (onaylı), OTO modda Ölçüm modu geçişi
-                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                // Sağ bölge: Ön ayarlar hapı + Sıfırla ikonu (PRO) / Ölçüm kısayolu (OTO)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End
+                ) {
                     if (!isAutoMode) {
-                        QuickPillAction(
-                            text = stringResource(R.string.action_reset_all),
-                            highlighted = false,
-                            compact = true,
-                            enabled = cameraReady,
-                            onClick = { showResetAllDialog = true }
-                        )
-                    } else {
-                        QuickPillAction(
-                            text = if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
-                                stringResource(R.string.metering_box)
-                            } else {
-                                stringResource(R.string.metering_full)
-                            },
-                            highlighted = meteringMode == ExposureMeteringMode.BOX_SPOT,
-                            compact = true,
-                            enabled = cameraReady,
-                            onClick = {
-                                meteringMode = if (meteringMode == ExposureMeteringMode.FULL_SCREEN) {
-                                    ExposureMeteringMode.BOX_SPOT
-                                } else {
-                                    ExposureMeteringMode.FULL_SCREEN
-                                }
-                                updatePreviewSettings()
-                                measureAndApplyExposureMetering(applyEvAdjust = false)
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = strResetAllCd }
+                                .clip(CircleShape)
+                                .clickable(enabled = cameraReady) { showResetAllDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (hasAnyManualChange) IrPalette.IrAmber.copy(alpha = 0.16f)
+                                        else IrPalette.HudCard
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (hasAnyManualChange) IrPalette.IrAmber.copy(alpha = 0.7f) else IrPalette.BorderSubtle,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ResetIcon(
+                                    tint = if (hasAnyManualChange) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                    modifier = Modifier.size(17.dp)
+                                )
                             }
-                        )
+                        }
                     }
+
+                    QuickPillAction(
+                        text = stringResource(R.string.action_presets),
+                        highlighted = showPresetsListDialog,
+                        compact = true,
+                        enabled = cameraReady,
+                        leadingIcon = { tint -> PresetStarIcon(tint = tint, modifier = Modifier.size(14.dp)) },
+                        onClick = { showPresetsListDialog = true }
+                    )
                 }
             }
         }
@@ -3990,7 +3854,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     if (showResetAllDialog) {
         AlertDialog(
             onDismissRequest = { showResetAllDialog = false },
-            containerColor = Color(0xFF141822),
+            containerColor = IrPalette.SurfaceElevated,
             titleContentColor = IrPalette.TextPrimary,
             textContentColor = IrPalette.TextSecondary,
             title = {
@@ -4042,7 +3906,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     if (showPresetsListDialog) {
         AlertDialog(
             onDismissRequest = { showPresetsListDialog = false },
-            containerColor = Color(0xFF141822),
+            containerColor = IrPalette.SurfaceElevated,
             titleContentColor = IrPalette.TextPrimary,
             textContentColor = IrPalette.TextSecondary,
             title = {
@@ -4063,11 +3927,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
+                            .background(IrPalette.IrAmber.copy(alpha = 0.14f))
                             .clickable {
                                 showPresetsListDialog = false
                                 showSaveDialog = true
                             }
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
             },
@@ -4092,15 +3957,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(
-                                        if (isMatching) IrPalette.IrAmber.copy(alpha = 0.20f)
+                                        if (isMatching) IrPalette.IrAmber.copy(alpha = 0.18f)
                                         else Color.White.copy(alpha = 0.05f)
                                     )
                                     .border(
                                         1.dp,
-                                        if (isMatching) IrPalette.IrAmber else Color.White.copy(alpha = 0.08f),
-                                        RoundedCornerShape(10.dp)
+                                        if (isMatching) IrPalette.IrAmber else Color.White.copy(alpha = 0.10f),
+                                        RoundedCornerShape(12.dp)
                                     )
                                     .clickable {
                                         isPickerActive = false
@@ -4119,7 +3984,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Text(
                                         text = preset.name,
                                         color = if (isMatching) IrPalette.IrAmber else IrPalette.TextPrimary,
@@ -4167,7 +4032,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     if (showSaveDialog) {
         AlertDialog(
             onDismissRequest = { showSaveDialog = false },
-            containerColor = Color(0xFF141822),
+            containerColor = IrPalette.SurfaceElevated,
             titleContentColor = IrPalette.TextPrimary,
             textContentColor = IrPalette.TextSecondary,
             title = {
@@ -4242,7 +4107,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     // Oran Öncelikli Çözünürlük Seçici Diyalogu (4:3 · 16:9 · 1:1 · 20:9 + Gelişmiş)
     if (showResolutionDialog) {
         ResolutionSelectorDialog(
-            availableResolutions = availableResolutions,
+            availableResolutions = availableResolutions.toList(),
             selectedResolution = selectedResolution,
             onSelect = { res ->
                 sharedPrefs.edit {
@@ -4261,7 +4126,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         )
     }
 
-    // 3 Adımlı İlk Açılış Rehberi (Noktasal BD, Oto-kalibre & Ölçüm Kutusu)
+    // 3 Adımlı İlk Açılış Rehberi
     if (showOnboardingGuide) {
         val stepTitles = listOf(
             stringResource(R.string.guide_step_1_title),
@@ -4279,7 +4144,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
                 showOnboardingGuide = false
             },
-            containerColor = Color(0xFF141822),
+            containerColor = IrPalette.SurfaceElevated,
             titleContentColor = IrPalette.TextPrimary,
             textContentColor = IrPalette.TextSecondary,
             title = {
@@ -4347,6 +4212,94 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 }
 
 @Composable
+private fun ModeSegmentItem(
+    text: String,
+    selected: Boolean,
+    activeColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 42.dp)
+            .clip(RoundedCornerShape(50))
+            .background(if (selected) activeColor else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (selected) Color.Black else IrPalette.TextSecondary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun TopBadgeButton(
+    text: String,
+    active: Boolean,
+    accentColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(50))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(if (active) accentColor.copy(alpha = 0.24f) else IrPalette.HudCard)
+                .border(1.dp, if (active) accentColor else IrPalette.BorderSubtle, RoundedCornerShape(50))
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Text(
+                text = text,
+                color = if (active) accentColor else IrPalette.TextPrimary,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun TopIconButton(
+    active: Boolean,
+    accentColor: Color,
+    contentDesc: String,
+    onClick: () -> Unit,
+    icon: @Composable (Color) -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .semantics { contentDescription = contentDesc }
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(if (active) accentColor.copy(alpha = 0.22f) else IrPalette.HudCard)
+                .border(1.dp, if (active) accentColor else IrPalette.BorderSubtle, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            icon(if (active) accentColor else IrPalette.TextSecondary)
+        }
+    }
+}
+
+@Composable
 private fun StatusTelemetryChip(
     text: String,
     accentColor: Color,
@@ -4355,10 +4308,10 @@ private fun StatusTelemetryChip(
 ) {
     Box(
         modifier = Modifier
-            .sizeIn(minHeight = 48.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .sizeIn(minHeight = 36.dp)
+            .clip(RoundedCornerShape(50))
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 4.dp),
+            .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -4381,19 +4334,24 @@ private fun LiveHistogramOverlay(
 ) {
     Box(
         modifier = modifier
-            .width(96.dp)
-            .height(38.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.Black.copy(alpha = 0.52f))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .width(102.dp)
+            .height(40.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.Black.copy(alpha = 0.56f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 5.dp, vertical = 5.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             if (bins.isEmpty()) return@Canvas
             val w = size.width
             val h = size.height
-            val step = w / (bins.size - 1).coerceAtLeast(1)
+            // İnce dikey referans çizgileri (gölgeler / orta tonlar / vurgular)
+            val guideColor = Color.White.copy(alpha = 0.12f)
+            drawLine(guideColor, Offset(w * 0.25f, 0f), Offset(w * 0.25f, h), strokeWidth = 0.8.dp.toPx())
+            drawLine(guideColor, Offset(w * 0.50f, 0f), Offset(w * 0.50f, h), strokeWidth = 0.8.dp.toPx())
+            drawLine(guideColor, Offset(w * 0.75f, 0f), Offset(w * 0.75f, h), strokeWidth = 0.8.dp.toPx())
 
+            val step = w / (bins.size - 1).coerceAtLeast(1)
             val fillPath = Path().apply {
                 moveTo(0f, h)
                 bins.forEachIndexed { idx, v ->
@@ -4406,7 +4364,9 @@ private fun LiveHistogramOverlay(
             }
             drawPath(
                 path = fillPath,
-                color = accentColor.copy(alpha = 0.36f),
+                brush = Brush.verticalGradient(
+                    colors = listOf(accentColor.copy(alpha = 0.52f), accentColor.copy(alpha = 0.08f))
+                ),
                 style = Fill
             )
 
@@ -4419,8 +4379,8 @@ private fun LiveHistogramOverlay(
             }
             drawPath(
                 path = strokePath,
-                color = Color.White.copy(alpha = 0.85f),
-                style = Stroke(width = 1.2.dp.toPx())
+                color = Color.White.copy(alpha = 0.88f),
+                style = Stroke(width = 1.2.dp.toPx(), join = StrokeJoin.Round)
             )
         }
     }
@@ -4433,28 +4393,394 @@ private fun HighlightGuardToggle(
     onToggle: () -> Unit
 ) {
     val label = stringResource(R.string.action_highlight_guard)
-    Row(
+    Box(
         modifier = Modifier
-            .sizeIn(minHeight = 48.dp)
+            .sizeIn(minHeight = 40.dp)
             .clip(RoundedCornerShape(50))
             .clickable(enabled = interactive, onClick = onToggle)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .padding(end = 4.dp),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
+        Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
-                .background(if (enabled) IrPalette.IrTeal.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.08f))
+                .background(if (enabled) IrPalette.IrTeal.copy(alpha = 0.22f) else IrPalette.SurfaceSubtle)
                 .border(1.dp, if (enabled) IrPalette.IrTeal else IrPalette.BorderSubtle, RoundedCornerShape(50))
-                .padding(horizontal = 8.dp, vertical = 5.dp)
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            ShieldIcon(
+                tint = if (enabled) IrPalette.IrTeal else IrPalette.TextSecondary,
+                modifier = Modifier.size(13.dp)
+            )
             Text(
-                text = "🛡 $label",
+                text = label,
                 color = if (enabled) IrPalette.IrTeal else IrPalette.TextSecondary,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+private fun <T> SegmentedChoiceRow(
+    options: List<Pair<T, String>>,
+    selected: T,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onSelect: (T) -> Unit
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(12.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        options.forEach { (item, label) ->
+            val isSel = item == selected
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .sizeIn(minHeight = 40.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (isSel) IrPalette.IrAmber.copy(alpha = 0.22f) else Color.Transparent)
+                    .border(
+                        1.dp,
+                        if (isSel) IrPalette.IrAmber.copy(alpha = 0.85f) else Color.Transparent,
+                        RoundedCornerShape(9.dp)
+                    )
+                    .clickable(enabled = enabled) { onSelect(item) }
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = if (isSel) IrPalette.IrAmber else IrPalette.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionPillButton(
+    label: String,
+    selected: Boolean,
+    accentColor: Color,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    leadingIcon: (@Composable (Color) -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    val bgAlpha by animateFloatAsState(if (selected) 0.22f else 0.06f, label = "actionBg")
+    val bg = if (selected) accentColor.copy(alpha = bgAlpha) else Color.White.copy(alpha = 0.06f)
+    val border = if (selected) accentColor.copy(alpha = 0.85f) else IrPalette.BorderSubtle
+    val contentColor = if (selected) accentColor else IrPalette.TextPrimary
+
+    Box(
+        modifier = modifier
+            .sizeIn(minHeight = 46.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(bg)
+                .border(1.dp, border, RoundedCornerShape(12.dp))
+                .padding(horizontal = 8.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            if (leadingIcon != null) {
+                leadingIcon(contentColor)
+                Spacer(modifier = Modifier.width(5.dp))
+            }
+            Text(
+                text = label,
+                color = contentColor,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun TabChip(
+    title: String,
+    selected: Boolean,
+    hasActiveIndicator: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    val bg = if (selected) IrPalette.IrAmber.copy(alpha = 0.22f) else Color.Transparent
+    val border = if (selected) IrPalette.IrAmber else Color.Transparent
+    val textColor = if (selected) IrPalette.IrAmber else IrPalette.TextSecondary
+
+    Box(
+        modifier = modifier
+            .sizeIn(minHeight = 44.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = title,
+                color = textColor,
+                fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                maxLines = 1
+            )
+            if (hasActiveIndicator) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(IrPalette.IrAmber)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProGradientSliderRow(
+    label: String,
+    valueBadge: String,
+    isModified: Boolean,
+    value: Float,
+    defaultValue: Float,
+    snapTolerance: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    gradient: Brush,
+    trailingHeaderContent: (@Composable () -> Unit)? = null,
+    onStepMinus: () -> Unit,
+    onStepPlus: () -> Unit,
+    onReset: () -> Unit,
+    onValueChange: (Float) -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    var wasSnapped by remember { mutableStateOf(abs(value - defaultValue) <= snapTolerance * 0.5f) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = label,
+                    color = IrPalette.TextSecondary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (isModified) IrPalette.IrAmber.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.09f))
+                        .border(
+                            1.dp,
+                            if (isModified) IrPalette.IrAmber.copy(alpha = 0.70f) else Color.Transparent,
+                            RoundedCornerShape(8.dp)
+                        )
+                        .clickable(enabled = enabled, onClick = onReset)
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = valueBadge,
+                        color = if (isModified) IrPalette.IrAmber else IrPalette.TextPrimary,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                trailingHeaderContent?.invoke()
+                StepButton(symbol = "−", enabled = enabled, onClick = onStepMinus)
+                StepButton(symbol = "+", enabled = enabled, onClick = onStepPlus)
+            }
+        }
+
+        // Profesyonel skala çentikli kaydırıcı: varsayılan çentikte yapışma + çift dokunmayla sıfırlama
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(38.dp)
+                .pointerInput(enabled, onReset) {
+                    if (enabled) {
+                        detectTapGestures(onDoubleTap = { onReset() })
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .height(18.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape)
+                        .background(gradient)
+                )
+                val span = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
+                val defaultFraction = ((defaultValue - valueRange.start) / span).coerceIn(0f, 1f)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    // İnce cetvel çentikleri
+                    val tickCount = 12
+                    val minorColor = Color.White.copy(alpha = 0.26f)
+                    for (i in 1 until tickCount) {
+                        val x = size.width * (i.toFloat() / tickCount)
+                        drawLine(
+                            color = minorColor,
+                            start = Offset(x, size.height * 0.25f),
+                            end = Offset(x, size.height * 0.75f),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
+                    // Varsayılan değer referans çentiği
+                    val tickX = size.width * defaultFraction
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.95f),
+                        start = Offset(tickX, 0f),
+                        end = Offset(tickX, size.height),
+                        strokeWidth = 2.2.dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+
+            Slider(
+                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
+                onValueChange = { raw ->
+                    val snapped = if (abs(raw - defaultValue) <= snapTolerance) {
+                        if (!wasSnapped) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            wasSnapped = true
+                        }
+                        defaultValue
+                    } else {
+                        wasSnapped = false
+                        raw
+                    }
+                    onValueChange(snapped)
+                },
+                valueRange = valueRange,
+                enabled = enabled,
+                colors = SliderDefaults.colors(
+                    thumbColor = Color.White,
+                    activeTrackColor = Color.Transparent,
+                    inactiveTrackColor = Color.Transparent,
+                    disabledThumbColor = Color.White.copy(alpha = 0.35f),
+                    disabledActiveTrackColor = Color.Transparent,
+                    disabledInactiveTrackColor = Color.Transparent
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(width = 44.dp, height = 38.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(width = 32.dp, height = 26.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color.White.copy(alpha = 0.10f))
+                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(7.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = symbol,
+                color = IrPalette.TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun QuickPillAction(
+    text: String,
+    highlighted: Boolean = false,
+    compact: Boolean = false,
+    enabled: Boolean,
+    leadingIcon: (@Composable (Color) -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    val bg = if (highlighted) IrPalette.IrAmber.copy(alpha = 0.22f) else IrPalette.HudCard
+    val border = if (highlighted) IrPalette.IrAmber else IrPalette.BorderSubtle
+    val textColor = if (highlighted) IrPalette.IrAmber else IrPalette.TextPrimary
+
+    Box(
+        modifier = Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .clip(RoundedCornerShape(50))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(bg)
+                .border(1.dp, border, RoundedCornerShape(50))
+                .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            leadingIcon?.invoke(textColor)
+            Text(
+                text = text,
+                color = textColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
@@ -4489,7 +4815,6 @@ private fun ResolutionSelectorDialog(
     var showAdvanced by remember { mutableStateOf(false) }
 
     val ratioResolutions = grouped[selectedRatioTag].orEmpty()
-    // Birbirine %8'den yakın çözünürlükleri (örn. 4080×3060 / 4000×3000) "Gelişmiş" bölümüne ayır
     val (primaryList, advancedList) = remember(ratioResolutions) {
         val primary = mutableListOf<Size>()
         val advanced = mutableListOf<Size>()
@@ -4510,7 +4835,7 @@ private fun ResolutionSelectorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = Color(0xFF141822),
+        containerColor = IrPalette.SurfaceElevated,
         titleContentColor = IrPalette.TextPrimary,
         textContentColor = IrPalette.TextSecondary,
         title = {
@@ -4529,13 +4854,12 @@ private fun ResolutionSelectorDialog(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                // Adım 1: Oran çipleri (4:3 · 16:9 · 1:1 · 20:9)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(availableRatios) { ratioTag ->
                         val isSel = ratioTag == selectedRatioTag
                         Box(
                             modifier = Modifier
-                                .sizeIn(minWidth = 54.dp, minHeight = 48.dp)
+                                .sizeIn(minWidth = 56.dp, minHeight = 48.dp)
                                 .clip(RoundedCornerShape(10.dp))
                                 .clickable {
                                     selectedRatioTag = ratioTag
@@ -4566,7 +4890,6 @@ private fun ResolutionSelectorDialog(
                     }
                 }
 
-                // Adım 2: Seçilen orana ait MP seçenekleri
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -4602,11 +4925,11 @@ private fun ResolutionSelectorDialog(
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold
                                 )
-                                Text(
-                                    text = if (showAdvanced) "⌃" else "⌄",
-                                    color = IrPalette.TextSecondary,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
+                                ChevronIcon(
+                                    tint = IrPalette.TextSecondary,
+                                    modifier = Modifier
+                                        .size(14.dp)
+                                        .rotate(if (showAdvanced) 180f else 0f)
                                 )
                             }
                         }
@@ -4708,297 +5031,7 @@ private fun ResolutionItemRow(
     }
 }
 
-@Composable
-private fun ModePillButton(
-    label: String,
-    selected: Boolean,
-    accentColor: Color,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val (greenPulse, triggerClick) = rememberGreenFade()
-    val bgAlpha by animateFloatAsState(if (selected) 0.24f else 0.06f, label = "modeBg")
-    val baseBg = if (selected) accentColor.copy(alpha = bgAlpha) else Color.White.copy(alpha = 0.06f)
-    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
-    val baseBorder = if (selected) accentColor.copy(alpha = 0.85f) else IrPalette.BorderSubtle
-    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
-
-    Box(
-        modifier = modifier
-            .sizeIn(minHeight = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(enabled = enabled) { triggerClick(onClick) },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(bg)
-                .border(1.dp, border, RoundedCornerShape(10.dp))
-                .padding(horizontal = 6.dp, vertical = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val baseText = if (selected) accentColor else IrPalette.TextPrimary
-            val textColor = lerp(baseText, Color.Black, greenPulse)
-            Text(
-                text = label,
-                color = textColor,
-                fontSize = 12.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-@Composable
-private fun TabChip(
-    title: String,
-    selected: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    val (greenPulse, triggerClick) = rememberGreenFade()
-    val baseBg = if (selected) IrPalette.IrAmber.copy(alpha = 0.24f) else Color.Transparent
-    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
-    val baseBorder = if (selected) IrPalette.IrAmber else Color.Transparent
-    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
-    val baseText = if (selected) IrPalette.IrAmber else IrPalette.TextSecondary
-    val textColor = lerp(baseText, Color.Black, greenPulse)
-
-    Box(
-        modifier = modifier
-            .sizeIn(minHeight = 48.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { triggerClick(onClick) },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .background(bg)
-                .border(1.dp, border, RoundedCornerShape(10.dp))
-                .padding(vertical = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = title,
-                color = textColor,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1
-            )
-        }
-    }
-}
-
-@Composable
-private fun ProGradientSliderRow(
-    label: String,
-    valueBadge: String,
-    value: Float,
-    defaultValue: Float,
-    snapTolerance: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    enabled: Boolean,
-    gradient: Brush,
-    trailingHeaderContent: (@Composable () -> Unit)? = null,
-    onStepMinus: () -> Unit,
-    onStepPlus: () -> Unit,
-    onReset: () -> Unit,
-    onValueChange: (Float) -> Unit
-) {
-    val haptic = LocalHapticFeedback.current
-    var wasSnapped by remember { mutableStateOf(abs(value - defaultValue) <= snapTolerance * 0.5f) }
-
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = label,
-                    color = IrPalette.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color.White.copy(alpha = 0.10f))
-                        .clickable(enabled = enabled, onClick = onReset)
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = valueBadge,
-                        color = IrPalette.TextPrimary,
-                        fontSize = 12.sp,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                trailingHeaderContent?.invoke()
-                StepButton(symbol = "−", enabled = enabled, onClick = onStepMinus)
-                StepButton(symbol = "+", enabled = enabled, onClick = onStepPlus)
-            }
-        }
-
-        // Kaydırıcı: varsayılan değerde görünür çentik + hafif yapışma (haptic) + çift dokunmayla sıfırlama
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(36.dp)
-                .pointerInput(enabled, onReset) {
-                    if (enabled) {
-                        detectTapGestures(onDoubleTap = { onReset() })
-                    }
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Arka plan gradyan çubuğu + varsayılan değer çentiği
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 10.dp)
-                    .height(14.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(CircleShape)
-                        .background(gradient)
-                )
-                val span = (valueRange.endInclusive - valueRange.start).coerceAtLeast(0.0001f)
-                val defaultFraction = ((defaultValue - valueRange.start) / span).coerceIn(0f, 1f)
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val tickX = size.width * defaultFraction
-                    drawLine(
-                        color = Color.White.copy(alpha = 0.90f),
-                        start = Offset(tickX, 0f),
-                        end = Offset(tickX, size.height),
-                        strokeWidth = 2.dp.toPx()
-                    )
-                }
-            }
-
-            Slider(
-                value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-                onValueChange = { raw ->
-                    val snapped = if (abs(raw - defaultValue) <= snapTolerance) {
-                        if (!wasSnapped) {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            wasSnapped = true
-                        }
-                        defaultValue
-                    } else {
-                        wasSnapped = false
-                        raw
-                    }
-                    onValueChange(snapped)
-                },
-                valueRange = valueRange,
-                enabled = enabled,
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.Transparent,
-                    inactiveTrackColor = Color.Transparent,
-                    disabledThumbColor = Color.White.copy(alpha = 0.35f),
-                    disabledActiveTrackColor = Color.Transparent,
-                    disabledInactiveTrackColor = Color.Transparent
-                )
-            )
-        }
-    }
-}
-
-@Composable
-private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
-    val (greenPulse, triggerClick) = rememberGreenFade(decayDurationMs = 450)
-    val bg = lerp(Color.White.copy(alpha = 0.12f), Color(0xFF00E676).copy(alpha = 0.9f), greenPulse)
-    val textColor = lerp(IrPalette.TextPrimary, Color.Black, greenPulse)
-    Box(
-        modifier = Modifier
-            .size(width = 48.dp, height = 36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled) { triggerClick(onClick) },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .size(width = 32.dp, height = 26.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(bg)
-                .border(1.dp, lerp(Color.Transparent, Color(0xFF00E676), greenPulse), RoundedCornerShape(6.dp)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = symbol,
-                color = textColor,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuickPillAction(
-    text: String,
-    highlighted: Boolean = false,
-    compact: Boolean = false,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    val (greenPulse, triggerClick) = rememberGreenFade()
-    val baseBg = if (highlighted) IrPalette.IrAmber.copy(alpha = 0.24f) else IrPalette.HudCard
-    val bg = lerp(baseBg, Color(0xFF00E676).copy(alpha = 0.85f), greenPulse)
-    val baseBorder = if (highlighted) IrPalette.IrAmber else IrPalette.BorderSubtle
-    val border = lerp(baseBorder, Color(0xFF00E676), greenPulse)
-    val baseText = if (highlighted) IrPalette.IrAmber else IrPalette.TextPrimary
-    val textColor = lerp(baseText, Color.Black, greenPulse)
-
-    Box(
-        modifier = Modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-            .clip(RoundedCornerShape(50))
-            .clickable(enabled = enabled) { triggerClick(onClick) },
-        contentAlignment = Alignment.Center
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50))
-                .background(bg)
-                .border(1.dp, border, RoundedCornerShape(50))
-                .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 9.dp)
-        ) {
-            Text(
-                text = text,
-                color = textColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false
-            )
-        }
-    }
-}
+// --- Özel Keskin Vektör İkonları (Canvas) ---
 
 @Composable
 private fun GridIcon(tint: Color, modifier: Modifier = Modifier) {
@@ -5008,10 +5041,183 @@ private fun GridIcon(tint: Color, modifier: Modifier = Modifier) {
         val x2 = size.width * 2f / 3f
         val y1 = size.height / 3f
         val y2 = size.height * 2f / 3f
-        drawLine(tint, Offset(x1, 0f), Offset(x1, size.height), strokeWidth = stroke)
-        drawLine(tint, Offset(x2, 0f), Offset(x2, size.height), strokeWidth = stroke)
-        drawLine(tint, Offset(0f, y1), Offset(size.width, y1), strokeWidth = stroke)
-        drawLine(tint, Offset(0f, y2), Offset(size.width, y2), strokeWidth = stroke)
+        drawLine(tint, Offset(x1, 0f), Offset(x1, size.height), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(x2, 0f), Offset(x2, size.height), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(0f, y1), Offset(size.width, y1), strokeWidth = stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(0f, y2), Offset(size.width, y2), strokeWidth = stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun ChevronIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 2.dp.toPx()
+        val path = Path().apply {
+            moveTo(size.width * 0.2f, size.height * 0.35f)
+            lineTo(size.width * 0.5f, size.height * 0.68f)
+            lineTo(size.width * 0.8f, size.height * 0.35f)
+        }
+        drawPath(
+            path = path,
+            color = tint,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+}
+
+@Composable
+private fun TimerIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.56f
+        val r = size.minDimension * 0.38f
+        drawCircle(tint, radius = r, center = Offset(cx, cy), style = Stroke(width = stroke))
+        drawLine(tint, Offset(cx - r * 0.35f, size.height * 0.08f), Offset(cx + r * 0.35f, size.height * 0.08f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(cx, cy), Offset(cx + r * 0.45f, cy - r * 0.45f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun LevelIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.6.dp.toPx()
+        val cy = size.height * 0.5f
+        drawLine(tint, Offset(size.width * 0.08f, cy), Offset(size.width * 0.34f, cy), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.66f, cy), Offset(size.width * 0.92f, cy), stroke, cap = StrokeCap.Round)
+        drawCircle(tint, radius = size.minDimension * 0.14f, center = Offset(size.width * 0.5f, cy), style = Stroke(width = stroke))
+    }
+}
+
+@Composable
+private fun ShieldIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        val path = Path().apply {
+            moveTo(size.width * 0.5f, size.height * 0.08f)
+            lineTo(size.width * 0.86f, size.height * 0.24f)
+            lineTo(size.width * 0.86f, size.height * 0.52f)
+            quadraticBezierTo(size.width * 0.86f, size.height * 0.80f, size.width * 0.5f, size.height * 0.94f)
+            quadraticBezierTo(size.width * 0.14f, size.height * 0.80f, size.width * 0.14f, size.height * 0.52f)
+            lineTo(size.width * 0.14f, size.height * 0.24f)
+            close()
+        }
+        drawPath(path, color = tint, style = Stroke(width = stroke, join = StrokeJoin.Round))
+    }
+}
+
+@Composable
+private fun ZebraIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.4.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        drawLine(tint, Offset(size.width * 0.18f, size.height * 0.55f), Offset(size.width * 0.55f, size.height * 0.18f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.22f, size.height * 0.84f), Offset(size.width * 0.84f, size.height * 0.22f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.52f, size.height * 0.84f), Offset(size.width * 0.84f, size.height * 0.52f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun TargetCrosshairIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val r = size.minDimension * 0.34f
+        drawCircle(tint, radius = r, center = Offset(cx, cy), style = Stroke(width = stroke))
+        drawLine(tint, Offset(cx, size.height * 0.04f), Offset(cx, cy - r * 0.6f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(cx, cy + r * 0.6f), Offset(cx, size.height * 0.96f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.04f, cy), Offset(cx - r * 0.6f, cy), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(cx + r * 0.6f, cy), Offset(size.width * 0.96f, cy), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun PipetteIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        drawLine(tint, Offset(size.width * 0.22f, size.height * 0.78f), Offset(size.width * 0.70f, size.height * 0.30f), stroke, cap = StrokeCap.Round)
+        drawCircle(tint, radius = size.minDimension * 0.16f, center = Offset(size.width * 0.76f, size.height * 0.24f), style = Stroke(width = stroke))
+        drawLine(tint, Offset(size.width * 0.52f, size.height * 0.24f), Offset(size.width * 0.76f, size.height * 0.48f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun SparkleAutoIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val path = Path().apply {
+            moveTo(cx, size.height * 0.08f)
+            quadraticBezierTo(cx, cy, size.width * 0.92f, cy)
+            quadraticBezierTo(cx, cy, cx, size.height * 0.92f)
+            quadraticBezierTo(cx, cy, size.width * 0.08f, cy)
+            quadraticBezierTo(cx, cy, cx, size.height * 0.08f)
+            close()
+        }
+        drawPath(path, color = tint, style = Fill)
+    }
+}
+
+@Composable
+private fun ResetIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.6.dp.toPx()
+        drawArc(
+            color = tint,
+            startAngle = -60f,
+            sweepAngle = 290f,
+            useCenter = false,
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
+        )
+        drawLine(tint, Offset(size.width * 0.64f, size.height * 0.10f), Offset(size.width * 0.78f, size.height * 0.26f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.56f, size.height * 0.28f), Offset(size.width * 0.78f, size.height * 0.26f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+private fun GalleryIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        drawRoundRect(
+            color = tint,
+            cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        val mountain = Path().apply {
+            moveTo(size.width * 0.14f, size.height * 0.78f)
+            lineTo(size.width * 0.42f, size.height * 0.46f)
+            lineTo(size.width * 0.60f, size.height * 0.66f)
+            lineTo(size.width * 0.74f, size.height * 0.52f)
+            lineTo(size.width * 0.88f, size.height * 0.78f)
+        }
+        drawPath(mountain, color = tint, style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        drawCircle(tint, radius = size.minDimension * 0.09f, center = Offset(size.width * 0.30f, size.height * 0.30f))
+    }
+}
+
+@Composable
+private fun PresetStarIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val outer = size.minDimension * 0.44f
+        val inner = outer * 0.44f
+        val path = Path()
+        for (i in 0 until 10) {
+            val angle = Math.toRadians((i * 36.0) - 90.0)
+            val r = if (i % 2 == 0) outer else inner
+            val x = cx + (cos(angle) * r).toFloat()
+            val y = cy + (sin(angle) * r).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        drawPath(path, color = tint, style = Stroke(width = stroke, join = StrokeJoin.Round))
     }
 }
 

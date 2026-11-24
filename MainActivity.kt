@@ -50,6 +50,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -348,6 +349,7 @@ private class CameraHolder {
     var previewBuilder: CaptureRequest.Builder? = null
     var imageReader: ImageReader? = null
     var activeSurface: Surface? = null
+    @Volatile var activeSurfaceTexture: SurfaceTexture? = null
     var isOpening: Boolean = false
     var isDisposed: Boolean = false
 
@@ -2091,6 +2093,7 @@ fun CameraScreen(
 
     var cameraReady by remember { mutableStateOf(false) }
     var isStudioMode by remember { mutableStateOf(incomingEditUri != null) }
+    val currentIsStudioMode by rememberUpdatedState(isStudioMode)
     var studioPhotoUri by remember { mutableStateOf<Uri?>(incomingEditUri) }
     var studioPhotoNonce by remember { mutableIntStateOf(incomingEditNonce) }
     var isAutoMode by remember { mutableStateOf(true) }
@@ -2686,14 +2689,21 @@ fun CameraScreen(
     /** Returns true when no open CameraDevice existed (so caller can reopen immediately without waiting for onClosed). */
     fun closeCameraInternal(releaseReader: Boolean = true, pendingReopen: SurfaceTexture? = null): Boolean {
         var closedWithoutActiveDevice = false
+        var closeGenSnapshot = 0
+        var hadDevice = false
         synchronized(holder) {
             holder.cameraGeneration += 1
+            closeGenSnapshot = holder.cameraGeneration
             holder.isOpening = false
             holder.isTakingPhoto = false
-            holder.pendingReopenSurfaceTexture = pendingReopen
-            val hadDevice = holder.device != null
+            if (pendingReopen != null) {
+                holder.pendingReopenSurfaceTexture = pendingReopen
+            }
+            hadDevice = holder.device != null
             if (hadDevice) {
                 holder.isClosingDevice = true
+            } else {
+                holder.isClosingDevice = false
             }
             try { holder.session?.close() } catch (_: Exception) {}
             holder.session = null
@@ -2702,6 +2712,7 @@ fun CameraScreen(
             holder.previewBuilder = null
             try { holder.activeSurface?.release() } catch (_: Exception) {}
             holder.activeSurface = null
+            holder.activeSurfaceTexture = null
             if (releaseReader) {
                 try { holder.imageReader?.close() } catch (_: Exception) {}
                 holder.imageReader = null
@@ -2713,6 +2724,25 @@ fun CameraScreen(
                 closedWithoutActiveDevice = true
             }
         }
+        if (hadDevice) {
+            // Güvenlik zaman aşımı: bazı cihaz HAL'ları onClosed çağrısını geciktirir veya atlar;
+            // 550 ms içinde onClosed gelmezse isClosingDevice kilidini açıp bekleyen yüzeyi başlat.
+            cameraHandler.postDelayed({
+                val pending = synchronized(holder) {
+                    if (holder.isClosingDevice && holder.cameraGeneration == closeGenSnapshot) {
+                        holder.isClosingDevice = false
+                        val st = holder.pendingReopenSurfaceTexture
+                        holder.pendingReopenSurfaceTexture = null
+                        st
+                    } else {
+                        null
+                    }
+                }
+                if (pending != null && !holder.isDisposed && !currentIsStudioMode) {
+                    startCameraInternal(pending)
+                }
+            }, 550L)
+        }
         mainHandler.post { cameraReady = false }
         return closedWithoutActiveDevice
     }
@@ -2722,12 +2752,17 @@ fun CameraScreen(
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             return
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && surfaceTexture.isReleased) {
+            return
+        }
         val openGen = synchronized(holder) {
-            if (holder.isDisposed || holder.device != null || holder.isOpening) return
-            if (holder.isClosingDevice) {
+            if (holder.isDisposed || currentIsStudioMode) return
+            if (holder.isClosingDevice || holder.isOpening) {
+                // Açılış veya kapanış sürerken gelen yeni yüzeyi ASLA düşürme, kuyruğa al!
                 holder.pendingReopenSurfaceTexture = surfaceTexture
                 return
             }
+            if (holder.device != null) return
             holder.isOpening = true
             holder.cameraGeneration += 1
             holder.cameraGeneration
@@ -2887,17 +2922,31 @@ fun CameraScreen(
                     null
                 }
                 holder.activeSurface = surface
+                holder.activeSurfaceTexture = surfaceTexture
             }
 
             cameraManager.openCamera(cameraId, object : CameraDevice.StateCallback() {
                 override fun onOpened(camera: CameraDevice) {
-                    synchronized(holder) {
+                    val surfaceDead = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && surfaceTexture.isReleased
+                    var stalePending: SurfaceTexture? = null
+                    val shouldAbort = synchronized(holder) {
                         holder.isOpening = false
-                        if (holder.isDisposed || holder.cameraGeneration != openGen) {
-                            camera.close()
-                            return
+                        if (holder.isDisposed || currentIsStudioMode || holder.cameraGeneration != openGen || surfaceDead) {
+                            stalePending = holder.pendingReopenSurfaceTexture
+                            holder.pendingReopenSurfaceTexture = null
+                            true
+                        } else {
+                            holder.device = camera
+                            false
                         }
-                        holder.device = camera
+                    }
+                    if (shouldAbort) {
+                        try { camera.close() } catch (_: Exception) {}
+                        val nextSt = stalePending
+                        if (nextSt != null && !holder.isDisposed && !currentIsStudioMode) {
+                            cameraHandler.post { startCameraInternal(nextSt) }
+                        }
+                        return
                     }
                     val readerSurface = holder.imageReader?.surface
                     if (readerSurface == null) {
@@ -3000,13 +3049,16 @@ fun CameraScreen(
                         holder.pendingReopenSurfaceTexture = null
                         st
                     }
-                    if (pending != null && !holder.isDisposed) {
+                    if (pending != null && !holder.isDisposed && !currentIsStudioMode) {
                         cameraHandler.post { startCameraInternal(pending) }
                     }
                 }
             }, cameraHandler)
         } catch (e: Exception) {
-            synchronized(holder) { holder.isOpening = false }
+            synchronized(holder) {
+                holder.isOpening = false
+                holder.isClosingDevice = false
+            }
             Log.e("CameraScreen", "Failed to open camera", e)
         }
     }
@@ -3245,25 +3297,62 @@ fun CameraScreen(
         }
     }
 
-    val currentIsStudioMode by rememberUpdatedState(isStudioMode)
+    // Note: currentIsStudioMode declared near top of CameraScreen so closeCameraInternal/startCameraInternal can read it safely
+    var prevStudioMode by remember { mutableStateOf(isStudioMode) }
+
+    BackHandler(enabled = isStudioMode) {
+        isStudioMode = false
+    }
 
     LaunchedEffect(isStudioMode) {
         if (isStudioMode) {
+            prevStudioMode = true
             isPickerActive = false
             isColorPipetteActive = false
             isExposureBoxPicking = false
-            cameraHandler.post { closeCameraInternal(releaseReader = true) }
-        } else {
+            textureViewInstance = null
+            cameraHandler.post {
+                synchronized(holder) { holder.pendingReopenSurfaceTexture = null }
+                closeCameraInternal(releaseReader = true)
+            }
+        } else if (prevStudioMode) {
+            // Stüdyo'dan kameraya dönüşte yeni TextureView zaten sıfırdan oluşturuluyor;
+            // surfaceGeneration'ı artırma (yoksa yeni TextureView açılırken iptal olur!).
+            prevStudioMode = false
             holder.previewFallbackLevel = 0
-            surfaceGeneration += 1
         }
     }
 
     LaunchedEffect(hasCameraPermission, textureViewInstance, surfaceGeneration, isStudioMode) {
-        if (!isStudioMode && hasCameraPermission && holder.device == null && !holder.isOpening && !holder.isClosingDevice) {
+        if (!isStudioMode && hasCameraPermission) {
             textureViewInstance?.let { tv ->
                 if (tv.isAvailable) {
                     tv.surfaceTexture?.let { startCamera(it) }
+                }
+            }
+        }
+    }
+
+    // Kendi kendini onaran kamera bekçisi: herhangi bir HAL gecikmesinde siyah ekran kalmasını önler
+    LaunchedEffect(isStudioMode, hasCameraPermission, cameraReady, textureViewInstance, surfaceGeneration) {
+        if (!isStudioMode && hasCameraPermission && !cameraReady) {
+            repeat(3) {
+                delay(900)
+                if (currentIsStudioMode || cameraReady) return@LaunchedEffect
+                val tv = textureViewInstance
+                val st = tv?.surfaceTexture
+                val valid = tv != null && tv.isAvailable && st != null &&
+                    (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !st.isReleased)
+                if (valid && st != null) {
+                    cameraHandler.post {
+                        if (!holder.isDisposed && !currentIsStudioMode && holder.device == null) {
+                            synchronized(holder) {
+                                holder.isOpening = false
+                                holder.isClosingDevice = false
+                            }
+                            startCameraInternal(st)
+                        }
+                    }
                 }
             }
         }
@@ -3273,23 +3362,32 @@ fun CameraScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 holder.previewFallbackLevel = 0
-                if (!currentIsStudioMode && holder.device == null && !holder.isOpening) {
-                    textureViewInstance?.let { tv ->
-                        if (tv.isAvailable) {
-                            tv.surfaceTexture?.let { startCamera(it) }
+                cameraHandler.post {
+                    if (!currentIsStudioMode && !holder.isDisposed && holder.device == null) {
+                        val tv = textureViewInstance
+                        val st = tv?.surfaceTexture
+                        val valid = tv != null && tv.isAvailable && st != null &&
+                            (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !st.isReleased)
+                        if (valid && st != null) {
+                            startCameraInternal(st)
                         }
                     }
                 }
             } else if (event == Lifecycle.Event.ON_PAUSE) {
-                closeCameraInternal(releaseReader = true)
+                cameraHandler.post {
+                    synchronized(holder) { holder.pendingReopenSurfaceTexture = null }
+                    closeCameraInternal(releaseReader = true)
+                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             holder.isDisposed = true
             lifecycleOwner.lifecycle.removeObserver(observer)
-            closeCameraInternal(releaseReader = true)
-            cameraThread.quitSafely()
+            cameraHandler.post {
+                closeCameraInternal(releaseReader = true)
+                cameraThread.quitSafely()
+            }
             try { shutterSound?.release() } catch (_: Throwable) {}
         }
     }
@@ -3467,7 +3565,7 @@ fun CameraScreen(
                     text = strModeAuto,
                     selected = isAutoMode,
                     activeColor = IrPalette.IrEmerald,
-                    enabled = cameraReady,
+                    enabled = true,
                     onClick = {
                         isPickerActive = false
                         isColorPipetteActive = false
@@ -3480,7 +3578,7 @@ fun CameraScreen(
                     text = strModePro,
                     selected = !isAutoMode,
                     activeColor = IrPalette.IrAmber,
-                    enabled = cameraReady,
+                    enabled = true,
                     onClick = {
                         isPickerActive = false
                         isColorPipetteActive = false
@@ -3788,16 +3886,40 @@ fun CameraScreen(
                                         applyPreviewTransform(this@apply, holder.activePreviewSize, holder.activeSensorOrientation)
                                     }
 
-                                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture) = true
+                                    override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                        if (textureViewInstance?.surfaceTexture === st) {
+                                            textureViewInstance = null
+                                        }
+                                        cameraHandler.post {
+                                            val shouldClose = synchronized(holder) {
+                                                if (holder.pendingReopenSurfaceTexture === st) {
+                                                    holder.pendingReopenSurfaceTexture = null
+                                                }
+                                                holder.activeSurfaceTexture === st
+                                            }
+                                            if (shouldClose) {
+                                                closeCameraInternal(releaseReader = true)
+                                            }
+                                        }
+                                        return true
+                                    }
                                     override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                                 }
                             }
                         },
                         update = { view ->
+                            if (textureViewInstance !== view) {
+                                textureViewInstance = view
+                            }
                             holder.activePreviewSize?.let { preview ->
                                 view.surfaceTexture?.setDefaultBufferSize(preview.width, preview.height)
                             }
                             applyPreviewTransform(view, holder.activePreviewSize, holder.activeSensorOrientation)
+                        },
+                        onRelease = { view ->
+                            if (textureViewInstance === view) {
+                                textureViewInstance = null
+                            }
                         }
                     )
                 }

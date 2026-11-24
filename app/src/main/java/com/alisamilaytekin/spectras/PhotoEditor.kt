@@ -713,29 +713,18 @@ internal fun PhotoEditorScreen(
             decodeUprightBitmapFromUri(context, uri, maxEdge = 1500)
         }
         if (loaded != null) {
-            val prevSrc = sourcePreviewBitmap
-            val prevSmall = smallSourceBitmap
             sourcePreviewBitmap = loaded
             val smallW = 180
             val smallH = (loaded.height * smallW / loaded.width.coerceAtLeast(1)).coerceIn(60, 260)
             smallSourceBitmap = Bitmap.createScaledBitmap(loaded, smallW, smallH, true)
+            fallbackRenderedBitmap = null
             editConfig = PhotoEditConfig()
             isSpotWbActive = false
             isPipetteActive = false
-            prevSrc?.takeIf { it !== loaded && !it.isRecycled }?.recycle()
-            prevSmall?.takeIf { !it.isRecycled }?.recycle()
         } else {
             showEditorStatus(context.getString(R.string.editor_load_failed))
         }
         isLoadingPhoto = false
-    }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            sourcePreviewBitmap?.takeIf { !it.isRecycled }?.recycle()
-            smallSourceBitmap?.takeIf { !it.isRecycled }?.recycle()
-            fallbackRenderedBitmap?.takeIf { !it.isRecycled }?.recycle()
-        }
     }
 
     // Real-time GPU shader on Android 13+ (API 33+)
@@ -775,9 +764,7 @@ internal fun PhotoEditorScreen(
                 if (working !== src && working !== out) working.recycle()
                 out
             }
-            val old = fallbackRenderedBitmap
             fallbackRenderedBitmap = rendered
-            old?.takeIf { it !== rendered && !it.isRecycled }?.recycle()
         }
     }
 
@@ -1118,15 +1105,23 @@ internal fun PhotoEditorScreen(
                             ImageView(ctx).apply {
                                 scaleType = ImageView.ScaleType.FIT_CENTER
                                 adjustViewBounds = false
-                                setImageBitmap(displayBmp)
+                                if (!displayBmp.isRecycled) setImageBitmap(displayBmp)
                                 imageViewRef = this
                             }
                         },
                         update = { iv ->
-                            iv.setImageBitmap(displayBmp)
+                            if (imageViewRef !== iv) imageViewRef = iv
+                            if (!displayBmp.isRecycled) iv.setImageBitmap(displayBmp)
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 updateEditorImageViewShader(iv, editConfig, isComparingOriginal)
                             }
+                        },
+                        onRelease = { iv ->
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                iv.setRenderEffect(null)
+                            }
+                            iv.setImageBitmap(null)
+                            if (imageViewRef === iv) imageViewRef = null
                         }
                     )
 

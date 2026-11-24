@@ -1,14 +1,23 @@
 <p align="center">
-  <img src="logo.svg" width="180" height="180" alt="CameraS Logo" style="border-radius: 22%;" />
+  <img src="logo.svg" width="180" height="180" alt="SpectraS Logo" style="border-radius: 22%;" />
 </p>
 
-# 📸 CameraS - Advanced Infrared (IR) Camera
+# 📸 SpectraS — Pro Color, Infrared RAW Camera & Photo Studio
 
-**Kameras** is a custom Android camera application designed specifically for near-infrared (NIR) photography enthusiasts. It provides real-time color correction to balance out aggressive color casts caused by specialized filters like **Kolari IRChrome**, **590nm (Gold)**, or other IR-pass filters directly on your live preview screen[cite: 1].
+**SpectraS** (`com.alisamilaytekin.spectras`) is an advanced offline Android Camera2 RAW (DNG) camera and built-in **Live Photo Editor Studio** built for both **Infrared / Aerochrome photographers** and creative mobile colorists.
+
+👉 **[Download SpectraS v5.0 APK](https://github.com/alisamilaytekin/infrared-photography-app/releases/download/v5.0/SpectraS-v5.0.apk)** · **[All Releases & Play Store AAB](https://github.com/alisamilaytekin/infrared-photography-app/releases/latest)** · **[Privacy Policy](https://alisamilaytekin.github.io/infrared-photography-app/privacy-policy.html)**
 
 ---
 
-## ✨ What's New in Version 4.0
+## ✨ What's New in Version 5.0 (SpectraS)
+
+* **Built-in Photo Editor Studio (`Edit` / `Stüdyo`):** Grade captured shots or any gallery photo (including "Share / Edit with SpectraS" from any gallery app) with the exact same real-time GPU/CPU color engine.
+* **Real-Time R↔B Channel Swap:** Live red-blue infrared channel swap in both the camera viewfinder and Photo Studio.
+* **8 Signature Infrared & Cinema Looks:** Instant Aerochrome IR, IR 590nm Gold (R↔B), 720nm B&W IR, Teal & Orange, Cyberpunk Neon, Sin City Crimson, Golden Hour Film, and Natural.
+* **Live 8-Band HSL Color Histogram Mixer & 360° Color Pipette:** Full-spectrum color shifting with smooth RGB-space feathering (zero edge halos).
+* **Full-Width Floating HUD & Ghost Mode:** Viewfinder never shrinks; translucent panels fade while dragging sliders and auto-hide when using Pipette / Spot WB.
+* **Universal RAW (DNG) + Flash / Torch + Front & Rear Camera + Bilingual EN/TR.**
 
 * **Hardware ISP Color & Contrast Engine in Manual Mode:**
   * **Normalized RGGB Gains:** Eliminates unintended digital overexposure and highlight clipping when switching from Auto to Manual white balance.

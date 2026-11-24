@@ -70,10 +70,10 @@ jobs:
       - name: Commit and Push APK to Repository Root
         run: |
           cp app/build/outputs/apk/release_named/SpectraS-v5.0.apk ./SpectraS-v5.0.apk
-          rm -f ./app-debug.apk
+          git rm -f --ignore-unmatch app-debug.apk || true
           git config user.name "alisamilaytekin"
           git config user.email "alisamilaytekin@gmail.com"
-          git add -A SpectraS-v5.0.apk app-debug.apk
+          git add SpectraS-v5.0.apk
           if ! git diff --staged --quiet; then
             git commit -m "Update SpectraS v5.0 compiled APK [skip ci]"
             git push origin main

@@ -2686,6 +2686,8 @@ fun CameraScreen(
         }
     }
 
+    var startCameraRef: ((SurfaceTexture) -> Unit)? = null
+
     /** Returns true when no open CameraDevice existed (so caller can reopen immediately without waiting for onClosed). */
     fun closeCameraInternal(releaseReader: Boolean = true, pendingReopen: SurfaceTexture? = null): Boolean {
         var closedWithoutActiveDevice = false
@@ -2739,7 +2741,7 @@ fun CameraScreen(
                     }
                 }
                 if (pending != null && !holder.isDisposed && !currentIsStudioMode) {
-                    startCameraInternal(pending)
+                    startCameraRef?.invoke(pending)
                 }
             }, 550L)
         }
@@ -3062,6 +3064,8 @@ fun CameraScreen(
             Log.e("CameraScreen", "Failed to open camera", e)
         }
     }
+
+    startCameraRef = { st -> startCameraInternal(st) }
 
     fun startCamera(surfaceTexture: SurfaceTexture) {
         cameraHandler.post { startCameraInternal(surfaceTexture) }

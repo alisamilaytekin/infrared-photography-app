@@ -6,27 +6,55 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Outer Precision Optical Rings -->
+    <!-- 1. Concentric Outer Lens Barrel & Metallic Rim (exact logo.svg geometry) -->
     <path
-        android:pathData="M54,54m-29,0a29,29 0,1 1,58 0a29,29 0,1 1,-58 0"
-        android:strokeWidth="1.6"
-        android:strokeColor="#4A5568" />
-
-    <path
-        android:pathData="M54,54m-27,0a27,27 0,1 1,54 0a27,27 0,1 1,-54 0"
-        android:strokeWidth="0.8"
-        android:strokeColor="#1E293B" />
-
-    <!-- Neon Optical Ring -->
-    <path
-        android:pathData="M54,54m-25,0a25,25 0,1 1,50 0a25,25 0,1 1,-50 0"
-        android:strokeWidth="1.2">
+        android:fillColor="#0A0D14"
+        android:strokeWidth="1.24"
+        android:pathData="M54.0,54.0m-32.34,0a32.34,32.34 0,1 1,64.68 0a32.34,32.34 0,1 1,-64.68 0">
         <aapt:attr name="android:strokeColor">
             <gradient
-                android:startX="29"
-                android:startY="79"
-                android:endX="79"
-                android:endY="29"
+                android:startX="21.66"
+                android:startY="21.66"
+                android:endX="86.34"
+                android:endY="86.34"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#3A4459" />
+                <item android:offset="0.25" android:color="#1A202C" />
+                <item android:offset="0.5" android:color="#4A5568" />
+                <item android:offset="0.75" android:color="#151922" />
+                <item android:offset="1.0" android:color="#2D3748" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path
+        android:strokeColor="#1E2638"
+        android:strokeWidth="0.36"
+        android:pathData="M54.0,54.0m-30.03,0a30.03,30.03 0,1 1,60.06 0a30.03,30.03 0,1 1,-60.06 0" />
+
+    <path
+        android:fillColor="#0C0F17"
+        android:strokeColor="#121824"
+        android:strokeWidth="0.66"
+        android:pathData="M54.0,54.0m-28.38,0a28.38,28.38 0,1 1,56.76 0a28.38,28.38 0,1 1,-56.76 0" />
+
+    <path
+        android:fillColor="#080A10"
+        android:strokeColor="#1A2234"
+        android:strokeWidth="0.36"
+        android:pathData="M54.0,54.0m-26.07,0a26.07,26.07 0,1 1,52.14 0a26.07,26.07 0,1 1,-52.14 0" />
+
+    <!-- 2. Glowing Spectral Aperture Ring (soft outer glow + sharp core ring) -->
+    <path
+        android:strokeWidth="1.82"
+        android:strokeAlpha="0.26"
+        android:pathData="M54.0,54.0m-24.09,0a24.09,24.09 0,1 1,48.18 0a24.09,24.09 0,1 1,-48.18 0">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:startX="29.91"
+                android:startY="78.09"
+                android:endX="78.09"
+                android:endY="29.91"
                 android:type="linear">
                 <item android:offset="0.0" android:color="#FF1744" />
                 <item android:offset="0.5" android:color="#D500F9" />
@@ -35,73 +63,110 @@
         </aapt:attr>
     </path>
 
-    <!-- Deep Lens Barrel Interior -->
     <path
-        android:fillColor="#06080E"
-        android:pathData="M54,54m-23,0a23,23 0,1 1,46 0a23,23 0,1 1,-46 0" />
-
-    <!-- Infrared Aerochrome Core (Crimson to Cyan Gradient) -->
-    <path
-        android:pathData="M54,54m-21,0a21,21 0,1 1,42 0a21,21 0,1 1,-42 0">
-        <aapt:attr name="android:fillColor">
+        android:strokeWidth="0.79"
+        android:strokeAlpha="0.92"
+        android:pathData="M54.0,54.0m-24.09,0a24.09,24.09 0,1 1,48.18 0a24.09,24.09 0,1 1,-48.18 0">
+        <aapt:attr name="android:strokeColor">
             <gradient
-                android:startX="35"
-                android:startY="35"
-                android:endX="73"
-                android:endY="73"
+                android:startX="29.91"
+                android:startY="78.09"
+                android:endX="78.09"
+                android:endY="29.91"
                 android:type="linear">
                 <item android:offset="0.0" android:color="#FF1744" />
-                <item android:offset="0.35" android:color="#FF5252" />
-                <item android:offset="0.6" android:color="#E040FB" />
+                <item android:offset="0.5" android:color="#D500F9" />
                 <item android:offset="1.0" android:color="#00E5FF" />
             </gradient>
         </aapt:attr>
     </path>
 
-    <!-- Aperture Blades (Translucent Shadowing) -->
     <path
-        android:fillColor="#B30A0C14"
-        android:pathData="M54,33 C60,33 67,37 70,42 C63,43 55,45 48,49 C50,42 51,36 54,33 Z" />
-    <path
-        android:fillColor="#AA0A0C14"
-        android:pathData="M75,54 C75,60 71,67 66,70 C65,63 63,55 59,48 C66,50 72,51 75,54 Z" />
-    <path
-        android:fillColor="#B80A0C14"
-        android:pathData="M54,75 C48,75 41,71 38,66 C45,65 53,63 60,59 C58,66 57,72 54,75 Z" />
-    <path
-        android:fillColor="#B00A0C14"
-        android:pathData="M33,54 C33,48 37,41 42,38 C43,45 45,53 49,60 C42,58 36,57 33,54 Z" />
+        android:fillColor="#06080E"
+        android:pathData="M54.0,54.0m-22.77,0a22.77,22.77 0,1 1,45.54 0a22.77,22.77 0,1 1,-45.54 0" />
 
-    <!-- Stylized CameraS "S" Curve Ribbon -->
+    <!-- 3. Deep IR Aerochrome Core (Crimson -> Magenta -> Cyan) -->
+    <path android:pathData="M54.0,54.0m-21.12,0a21.12,21.12 0,1 1,42.24 0a21.12,21.12 0,1 1,-42.24 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="36.02"
+                android:startY="36.02"
+                android:endX="71.98"
+                android:endY="71.98"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#FF1744" />
+                <item android:offset="0.30" android:color="#FF5252" />
+                <item android:offset="0.55" android:color="#E040FB" />
+                <item android:offset="0.80" android:color="#00E5FF" />
+                <item android:offset="1.0" android:color="#00B0FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- 4. Optical Lens Blades -->
+    <path android:fillColor="#B80A0C14" android:pathData="M 54.0,32.88 C 59.61,32.88 66.21,36.51 69.18,41.46 C 62.91,42.45 54.66,44.76 48.06,48.06 C 49.71,41.46 51.36,35.69 54.0,32.88 Z" />
+    <path android:fillColor="#AD0A0C14" android:pathData="M 75.12,54.0 C 75.12,59.61 71.49,66.21 66.54,69.18 C 65.55,62.91 63.24,54.66 59.94,48.06 C 66.54,49.71 72.31,51.36 75.12,54.0 Z" />
+    <path android:fillColor="#BF0A0C14" android:pathData="M 54.0,75.12 C 48.39,75.12 41.79,71.49 38.82,66.54 C 45.09,65.55 53.34,63.24 59.94,59.94 C 58.29,66.54 56.64,72.31 54.0,75.12 Z" />
+    <path android:fillColor="#B30A0C14" android:pathData="M 32.88,54.0 C 32.88,48.39 36.51,41.79 41.46,38.82 C 42.45,45.09 44.76,53.34 48.06,59.94 C 41.46,58.29 35.69,56.64 32.88,54.0 Z" />
+
+    <!-- 5. Central Dynamic Double 'S' Ribbon Streamline (soft glow + crisp white ribbon) -->
     <path
-        android:strokeColor="#FFFFFF"
-        android:strokeWidth="2.8"
+        android:strokeColor="#40FFFFFF"
+        android:strokeWidth="3.47"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M60,40 C49,40 43,45 43,50 C43,57 51,58 56,60 C63,62 65,66 65,70 C65,75 58,78 50,77 C44,76 40,73 38,70" />
+        android:pathData="M 59.94,39.48 C 49.71,39.48 44.1,44.43 44.1,49.71 C 44.1,56.31 51.36,57.96 56.64,59.94 C 62.91,62.25 64.56,65.55 64.56,69.18 C 64.56,74.46 57.96,77.76 50.37,76.77 C 45.42,76.11 41.79,73.47 39.48,70.5 M 48.72,68.52 C 57.63,68.52 63.57,63.9 63.57,58.62 C 63.57,52.35 56.64,50.37 51.36,48.39 C 45.42,46.08 43.77,43.11 43.77,39.48 C 43.77,34.53 50.37,30.9 58.29,31.56 C 62.91,32.22 66.54,34.86 68.85,37.83" />
 
-    <!-- Center Optical Pupil Pin -->
+    <path
+        android:strokeColor="#F0FFFFFF"
+        android:strokeWidth="2.15"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M 59.94,39.48 C 49.71,39.48 44.1,44.43 44.1,49.71 C 44.1,56.31 51.36,57.96 56.64,59.94 C 62.91,62.25 64.56,65.55 64.56,69.18 C 64.56,74.46 57.96,77.76 50.37,76.77 C 45.42,76.11 41.79,73.47 39.48,70.5 M 48.72,68.52 C 57.63,68.52 63.57,63.9 63.57,58.62 C 63.57,52.35 56.64,50.37 51.36,48.39 C 45.42,46.08 43.77,43.11 43.77,39.48 C 43.77,34.53 50.37,30.9 58.29,31.56 C 62.91,32.22 66.54,34.86 68.85,37.83" />
+
+    <!-- 6. Optical Lens Center Pupil & Iris Aperture Pin -->
     <path
         android:fillColor="#06080F"
-        android:strokeColor="#00E5FF"
-        android:strokeWidth="0.8"
-        android:pathData="M54,54m-5,0a5,5 0,1 1,10 0a5,5 0,1 1,-10 0" />
-
+        android:strokeColor="#CC00E5FF"
+        android:strokeWidth="0.46"
+        android:pathData="M54.0,54.0m-4.95,0a4.95,4.95 0,1 1,9.9 0a4.95,4.95 0,1 1,-9.9 0" />
     <path
-        android:fillColor="#FF1744"
-        android:pathData="M54,54m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
-
+        android:fillColor="#D9FF1744"
+        android:pathData="M54.0,54.0m-2.31,0a2.31,2.31 0,1 1,4.62 0a2.31,2.31 0,1 1,-4.62 0" />
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,54m-1,0a1,1 0,1 1,2 0a1,1 0,1 1,-2 0" />
+        android:fillColor="#F2FFFFFF"
+        android:pathData="M54.0,54.0m-0.99,0a0.99,0.99 0,1 1,1.98 0a0.99,0.99 0,1 1,-1.98 0" />
 
-    <!-- Top-Left Glass Reflection Crescent -->
-    <path
-        android:fillColor="#35FFFFFF"
-        android:pathData="M37,47 C39,38 45,34 54,34 C63,34 69,38 71,47 C65,41 59,38 54,38 C49,38 43,41 37,47 Z" />
+    <!-- 7. Spherical Glass Lens Reflections & Micro Glints -->
+    <path android:pathData="M 36.18,46.41 C 38.16,38.16 44.76,34.03 54.0,34.03 C 63.24,34.03 69.84,38.16 71.82,46.41 C 66.21,40.63 60.44,38.16 54.0,38.16 C 47.56,38.16 41.79,40.63 36.18,46.41 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="36.18"
+                android:startY="34.03"
+                android:endX="54.0"
+                android:endY="46.41"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#59FFFFFF" />
+                <item android:offset="0.6" android:color="#0DFFFFFF" />
+                <item android:offset="1.0" android:color="#00FFFFFF" />
+            </gradient>
+        </aapt:attr>
+    </path>
 
-    <!-- Glint Dot -->
-    <path
-        android:fillColor="#BFFFFFFF"
-        android:pathData="M44,43m-0.8,0a0.8,0.8 0,1 1,1.6 0a0.8,0.8 0,1 1,-1.6 0" />
+    <path android:pathData="M 71.82,61.59 C 69.84,69.84 63.24,73.97 54.0,73.97 C 44.76,73.97 38.16,69.84 36.18,61.59 C 41.79,67.36 47.56,69.84 54.0,69.84 C 60.44,69.84 66.21,67.36 71.82,61.59 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="71.82"
+                android:startY="73.97"
+                android:endX="46.41"
+                android:endY="61.59"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#4000E5FF" />
+                <item android:offset="1.0" android:color="#0000E5FF" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <path android:fillColor="#BFFFFFFF" android:pathData="M44.43,43.11m-0.74,0a0.74,0.74 0,1 1,1.48 0a0.74,0.74 0,1 1,-1.48 0" />
+    <path android:fillColor="#73FFFFFF" android:pathData="M46.41,41.13m-0.41,0a0.41,0.41 0,1 1,0.82 0a0.41,0.41 0,1 1,-0.82 0" />
 </vector>

@@ -20,6 +20,8 @@
     <!-- Alt seçiciler -->
     <string name="sub_kelvin">Sıcaklık</string>
     <string name="sub_tint">Ton</string>
+    <string name="sub_sat_short">Doyg.</string>
+    <string name="sub_lum_short">Parl.</string>
 
     <!-- Kaydırıcı etiketleri -->
     <string name="slider_kelvin">Renk sıcaklığı</string>

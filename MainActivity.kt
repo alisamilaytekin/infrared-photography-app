@@ -30,6 +30,7 @@ import android.hardware.camera2.params.TonemapCurve
 import android.media.ExifInterface
 import android.media.ImageReader
 import android.media.MediaActionSound
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -42,6 +43,7 @@ import android.util.Log
 import android.util.Range
 import android.util.Rational
 import android.util.Size
+import android.view.KeyEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
@@ -74,6 +76,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -85,6 +88,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.rotate
@@ -121,11 +125,13 @@ import androidx.core.graphics.get
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -164,6 +170,7 @@ private object IrPalette {
 
 class MainActivity : ComponentActivity() {
     private var hasCameraPermission by mutableStateOf(false)
+    @Volatile private var volumeShutterAction: (() -> Unit)? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
@@ -175,8 +182,20 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            val action = volumeShutterAction
+            if (action != null && (event == null || event.repeatCount == 0)) {
+                action.invoke()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
@@ -198,7 +217,10 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                CameraScreen(hasCameraPermission = hasCameraPermission)
+                CameraScreen(
+                    hasCameraPermission = hasCameraPermission,
+                    onRegisterVolumeShutter = { cb -> volumeShutterAction = cb }
+                )
             }
         }
     }
@@ -1553,6 +1575,15 @@ private fun readExifOrientation(bytes: ByteArray, cacheDir: File): Int {
     }
 }
 
+private fun jpegDegreesToExifOrientation(degrees: Int): Int {
+    return when (((degrees % 360) + 360) % 360) {
+        90 -> ExifInterface.ORIENTATION_ROTATE_90
+        180 -> ExifInterface.ORIENTATION_ROTATE_180
+        270 -> ExifInterface.ORIENTATION_ROTATE_270
+        else -> ExifInterface.ORIENTATION_NORMAL
+    }
+}
+
 private fun saveOutputToGallery(
     context: Context,
     rawBytes: ByteArray?,
@@ -1564,54 +1595,89 @@ private fun saveOutputToGallery(
     var uri: Uri? = null
     return try {
         val timestamp = System.currentTimeMillis()
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "IMG_$timestamp.jpg")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val displayName = "IMG_$timestamp.jpg"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
                 put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
-        }
+            val resolver = context.contentResolver
+            uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+                ?: return false
 
-        val resolver = context.contentResolver
-        uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
-            ?: return false
-
-        if (processedBitmap != null) {
-            tempOut = File.createTempFile("kameras_out_", ".jpg", context.cacheDir)
-            FileOutputStream(tempOut).use { fos ->
-                processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
-                fos.flush()
-            }
-            if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
-                try {
-                    ExifInterface(tempOut.absolutePath).apply {
-                        setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
-                        saveAttributes()
-                    }
-                } catch (_: Exception) {
+            if (processedBitmap != null) {
+                tempOut = File.createTempFile("kameras_out_", ".jpg", context.cacheDir)
+                FileOutputStream(tempOut).use { fos ->
+                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+                    fos.flush()
+                }
+                if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
+                    try {
+                        ExifInterface(tempOut.absolutePath).apply {
+                            setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
+                            saveAttributes()
+                        }
+                    } catch (_: Exception) {}
+                }
+                resolver.openOutputStream(uri)?.use { out ->
+                    FileInputStream(tempOut).use { inp -> inp.copyTo(out) }
+                    out.flush()
+                }
+            } else if (rawBytes != null) {
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(rawBytes)
+                    out.flush()
                 }
             }
-            resolver.openOutputStream(uri)?.use { out ->
-                FileInputStream(tempOut).use { inp ->
-                    inp.copyTo(out)
-                }
-                out.flush()
-            }
-        } else if (rawBytes != null) {
-            resolver.openOutputStream(uri)?.use { out ->
-                out.write(rawBytes)
-                out.flush()
-            }
-        }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
             resolver.update(uri, done, null, null)
+            onSavedUri?.invoke(uri)
+            true
+        } else {
+            // Android 5–9 (API 21–28): DCIM/Kameras klasörüne doğrudan yazıp MediaScanner ile galeriye anında kaydet
+            @Suppress("DEPRECATION")
+            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Kameras")
+            if (!dcimDir.exists()) dcimDir.mkdirs()
+            val outFile = File(dcimDir, displayName)
+
+            if (processedBitmap != null) {
+                FileOutputStream(outFile).use { fos ->
+                    processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
+                    fos.flush()
+                }
+                if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
+                    try {
+                        ExifInterface(outFile.absolutePath).apply {
+                            setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
+                            saveAttributes()
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else if (rawBytes != null) {
+                FileOutputStream(outFile).use { fos ->
+                    fos.write(rawBytes)
+                    fos.flush()
+                }
+            } else {
+                return false
+            }
+
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(outFile.absolutePath),
+                arrayOf("image/jpeg")
+            ) { _, scannedUri ->
+                if (scannedUri != null) {
+                    onSavedUri?.invoke(scannedUri)
+                }
+            }
+            true
         }
-        onSavedUri?.invoke(uri)
-        true
     } catch (e: Exception) {
         Log.e("CameraScreen", "Failed to save image", e)
         if (uri != null) {
@@ -1623,41 +1689,88 @@ private fun saveOutputToGallery(
     }
 }
 
-// RAW sensör görüntüsünü DngCreator ile galeriye (.dng) kaydeder
+/**
+ * Evrensel RAW/DNG kayıt motoru (Android 5–15, Samsung / Xiaomi / Pixel / OnePlus / OPPO / Huawei uyumlu):
+ * - DngCreator'a doğru EXIF yönünü işler (dikey fotoğraflar yan dönmez)
+ * - API 29+ cihazlarda önce Images.Media, OEM reddederse Files.getContentUri("external") yedeğini kullanır
+ * - API 21–28 cihazlarda DCIM/Kameras altına yazıp MediaScanner ile galeriye bildirir
+ */
 private fun saveRawDngToGallery(
     context: Context,
     characteristics: CameraCharacteristics,
     result: TotalCaptureResult,
-    rawImage: android.media.Image
+    rawImage: android.media.Image,
+    jpegOrientationDegrees: Int
 ): Boolean {
     var uri: Uri? = null
+    val timestamp = System.currentTimeMillis()
+    val displayName = "RAW_$timestamp.dng"
+    val exifOrientation = jpegDegreesToExifOrientation(jpegOrientationDegrees)
+
+    fun writeDngToStream(out: java.io.OutputStream) {
+        val dngCreator = DngCreator(characteristics, result)
+        try {
+            try {
+                dngCreator.setOrientation(exifOrientation)
+            } catch (_: Exception) {}
+            try {
+                dngCreator.setDescription("CameraS Infrared RAW")
+            } catch (_: Exception) {}
+            dngCreator.writeImage(out, rawImage)
+            out.flush()
+        } finally {
+            try { dngCreator.close() } catch (_: Exception) {}
+        }
+    }
+
     return try {
-        val timestamp = System.currentTimeMillis()
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "RAW_$timestamp.dng")
-            put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val imgValues = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
                 put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
                 put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
-        }
-        val resolver = context.contentResolver
-        uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-        val dngCreator = DngCreator(characteristics, result)
-        try {
-            resolver.openOutputStream(uri)?.use { out ->
-                dngCreator.writeImage(out, rawImage)
-                out.flush()
+            // Bazı OEM'ler DNG'yi Images.Media yerine Files koleksiyonunda kabul eder
+            uri = try {
+                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, imgValues)
+            } catch (_: Exception) {
+                null
             }
-        } finally {
-            dngCreator.close()
+            if (uri == null) {
+                val fileValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                uri = resolver.insert(MediaStore.Files.getContentUri("external"), fileValues)
+            }
+            val targetUri = uri ?: return false
+            resolver.openOutputStream(targetUri)?.use { out ->
+                writeDngToStream(out)
+            } ?: return false
+            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            resolver.update(targetUri, done, null, null)
+            true
+        } else {
+            @Suppress("DEPRECATION")
+            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Kameras")
+            if (!dcimDir.exists()) dcimDir.mkdirs()
+            val outFile = File(dcimDir, displayName)
+            FileOutputStream(outFile).use { fos ->
+                writeDngToStream(fos)
+            }
+            MediaScannerConnection.scanFile(
+                context,
+                arrayOf(outFile.absolutePath),
+                arrayOf("image/x-adobe-dng"),
+                null
+            )
+            true
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-            resolver.update(uri, done, null, null)
-        }
-        true
     } catch (e: Exception) {
         Log.e("CameraScreen", "RAW/DNG kaydedilemedi", e)
         if (uri != null) {
@@ -1667,19 +1780,74 @@ private fun saveRawDngToGallery(
     }
 }
 
-// JPEG baytlarından düşük bellekli küçük önizleme resmi üretir
-private fun decodeThumbnailFromBytes(bytes: ByteArray): Bitmap? {
+// JPEG baytlarından EXIF yönü düzeltilmiş düşük bellekli küçük önizleme resmi üretir
+private fun decodeThumbnailFromBytes(bytes: ByteArray, cacheDir: File): Bitmap? {
     return try {
         val opts = BitmapFactory.Options().apply { inSampleSize = 8 }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
+        val raw = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts) ?: return null
+        val orientation = readExifOrientation(bytes, cacheDir)
+        val degrees = when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+        if (degrees == 0f) {
+            raw
+        } else {
+            val matrix = Matrix().apply { postRotate(degrees) }
+            val rotated = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+            if (rotated !== raw) raw.recycle()
+            rotated
+        }
     } catch (_: Exception) {
         null
     }
 }
 
+// Tüm üreticilerin (Samsung, Xiaomi, Pixel, OnePlus/OPPO, Huawei vb.) Galeri uygulamalarını 4 kademeli yedekle açar
+private fun openGallerySafely(context: Context, lastUri: Uri?): Boolean {
+    val candidates = buildList<Intent> {
+        if (lastUri != null) {
+            add(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(lastUri, "image/*")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            )
+        }
+        add(
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*")
+            }
+        )
+        add(Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY))
+        add(
+            Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "image/*"
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+        )
+    }
+    for (intent in candidates) {
+        try {
+            if (context !is Activity) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+            return true
+        } catch (_: Exception) {
+        }
+    }
+    return false
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun CameraScreen(hasCameraPermission: Boolean) {
+fun CameraScreen(
+    hasCameraPermission: Boolean,
+    onRegisterVolumeShutter: ((() -> Unit)?) -> Unit = {}
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
@@ -1687,9 +1855,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val holder = remember { CameraHolder() }
     val cameraThread = remember { HandlerThread("CameraThread").also { it.start() } }
     val cameraHandler = remember { Handler(cameraThread.looper) }
-    val shutterSound = remember { MediaActionSound() }
+    val shutterSound = remember { try { MediaActionSound() } catch (_: Throwable) { null } }
     val coroutineScope = rememberCoroutineScope()
     val turkishLocale = remember { Locale("tr", "TR") }
+    var shownPreTiramisuHslNotice by remember { mutableStateOf(false) }
 
     var cameraReady by remember { mutableStateOf(false) }
     var isAutoMode by remember { mutableStateOf(true) }
@@ -1713,6 +1882,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var activeBandSubSlider by remember { mutableStateOf(PointColorSubSlider.TON) }
     var colorBandsConfig by remember { mutableStateOf(ColorBandsConfig()) }
     var isDeckCollapsed by remember { mutableStateOf(false) }
+    var isAnySliderDragging by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showPresetsListDialog by remember { mutableStateOf(false) }
@@ -1833,6 +2003,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             colorBands = colorBandsConfig,
             bypass = isAutoMode || isComparingAuto
         )
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !shownPreTiramisuHslNotice && !isAutoMode) {
+            val hasGrading = colorBandsConfig.hasAnyModification ||
+                (targetedColorConfig.isActive && (targetedColorConfig.deltaHue != 0f || targetedColorConfig.deltaSat != 0f || targetedColorConfig.deltaLum != 0f))
+            if (hasGrading) {
+                shownPreTiramisuHslNotice = true
+                showStatus("Canlı renk önizlemesi Android 13+ gerektirir; çekilen fotoğrafa uygulanır")
+            }
+        }
     }
 
     fun savePresetsToStorage() {
@@ -1919,35 +2097,53 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     ) {
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
         builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-        if (holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
-            builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        when {
+            holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) -> {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+            }
+            holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) -> {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+            }
         }
         if (holder.aeCompensationRange.upper > holder.aeCompensationRange.lower) {
             val clampedEv = exposureEv.coerceIn(holder.aeCompensationRange.lower, holder.aeCompensationRange.upper)
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedEv)
         }
         if (holder.maxAeRegions > 0 && !compatibilityFallback) {
-            buildAeMeteringRegion(
-                activeArray = holder.activeSensorArray,
-                sensorOrientation = holder.activeSensorOrientation,
-                mode = meteringModeVal,
-                boxNorm = boxNorm,
-                boxSizeNorm = boxSizeNorm
-            )?.let { rects ->
-                builder.set(CaptureRequest.CONTROL_AE_REGIONS, rects)
+            try {
+                buildAeMeteringRegion(
+                    activeArray = holder.activeSensorArray,
+                    sensorOrientation = holder.activeSensorOrientation,
+                    mode = meteringModeVal,
+                    boxNorm = boxNorm,
+                    boxSizeNorm = boxSizeNorm
+                )?.let { rects ->
+                    builder.set(CaptureRequest.CONTROL_AE_REGIONS, rects)
+                }
+            } catch (_: Exception) {
             }
         }
-        // Mercek / yakınlaştırma oranı (Android 11+ CONTROL_ZOOM_RATIO, altı SCALER_CROP_REGION)
+        // Mercek / yakınlaştırma oranı (Android 11+ CONTROL_ZOOM_RATIO + güvenli SCALER_CROP_REGION yedeği)
         val clampedZoom = holder.currentZoomRatio.coerceIn(holder.zoomRange.lower, holder.zoomRange.upper)
+        var appliedZoomRatio = false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedZoom)
-        } else if (clampedZoom > 1.01f) {
+            try {
+                builder.set(CaptureRequest.CONTROL_ZOOM_RATIO, clampedZoom)
+                appliedZoomRatio = true
+            } catch (_: Exception) {
+                appliedZoomRatio = false
+            }
+        }
+        if (!appliedZoomRatio && clampedZoom > 1.01f) {
             holder.activeSensorArray?.let { active ->
                 val cropW = (active.width() / clampedZoom).roundToInt().coerceAtLeast(1)
                 val cropH = (active.height() / clampedZoom).roundToInt().coerceAtLeast(1)
                 val dx = (active.width() - cropW) / 2
                 val dy = (active.height() - cropH) / 2
-                builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(dx, dy, dx + cropW, dy + cropH))
+                try {
+                    builder.set(CaptureRequest.SCALER_CROP_REGION, Rect(dx, dy, dx + cropW, dy + cropH))
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -2322,23 +2518,35 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             holder.aeCompensationRange = range
             holder.aeCompensationStep = step
 
-            // Desteklenen yakınlaştırma / mercek aralığı (0.5x / 1x / 2x)
+            // Desteklenen yakınlaştırma / mercek aralığı (0.5x veya 0.6x geniş açı / 1x / 2x)
             val zRange = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) ?: Range(1f, 1f)
+                try {
+                    chars.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) ?: Range(1f, 1f)
+                } catch (_: Exception) {
+                    Range(1f, (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).coerceAtLeast(1f))
+                }
             } else {
                 val maxDigital = (chars.get(CameraCharacteristics.SCALER_AVAILABLE_MAX_DIGITAL_ZOOM) ?: 1f).coerceAtLeast(1f)
                 Range(1f, maxDigital)
             }
             holder.zoomRange = zRange
             val zoomOpts = buildList {
-                if (zRange.lower <= 0.65f) add(0.5f)
+                if (zRange.lower <= 0.70f) {
+                    add(if (zRange.lower > 0.55f) 0.6f else 0.5f)
+                }
                 add(1f)
                 if (zRange.upper >= 2.0f) add(2f)
             }
 
-            // RAW/DNG sensör desteği kontrolü
+            // RAW/DNG sensör desteği kontrolü (CFA + ActiveArray doğrulamasıyla tüm cihazlarda güvenli)
             val caps = chars.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
-            val rawSizes = if (caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW)) {
+            val hasCfa = chars.get(CameraCharacteristics.SENSOR_INFO_COLOR_FILTER_ARRANGEMENT) != null
+            val hasActiveArr = chars.get(CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE) != null
+            val rawSizes = if (
+                caps.contains(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_RAW) &&
+                hasCfa &&
+                hasActiveArr
+            ) {
                 map.getOutputSizes(ImageFormat.RAW_SENSOR)
             } else null
             val chosenRaw = rawSizes?.maxByOrNull { it.width.toLong() * it.height.toLong() }
@@ -2361,7 +2569,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 holder.imageReader = ImageReader.newInstance(chosenJpeg.width, chosenJpeg.height, ImageFormat.JPEG, 4)
                 holder.rawImageReader?.close()
                 holder.rawImageReader = if (holder.rawCaptureEnabled && chosenRaw != null) {
-                    ImageReader.newInstance(chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 2)
+                    ImageReader.newInstance(chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 4)
                 } else {
                     null
                 }
@@ -2427,9 +2635,21 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 }
 
                                 override fun onConfigureFailed(s: CameraCaptureSession) {
-                                    Log.w("CameraScreen", "Session config failed at tier=${holder.previewFallbackLevel}")
+                                    Log.w("CameraScreen", "Session config failed at tier=${holder.previewFallbackLevel}, raw=${holder.rawCaptureEnabled}")
                                     if (!holder.isDisposed && holder.previewFallbackLevel < 2) {
                                         holder.previewFallbackLevel += 1
+                                        if (closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)) {
+                                            cameraHandler.post { startCameraInternal(surfaceTexture) }
+                                        }
+                                    } else if (!holder.isDisposed && holder.rawCaptureEnabled) {
+                                        // Bazı cihazlar yüksek çözünürlüklü JPEG + RAW + Preview 3'lü oturumunu desteklemez:
+                                        // güvenli şekilde JPEG moduna dönüp kamerayı kesintisiz yeniden açar.
+                                        holder.rawCaptureEnabled = false
+                                        holder.previewFallbackLevel = 0
+                                        mainHandler.post {
+                                            rawEnabled = false
+                                            showStatus("Bu çözünürlükte RAW desteklenmedi, JPEG moduna geçildi")
+                                        }
                                         if (closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)) {
                                             cameraHandler.post { startCameraInternal(surfaceTexture) }
                                         }
@@ -2565,7 +2785,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 val onSaved: (Uri) -> Unit = { savedUri ->
                     mainHandler.post { lastCapturedUri = savedUri }
                 }
-                val thumbBmp = decodeThumbnailFromBytes(bytes)
+                val thumbBmp = decodeThumbnailFromBytes(bytes, context.cacheDir)
                 if (thumbBmp != null) {
                     val imgBmp = thumbBmp.asImageBitmap()
                     withContext(Dispatchers.Main) { lastCapturedThumb = imgBmp }
@@ -2606,71 +2826,102 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }, cameraHandler)
 
         val activeRawReader = if (holder.rawCaptureEnabled) holder.rawImageReader else null
+        val shotResultDeferred = CompletableDeferred<TotalCaptureResult?>()
         holder.lastStillCaptureResult = null
         activeRawReader?.setOnImageAvailableListener({ rawImgReader ->
             val rawImg = try { rawImgReader.acquireLatestImage() } catch (_: Exception) { null } ?: return@setOnImageAvailableListener
             coroutineScope.launch(Dispatchers.IO) {
                 try {
-                    // CaptureResult gelene kadar kısa süre bekle
-                    var waitMs = 0
-                    while (holder.lastStillCaptureResult == null && waitMs < 1500) {
-                        delay(50)
-                        waitMs += 50
-                    }
-                    val capRes = holder.lastStillCaptureResult
+                    val capRes = withTimeoutOrNull(5000L) { shotResultDeferred.await() }
+                        ?: holder.lastStillCaptureResult
                     if (capRes != null) {
-                        val savedRaw = saveRawDngToGallery(context, characteristics, capRes, rawImg)
-                        if (savedRaw) {
-                            withContext(Dispatchers.Main) { showStatus("RAW (DNG) kaydedildi") }
+                        val savedRaw = saveRawDngToGallery(
+                            context = context,
+                            characteristics = characteristics,
+                            result = capRes,
+                            rawImage = rawImg,
+                            jpegOrientationDegrees = jpegOrientation
+                        )
+                        withContext(Dispatchers.Main) {
+                            if (savedRaw) {
+                                showStatus("RAW (DNG) kaydedildi")
+                            } else {
+                                showStatus("RAW kaydedilemedi (JPEG kaydedildi)")
+                            }
                         }
                     }
                 } finally {
-                    rawImg.close()
+                    try { rawImg.close() } catch (_: Exception) {}
                 }
             }
         }, cameraHandler)
 
-        val captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
-            addTarget(reader.surface)
-            activeRawReader?.surface?.let { addTarget(it) }
-            applyCamera2Settings(
-                builder = this,
-                auto = snapAuto,
-                kVal = snapKelvin,
-                tVal = snapTint,
-                contrastVal = snapContrast,
-                saturationVal = snapSat,
-                exposureEv = snapEv,
-                meteringModeVal = snapMetering,
-                boxNorm = snapBoxNorm,
-                boxSizeNorm = snapBoxSize,
-                isStillCapture = true
-            )
-            set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+        fun buildStillCaptureRequest(includeRaw: Boolean, fallbackMode: Boolean): CaptureRequest {
+            return camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                addTarget(reader.surface)
+                if (includeRaw) {
+                    activeRawReader?.surface?.let { addTarget(it) }
+                }
+                applyCamera2Settings(
+                    builder = this,
+                    auto = snapAuto,
+                    kVal = snapKelvin,
+                    tVal = snapTint,
+                    contrastVal = snapContrast,
+                    saturationVal = snapSat,
+                    exposureEv = snapEv,
+                    meteringModeVal = snapMetering,
+                    boxNorm = snapBoxNorm,
+                    boxSizeNorm = snapBoxSize,
+                    isStillCapture = true,
+                    compatibilityFallback = fallbackMode
+                )
+                set(CaptureRequest.JPEG_ORIENTATION, jpegOrientation)
+            }.build()
+        }
+
+        val stillCallback = object : CameraCaptureSession.CaptureCallback() {
+            override fun onCaptureCompleted(
+                s: CameraCaptureSession,
+                r: CaptureRequest,
+                result: TotalCaptureResult
+            ) {
+                holder.lastStillCaptureResult = result
+                shotResultDeferred.complete(result)
+            }
+
+            override fun onCaptureFailed(
+                s: CameraCaptureSession,
+                r: CaptureRequest,
+                failure: CaptureFailure
+            ) {
+                shotResultDeferred.complete(null)
+                holder.isTakingPhoto = false
+            }
         }
 
         try {
-            shutterSound.play(MediaActionSound.SHUTTER_CLICK)
-            session.capture(captureBuilder.build(), object : CameraCaptureSession.CaptureCallback() {
-                override fun onCaptureCompleted(
-                    s: CameraCaptureSession,
-                    r: CaptureRequest,
-                    result: TotalCaptureResult
-                ) {
-                    holder.lastStillCaptureResult = result
-                }
-
-                override fun onCaptureFailed(
-                    s: CameraCaptureSession,
-                    r: CaptureRequest,
-                    failure: CaptureFailure
-                ) {
-                    holder.isTakingPhoto = false
-                }
-            }, cameraHandler)
+            try { shutterSound?.play(MediaActionSound.SHUTTER_CLICK) } catch (_: Throwable) {}
+            session.capture(
+                buildStillCaptureRequest(includeRaw = activeRawReader != null, fallbackMode = false),
+                stillCallback,
+                cameraHandler
+            )
         } catch (e: Exception) {
-            holder.isTakingPhoto = false
-            Log.e("CameraScreen", "Failed to capture photo", e)
+            Log.w("CameraScreen", "Primary still capture failed, trying compatibility fallback", e)
+            try {
+                // İlk yedek: Manuel matris/tonemap uyumluluk yedeğiyle tekrar dene (JPEG öncelikli)
+                session.capture(
+                    buildStillCaptureRequest(includeRaw = false, fallbackMode = true),
+                    stillCallback,
+                    cameraHandler
+                )
+            } catch (e2: Exception) {
+                shotResultDeferred.complete(null)
+                holder.isTakingPhoto = false
+                Log.e("CameraScreen", "Failed to capture photo even with fallback", e2)
+                mainHandler.post { showStatus("Çekim başarısız oldu, tekrar deneyin") }
+            }
         }
     }
 
@@ -2705,7 +2956,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             lifecycleOwner.lifecycle.removeObserver(observer)
             closeCameraInternal(releaseReader = true)
             cameraThread.quitSafely()
-            shutterSound.release()
+            try { shutterSound?.release() } catch (_: Throwable) {}
         }
     }
 
@@ -2790,6 +3041,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
+    DisposableEffect(cameraReady) {
+        onRegisterVolumeShutter(if (cameraReady) { { triggerCaptureWithTimer() } } else null)
+        onDispose { onRegisterVolumeShutter(null) }
+    }
+
     fun openProControl(tab: ControlTab) {
         isPickerActive = false
         isColorPipetteActive = false
@@ -2804,7 +3060,18 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         isDeckCollapsed = false
     }
 
-    // Ana dikey yerleşim: Üst araç çubuğu → Önizleme (panel asla üstüne binmez) → Alt kontrol alanı
+    val deckBgAlpha by animateFloatAsState(
+        targetValue = if (isAnySliderDragging) 0.14f else 0.78f,
+        animationSpec = tween(150),
+        label = "deckBgAlpha"
+    )
+    val ghostChromeAlpha by animateFloatAsState(
+        targetValue = if (isAnySliderDragging) 0.08f else 1f,
+        animationSpec = tween(150),
+        label = "ghostChromeAlpha"
+    )
+
+    // Ana dikey yerleşim: İnce üst araç çubuğu → Tam genişlikli vizör + yarı saydam yüzen Pro panel → Kompakt deklanşör çubuğu
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -2812,11 +3079,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // 1) ÜST ARAÇ ÇUBUĞU: Ferah, sıkışmayan mod anahtarı + keskin vektör hızlı araçlar
+        // 1) ÜST ARAÇ ÇUBUĞU: Kompakt mod anahtarı + ince keskin vektör hızlı araçlar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -2898,7 +3165,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     contentDesc = strGridCd,
                     onClick = { showGrid = !showGrid }
                 ) { tint ->
-                    GridIcon(tint = tint, modifier = Modifier.size(16.dp))
+                    GridIcon(tint = tint, modifier = Modifier.size(14.dp))
                 }
 
                 TopIconButton(
@@ -2910,7 +3177,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         showStatus(if (showLevel) strLevelOn else strLevelOff)
                     }
                 ) { tint ->
-                    LevelIcon(tint = tint, modifier = Modifier.size(17.dp))
+                    LevelIcon(tint = tint, modifier = Modifier.size(15.dp))
                 }
 
                 TopIconButton(
@@ -2935,12 +3202,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         Text(
                             text = "${timerSeconds}s",
                             color = tint,
-                            fontSize = 12.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             fontFamily = FontFamily.Monospace
                         )
                     } else {
-                        TimerIcon(tint = tint, modifier = Modifier.size(16.dp))
+                        TimerIcon(tint = tint, modifier = Modifier.size(14.dp))
                     }
                 }
             }
@@ -3443,14 +3710,32 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Önizleme alt HUD satırı: Tek satırda hizalı [Karşılaştır] · [0,5x | 1x | 2x] · [Aktif araç rozeti]
-                // Yatay Row düzeni sayesinde hiçbir en-boy oranında öğeler birbirinin üstüne binmez
+                // Deklanşör çekim flaş efekti
+                if (shutterFlashAlpha.value > 0.01f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.White.copy(alpha = shutterFlashAlpha.value))
+                    )
+                }
+            }
+
+            // YÜZEN ALT KATMAN: Tam genişlikte HUD satırı + Yarı saydam Pro kontrol paneli
+            // Vizör asla küçülmez; pipet/BD seçicisinde panel otomatik gizlenir; slider sürüklerken Hayalet Mod açılır
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Alt HUD satırı: [Karşılaştır] · [0,5x | 1x | 2x] · [ZEBRA/KUTU] (tam ekran genişliğinde, asla kırpılmaz)
                 if (cameraReady) {
                     Row(
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                            .alpha(ghostChromeAlpha)
+                            .padding(horizontal = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         // Sol slot: PRO modda basılı tutunca OTO önizlemesi gösteren Karşılaştır düğmesi
@@ -3461,7 +3746,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             if (!isAutoMode) {
                                 Box(
                                     modifier = Modifier
-                                        .sizeIn(minWidth = 44.dp, minHeight = 44.dp)
+                                        .sizeIn(minWidth = 40.dp, minHeight = 36.dp)
                                         .pointerInput(cameraReady) {
                                             detectTapGestures(
                                                 onPress = {
@@ -3483,17 +3768,17 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 else IrPalette.HudScrim
                                             )
                                             .border(
-                                                1.dp,
+                                                0.8.dp,
                                                 if (isComparingAuto) IrPalette.IrEmerald else Color.White.copy(alpha = 0.20f),
                                                 RoundedCornerShape(50)
                                             )
-                                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                                            .padding(horizontal = 9.dp, vertical = 5.dp),
                                         verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         CompareEyeIcon(
                                             tint = if (isComparingAuto) Color.Black else IrPalette.TextPrimary,
-                                            modifier = Modifier.size(14.dp)
+                                            modifier = Modifier.size(13.dp)
                                         )
                                         Text(
                                             text = strCompare,
@@ -3508,20 +3793,20 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Orta slot: Mercek / yakınlaştırma kapsülü (0,5x · 1x · 2x)
+                        // Orta slot: Kompakt mercek / yakınlaştırma kapsülü (0,5x · 1x · 2x)
                         if (availableZoomOptions.size > 1) {
                             Row(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(50))
                                     .background(IrPalette.HudScrim)
-                                    .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(50))
-                                    .padding(3.dp),
+                                    .border(0.8.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(50))
+                                    .padding(2.dp),
                                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 availableZoomOptions.forEach { z ->
                                     val isSelected = abs(zoomRatio - z) < 0.08f
-                                    val zLabel = if (z == 0.5f) "0,5x" else "${z.toInt()}x"
+                                    val zLabel = if (z < 0.99f) String.format(turkishLocale, "%.1fx", z) else "${z.toInt()}x"
                                     val chipBg by animateColorAsState(
                                         targetValue = if (isSelected) IrPalette.IrAmber else Color.Transparent,
                                         animationSpec = tween(160),
@@ -3529,20 +3814,20 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     )
                                     Box(
                                         modifier = Modifier
-                                            .sizeIn(minWidth = 36.dp, minHeight = 32.dp)
+                                            .sizeIn(minWidth = 32.dp, minHeight = 28.dp)
                                             .clip(CircleShape)
                                             .background(chipBg)
                                             .clickable {
                                                 zoomRatio = z
                                                 updatePreviewSettings()
                                             }
-                                            .padding(horizontal = 7.dp),
+                                            .padding(horizontal = 6.dp),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = zLabel,
                                             color = if (isSelected) Color.Black else Color.White,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.sp,
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold
                                         )
@@ -3551,7 +3836,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Sağ slot: Simetriyi koruyan kompakt aktif araç rozeti (ZEBRA / KUTU)
+                        // Sağ slot: Kompakt aktif araç rozeti (ZEBRA / KUTU)
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterEnd
@@ -3567,8 +3852,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
                                         .background(IrPalette.HudScrim)
-                                        .border(1.dp, color.copy(alpha = 0.65f), RoundedCornerShape(50))
-                                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                                        .border(0.8.dp, color.copy(alpha = 0.65f), RoundedCornerShape(50))
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
                                 ) {
                                     Text(
                                         text = tag,
@@ -3583,49 +3868,38 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
 
-                // Deklanşör çekim flaş efekti
-                if (shutterFlashAlpha.value > 0.01f) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Color.White.copy(alpha = shutterFlashAlpha.value))
-                    )
-                }
-            }
-        }
-
-        // 3) ALT KONTROL ALANI: Önizlemenin altında ayrı bölüm (OTO modda tam ferah vizör, PRO modda tek kaydırıcı paneli)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(IrPalette.VoidBlack)
-                .padding(horizontal = 12.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // PRO Mod Çip Tabanlı Tek Kaydırıcı Paneli
-            AnimatedVisibility(visible = !isAutoMode) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(IrPalette.HudGlass)
-                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(18.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                // PRO Mod Yarı Saydam Yüzen Kontrol Paneli (Pipet / Noktasal BD açıkken otomatik gizlenir!)
+                AnimatedVisibility(
+                    visible = !isAutoMode && !isPickerActive && !isColorPipetteActive,
+                    enter = fadeIn(tween(170)) + slideInVertically(tween(190)) { it / 3 },
+                    exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 3 }
                 ) {
-                    // Seçili çipin tek/kompakt kaydırıcı alanı
-                    AnimatedVisibility(
-                        visible = !isDeckCollapsed,
-                        enter = fadeIn() + slideInVertically { it / 4 },
-                        exit = fadeOut() + slideOutVertically { it / 4 }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(IrPalette.HudGlass.copy(alpha = deckBgAlpha))
+                            .border(
+                                0.8.dp,
+                                IrPalette.BorderSubtle.copy(alpha = if (isAnySliderDragging) 0.08f else 0.24f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        // Seçili çipin tek/kompakt kaydırıcı alanı
+                        AnimatedVisibility(
+                            visible = !isDeckCollapsed,
+                            enter = fadeIn(tween(150)) + slideInVertically(tween(170)) { it / 4 },
+                            exit = fadeOut(tween(130)) + slideOutVertically(tween(150)) { it / 4 }
                         ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                             when (activeTab) {
                                 ControlTab.BD -> {
-                                    // Tek kaydırıcı + canlı değer gösteren 2'li alt seçici (vizör asla daralmaz)
+                                    // Tek kaydırıcı + canlı değer gösteren 2'li alt seçici
                                     SegmentedChoiceRow(
                                         options = listOf(
                                             WbSubSlider.KELVIN to "${stringResource(R.string.sub_kelvin)} · ${kelvinValue.toInt()}K",
@@ -3633,6 +3907,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         ),
                                         selected = activeWbSubSlider,
                                         enabled = cameraReady,
+                                        modifier = Modifier.alpha(ghostChromeAlpha),
                                         onSelect = { activeWbSubSlider = it }
                                     )
 
@@ -3649,6 +3924,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             gradient = Brush.horizontalGradient(
                                                 colors = listOf(Color(0xFFFF6B2B), Color(0xFFFFF4E6), IrPalette.IrCyan)
                                             ),
+                                            onDraggingChange = { isAnySliderDragging = it },
                                             onStepMinus = {
                                                 kelvinValue = (kelvinValue - 100f).coerceIn(KELVIN_MIN, KELVIN_MAX)
                                                 updatePreviewSettings()
@@ -3680,6 +3956,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             gradient = Brush.horizontalGradient(
                                                 colors = listOf(IrPalette.IrEmerald, Color(0xFFE2E8F0), IrPalette.IrMagenta)
                                             ),
+                                            onDraggingChange = { isAnySliderDragging = it },
                                             onStepMinus = {
                                                 tintValue = (tintValue - 5f).coerceIn(-100f, 100f)
                                                 updatePreviewSettings()
@@ -3701,8 +3978,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     }
 
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .alpha(ghostChromeAlpha),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         ActionPillButton(
@@ -3711,7 +3990,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             accentColor = IrPalette.IrAmber,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                            leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                             onClick = { runAutoCalibrate() }
                                         )
                                         ActionPillButton(
@@ -3720,7 +3999,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             accentColor = IrPalette.IrAmber,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> TargetCrosshairIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                            leadingIcon = { tint -> TargetCrosshairIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                             onClick = {
                                                 isPickerActive = !isPickerActive
                                                 if (isPickerActive) {
@@ -3749,6 +4028,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             gradient = Brush.horizontalGradient(
                                                 colors = listOf(Color(0xFF1E293B), Color(0xFF94A3B8), Color(0xFFFEF08A))
                                             ),
+                                            onDraggingChange = { isAnySliderDragging = it },
                                             onStepMinus = {
                                                 exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
                                                 updatePreviewSettings()
@@ -3771,8 +4051,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                                     // Dengeli 2'li araç satırı: Vurgu koruma + Zebra uyarısı
                                     Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .alpha(ghostChromeAlpha),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         ActionPillButton(
@@ -3781,7 +4063,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             accentColor = IrPalette.IrTeal,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> ShieldIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                            leadingIcon = { tint -> ShieldIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                             onClick = {
                                                 highlightProtectionEnabled = !highlightProtectionEnabled
                                                 measureAndApplyExposureMetering(applyEvAdjust = highlightProtectionEnabled)
@@ -3794,7 +4076,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             accentColor = IrPalette.IrCoral,
                                             enabled = cameraReady,
                                             modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> ZebraIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                            leadingIcon = { tint -> ZebraIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                             onClick = {
                                                 showZebra = !showZebra
                                                 showStatus(if (showZebra) strZebraOn else strZebraOff)
@@ -3823,6 +4105,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         ),
                                         selected = colorPanelMode,
                                         enabled = cameraReady,
+                                        modifier = Modifier.alpha(ghostChromeAlpha),
                                         onSelect = { mode ->
                                             colorPanelMode = mode
                                             if (mode != ColorPanelMode.PIPET) {
@@ -3842,6 +4125,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 ),
                                                 selected = activeColorSubSlider,
                                                 enabled = cameraReady,
+                                                modifier = Modifier.alpha(ghostChromeAlpha),
                                                 onSelect = { activeColorSubSlider = it }
                                             )
 
@@ -3864,6 +4148,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                             Color(0xFFEF4444)
                                                         )
                                                     ),
+                                                    onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
                                                         saturationValue = (saturationValue - 0.05f).coerceIn(0.50f, 2.00f)
                                                         updatePreviewSettings()
@@ -3895,6 +4180,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     gradient = Brush.horizontalGradient(
                                                         colors = listOf(Color(0xFF475569), Color(0xFFCBD5E1), Color.White)
                                                     ),
+                                                    onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
                                                         contrastValue = (contrastValue - 0.05f).coerceIn(0.60f, 1.80f)
                                                         updatePreviewSettings()
@@ -3916,8 +4202,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                             }
 
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .alpha(ghostChromeAlpha),
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 ActionPillButton(
@@ -3926,7 +4214,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     accentColor = IrPalette.IrAmber,
                                                     enabled = cameraReady,
                                                     modifier = Modifier.weight(1f),
-                                                    leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                                     onClick = { runAutoContrast() }
                                                 )
                                                 ActionPillButton(
@@ -3935,7 +4223,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     accentColor = IrPalette.IrTeal,
                                                     enabled = cameraReady,
                                                     modifier = Modifier.weight(1f),
-                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                                     onClick = {
                                                         colorPanelMode = ColorPanelMode.PIPET
                                                         isColorPipetteActive = true
@@ -3948,25 +4236,25 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                         }
 
                                         ColorPanelMode.BANTLAR -> {
-                                            // Lightroom / Darkroom tarzı etkileşimli Renk Histogramı Bant Mikseri
                                             val bandAdj = colorBandsConfig.get(selectedColorBand)
                                             val bandShiftedHue = (((selectedColorBand.centerHue + bandAdj.deltaHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
                                             val bandHasHueShift = abs(bandAdj.deltaHue) > 1f
 
-                                            // Seçili bant başlığı + kaynak -> hedef renk önizlemesi + sıfırla
                                             Row(
-                                                modifier = Modifier.fillMaxWidth(),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .alpha(ghostChromeAlpha),
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
                                                     modifier = Modifier.weight(1f, fill = false)
                                                 ) {
                                                     Box(
                                                         modifier = Modifier
-                                                            .size(14.dp)
+                                                            .size(13.dp)
                                                             .clip(CircleShape)
                                                             .background(selectedColorBand.swatchColor)
                                                             .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape)
@@ -3980,11 +4268,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                         Text(
                                                             text = "→",
                                                             color = IrPalette.TextSecondary,
-                                                            fontSize = 11.sp
+                                                            fontSize = 10.sp
                                                         )
                                                         Box(
                                                             modifier = Modifier
-                                                                .size(14.dp)
+                                                                .size(13.dp)
                                                                 .clip(CircleShape)
                                                                 .background(shiftedBandColor)
                                                                 .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
@@ -3997,7 +4285,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                             selectedColorBand.label
                                                         },
                                                         color = IrPalette.TextPrimary,
-                                                        fontSize = 12.sp,
+                                                        fontSize = 11.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
@@ -4006,48 +4294,48 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
                                                     if (bandAdj.isModified) {
                                                         Text(
                                                             text = stringResource(R.string.action_reset_band),
                                                             color = IrPalette.IrAmber,
-                                                            fontSize = 11.sp,
+                                                            fontSize = 10.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                             modifier = Modifier
-                                                                .clip(RoundedCornerShape(7.dp))
+                                                                .clip(RoundedCornerShape(6.dp))
                                                                 .background(IrPalette.IrAmber.copy(alpha = 0.14f))
                                                                 .clickable {
                                                                     colorBandsConfig = colorBandsConfig.update(selectedColorBand) { BandHslAdjustment() }
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                 }
-                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                                .padding(horizontal = 7.dp, vertical = 3.dp)
                                                         )
                                                     } else if (colorBandsConfig.hasAnyModification) {
                                                         Text(
                                                             text = stringResource(R.string.action_reset_all_bands),
                                                             color = IrPalette.IrCoral,
-                                                            fontSize = 11.sp,
+                                                            fontSize = 10.sp,
                                                             fontWeight = FontWeight.SemiBold,
                                                             modifier = Modifier
-                                                                .clip(RoundedCornerShape(7.dp))
+                                                                .clip(RoundedCornerShape(6.dp))
                                                                 .background(IrPalette.IrCoral.copy(alpha = 0.14f))
                                                                 .clickable {
                                                                     colorBandsConfig = ColorBandsConfig()
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                 }
-                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                                .padding(horizontal = 7.dp, vertical = 3.dp)
                                                         )
                                                     }
                                                 }
                                             }
 
-                                            // Canlı Renk Tonu Histogramı üzerinden dokunarak/sürükleyerek 8 bant seçimi
                                             ColorHistogramBandPicker(
                                                 hueBins = liveHistogram.hueBins,
                                                 selectedBand = selectedColorBand,
                                                 config = colorBandsConfig,
                                                 enabled = cameraReady,
+                                                modifier = Modifier.alpha(ghostChromeAlpha),
                                                 onSelectBand = { band ->
                                                     if (selectedColorBand != band) {
                                                         selectedColorBand = band
@@ -4056,15 +4344,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 }
                                             )
 
-                                            // Seçili bant için Ton / Doygunluk / Parlaklık seçicisi
                                             SegmentedChoiceRow(
                                                 options = listOf(
                                                     PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(bandAdj.deltaHue)}°",
-                                                    PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${formatSigned(bandAdj.deltaSat * 100f)}%",
-                                                    PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.slider_point_lum)} · ${formatSigned(bandAdj.deltaLum * 100f)}%"
+                                                    PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.sub_sat_short)} · ${formatSigned(bandAdj.deltaSat * 100f)}%",
+                                                    PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.sub_lum_short)} · ${formatSigned(bandAdj.deltaLum * 100f)}%"
                                                 ),
                                                 selected = activeBandSubSlider,
                                                 enabled = cameraReady,
+                                                modifier = Modifier.alpha(ghostChromeAlpha),
                                                 onSelect = { activeBandSubSlider = it }
                                             )
 
@@ -4079,7 +4367,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                         }
                                                     }
                                                     ProGradientSliderRow(
-                                                        label = "${selectedColorBand.label} · ${stringResource(R.string.slider_point_hue)}",
+                                                        label = "${selectedColorBand.label} · ${stringResource(R.string.sub_tint)}",
                                                         valueBadge = "${formatSigned(bandAdj.deltaHue)}°",
                                                         isModified = abs(bandAdj.deltaHue) > 0.5f,
                                                         value = bandAdj.deltaHue,
@@ -4088,6 +4376,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                         valueRange = -180f..180f,
                                                         enabled = cameraReady,
                                                         gradient = Brush.horizontalGradient(bandSpectrum),
+                                                        onDraggingChange = { isAnySliderDragging = it },
                                                         onStepMinus = {
                                                             colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
                                                                 it.copy(deltaHue = (it.deltaHue - 10f).coerceIn(-180f, 180f))
@@ -4120,6 +4409,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     gradient = Brush.horizontalGradient(
                                                         listOf(Color(0xFF475569), selectedColorBand.swatchColor)
                                                     ),
+                                                    onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
                                                         colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
                                                             it.copy(deltaSat = (it.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f))
@@ -4140,7 +4430,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 )
 
                                                 PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
-                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.slider_point_lum)}",
+                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.sub_lum_short)}",
                                                     valueBadge = "${formatSigned(bandAdj.deltaLum * 100f)}%",
                                                     isModified = abs(bandAdj.deltaLum) > 0.02f,
                                                     value = bandAdj.deltaLum,
@@ -4151,6 +4441,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     gradient = Brush.horizontalGradient(
                                                         listOf(Color(0xFF1E293B), selectedColorBand.swatchColor, Color.White)
                                                     ),
+                                                    onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
                                                         colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
                                                             it.copy(deltaLum = (it.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f))
@@ -4174,9 +4465,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
                                         ColorPanelMode.PIPET -> {
                                             if (targetedColorConfig.isActive) {
-                                                // Noktasal renk başlığı + genişlik + kaldır
+                                                // Noktasal renk başlığı + genişlik + yeniden seç + kaldır
                                                 Row(
-                                                    modifier = Modifier.fillMaxWidth(),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .alpha(ghostChromeAlpha),
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.SpaceBetween
                                                 ) {
@@ -4184,12 +4477,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     val hasHueShift = abs(targetedColorConfig.deltaHue) > 1f
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                         modifier = Modifier.weight(1f, fill = false)
                                                     ) {
                                                         Box(
                                                             modifier = Modifier
-                                                                .size(15.dp)
+                                                                .size(13.dp)
                                                                 .clip(CircleShape)
                                                                 .background(Color(targetedColorConfig.previewColorInt))
                                                                 .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
@@ -4203,11 +4496,11 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                             Text(
                                                                 text = "→",
                                                                 color = IrPalette.TextSecondary,
-                                                                fontSize = 11.sp
+                                                                fontSize = 10.sp
                                                             )
                                                             Box(
                                                                 modifier = Modifier
-                                                                    .size(15.dp)
+                                                                    .size(13.dp)
                                                                     .clip(CircleShape)
                                                                     .background(shiftedColor)
                                                                     .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
@@ -4220,7 +4513,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                                 "${getHueName(targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)"
                                                             },
                                                             color = IrPalette.IrTeal,
-                                                            fontSize = 12.sp,
+                                                            fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             maxLines = 1,
                                                             overflow = TextOverflow.Ellipsis
@@ -4228,7 +4521,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     }
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
                                                     ) {
                                                         listOf(
                                                             stringResource(R.string.range_narrow) to 14f,
@@ -4238,7 +4531,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                             val isSel = targetedColorConfig.hueWidth == w
                                                             Box(
                                                                 modifier = Modifier
-                                                                    .clip(RoundedCornerShape(8.dp))
+                                                                    .clip(RoundedCornerShape(6.dp))
                                                                     .background(if (isSel) IrPalette.IrAmber else IrPalette.SurfaceSubtle)
                                                                     .clickable {
                                                                         targetedColorConfig = targetedColorConfig.copy(
@@ -4246,27 +4539,43 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                                             hueFeather = if (w == 14f) 12f else if (w == 22f) 18f else 26f
                                                                         )
                                                                     }
-                                                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                                                                    .padding(horizontal = 6.dp, vertical = 3.dp)
                                                             ) {
                                                                 Text(
                                                                     text = lbl,
                                                                     color = if (isSel) Color.Black else IrPalette.TextSecondary,
-                                                                    fontSize = 11.sp,
+                                                                    fontSize = 10.sp,
                                                                     fontWeight = FontWeight.SemiBold
                                                                 )
                                                             }
                                                         }
+                                                        // Tek dokunuşla yeniden pipetle seç (panel otomatik gizlenip tam ekran açılır!)
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(IrPalette.IrTeal.copy(alpha = 0.16f))
+                                                                .clickable {
+                                                                    isColorPipetteActive = true
+                                                                    isPickerActive = false
+                                                                    isExposureBoxPicking = false
+                                                                    showStatus(strTapColor)
+                                                                }
+                                                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            PipetteIcon(tint = IrPalette.IrTeal, modifier = Modifier.size(12.dp))
+                                                        }
                                                         Text(
                                                             text = stringResource(R.string.action_remove),
                                                             color = IrPalette.IrCoral,
-                                                            fontSize = 11.sp,
+                                                            fontSize = 10.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier
-                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .clip(RoundedCornerShape(6.dp))
                                                                 .clickable {
                                                                     targetedColorConfig = TargetedColorConfig()
                                                                 }
-                                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                                .padding(horizontal = 5.dp, vertical = 3.dp)
                                                         )
                                                     }
                                                 }
@@ -4274,11 +4583,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 SegmentedChoiceRow(
                                                     options = listOf(
                                                         PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(targetedColorConfig.deltaHue)}°",
-                                                        PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
-                                                        PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.slider_point_lum)} · ${formatSigned(targetedColorConfig.deltaLum * 100f)}%"
+                                                        PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.sub_sat_short)} · ${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
+                                                        PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.sub_lum_short)} · ${formatSigned(targetedColorConfig.deltaLum * 100f)}%"
                                                     ),
                                                     selected = activePointColorSubSlider,
                                                     enabled = cameraReady,
+                                                    modifier = Modifier.alpha(ghostChromeAlpha),
                                                     onSelect = { activePointColorSubSlider = it }
                                                 )
 
@@ -4302,6 +4612,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                             valueRange = -180f..180f,
                                                             enabled = cameraReady,
                                                             gradient = Brush.horizontalGradient(hueSpectrumColors),
+                                                            onDraggingChange = { isAnySliderDragging = it },
                                                             onStepMinus = {
                                                                 targetedColorConfig = targetedColorConfig.copy(
                                                                     deltaHue = (targetedColorConfig.deltaHue - 10f).coerceIn(-180f, 180f)
@@ -4334,6 +4645,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                         gradient = Brush.horizontalGradient(
                                                             listOf(Color(0xFF64748B), Color(0xFF22C55E), Color(0xFFF59E0B), Color(0xFFEF4444))
                                                         ),
+                                                        onDraggingChange = { isAnySliderDragging = it },
                                                         onStepMinus = {
                                                             targetedColorConfig = targetedColorConfig.copy(
                                                                 deltaSat = (targetedColorConfig.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f)
@@ -4365,6 +4677,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                         gradient = Brush.horizontalGradient(
                                                             listOf(Color(0xFF334155), Color.White)
                                                         ),
+                                                        onDraggingChange = { isAnySliderDragging = it },
                                                         onStepMinus = {
                                                             targetedColorConfig = targetedColorConfig.copy(
                                                                 deltaLum = (targetedColorConfig.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f)
@@ -4388,7 +4701,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                 Text(
                                                     text = stringResource(R.string.pipette_empty_hint),
                                                     color = IrPalette.TextSecondary,
-                                                    fontSize = 12.sp
+                                                    fontSize = 11.sp
                                                 )
                                                 ActionPillButton(
                                                     label = if (isColorPipetteActive) stringResource(R.string.action_color_pipette_active) else stringResource(R.string.action_color_pipette),
@@ -4396,7 +4709,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     accentColor = IrPalette.IrTeal,
                                                     enabled = cameraReady,
                                                     modifier = Modifier.fillMaxWidth(),
-                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                                                     onClick = {
                                                         isColorPipetteActive = !isColorPipetteActive
                                                         if (isColorPipetteActive) {
@@ -4483,20 +4796,31 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         }
                     }
 
-                    // Yatay Profesyonel Sekme Çubuğu: İkon + anlaşılır Türkçe etiket + aktiflik noktası + panel aç/kapa
+                    // Yatay Profesyonel Sekme Çubuğu (aşağı kaydırarak gizle, yukarı kaydırarak aç + Hayalet Modda silikleşir)
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(ghostChromeAlpha)
+                            .pointerInput(Unit) {
+                                detectVerticalDragGestures { _, dragAmount ->
+                                    if (dragAmount > 14f) {
+                                        isDeckCollapsed = true
+                                    } else if (dragAmount < -14f) {
+                                        isDeckCollapsed = false
+                                    }
+                                }
+                            },
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Row(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color.White.copy(alpha = 0.04f))
-                                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
-                                .padding(3.dp),
-                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                                .padding(2.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             val chips = listOf(
                                 Triple(ControlTab.BD, stringResource(R.string.chip_wb), isWbModified),
@@ -4512,10 +4836,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                     modifier = Modifier.weight(1f),
                                     icon = { tint ->
                                         when (tab) {
-                                            ControlTab.BD -> WhiteBalanceIcon(tint = tint, modifier = Modifier.size(14.dp))
-                                            ControlTab.POZ -> ExposureIcon(tint = tint, modifier = Modifier.size(14.dp))
-                                            ControlTab.RENK -> ColorWheelIcon(tint = tint, modifier = Modifier.size(14.dp))
-                                            ControlTab.OLCUM -> MeteringFrameIcon(tint = tint, modifier = Modifier.size(14.dp))
+                                            ControlTab.BD -> WhiteBalanceIcon(tint = tint, modifier = Modifier.size(13.dp))
+                                            ControlTab.POZ -> ExposureIcon(tint = tint, modifier = Modifier.size(13.dp))
+                                            ControlTab.RENK -> ColorWheelIcon(tint = tint, modifier = Modifier.size(13.dp))
+                                            ControlTab.OLCUM -> MeteringFrameIcon(tint = tint, modifier = Modifier.size(13.dp))
                                         }
                                     },
                                     onClick = {
@@ -4530,15 +4854,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Panel aç/kapa vektör düğmesi (48x48dp dokunma alanı, 180° dönüş)
+                        // Kompakt panel aç/kapa vektör düğmesi
                         val chevronRotation by animateFloatAsState(
                             targetValue = if (isDeckCollapsed) 180f else 0f,
-                            animationSpec = tween(220),
+                            animationSpec = tween(200),
                             label = "chevronRot"
                         )
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(38.dp)
                                 .semantics { contentDescription = strPanelCd }
                                 .clip(CircleShape)
                                 .clickable { isDeckCollapsed = !isDeckCollapsed },
@@ -4546,23 +4870,23 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(11.dp))
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(9.dp))
                                     .background(
                                         if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.20f)
                                         else Color.White.copy(alpha = 0.06f)
                                     )
                                     .border(
-                                        1.dp,
+                                        0.8.dp,
                                         if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
-                                        RoundedCornerShape(11.dp)
+                                        RoundedCornerShape(9.dp)
                                     ),
                                 contentAlignment = Alignment.Center
                             ) {
                                 ChevronIcon(
                                     tint = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
                                     modifier = Modifier
-                                        .size(15.dp)
+                                        .size(14.dp)
                                         .rotate(chevronRotation)
                                 )
                             }
@@ -4570,40 +4894,32 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     }
                 }
             }
+        }
+        }
 
-            // ALT DEKLANŞÖR ÇUBUĞU: Kusursuz 3 bölgeli simetrik düzen
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                // Sol bölge: 52dp dairesel Galeri küçük resmi
+        // 3) KOMPAKT ALT DEKLANŞÖR ÇUBUĞU: Tam genişlikli vizörün altında sade, dengeli çekim şeridi
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(IrPalette.VoidBlack)
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+                // Sol bölge: 46dp kompakt dairesel Galeri küçük resmi
                 Box(
                     modifier = Modifier.weight(1f),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
+                            .size(46.dp)
                             .semantics { contentDescription = strGalleryCd }
                             .clip(CircleShape)
                             .background(IrPalette.HudCard)
-                            .border(1.5.dp, Color.White.copy(alpha = 0.34f), CircleShape)
+                            .border(1.3.dp, Color.White.copy(alpha = 0.34f), CircleShape)
                             .clickable {
-                                val targetUri = lastCapturedUri
-                                val intent = if (targetUri != null) {
-                                    Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(targetUri, "image/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                } else {
-                                    Intent(Intent.ACTION_VIEW, MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-                                }
-                                try {
-                                    context.startActivity(intent)
-                                } catch (_: Exception) {
+                                if (!openGallerySafely(context, lastCapturedUri)) {
                                     showStatus("Galeri açılamadı")
                                 }
                             },
@@ -4618,14 +4934,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 modifier = Modifier.fillMaxSize().clip(CircleShape)
                             )
                         } else {
-                            GalleryIcon(tint = IrPalette.TextSecondary, modifier = Modifier.size(20.dp))
+                            GalleryIcon(tint = IrPalette.TextSecondary, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
 
-                // Orta: Profesyonel çift halkalı deklanşör (geri sayımda kırmızı iptal düğmesine dönüşür)
+                // Orta: Kompakt profesyonel çift halkalı deklanşör (68dp)
                 val innerSize by animateDpAsState(
-                    targetValue = if (isShutterPressed) 52.dp else 60.dp,
+                    targetValue = if (isShutterPressed) 46.dp else 54.dp,
                     animationSpec = tween(90),
                     label = "shutterSize"
                 )
@@ -4645,10 +4961,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 }
                 Box(
                     modifier = Modifier
-                        .size(76.dp)
+                        .size(68.dp)
                         .semantics { contentDescription = strShutterCd }
                         .clip(CircleShape)
-                        .border(2.8.dp, shutterBorderColor, CircleShape)
+                        .border(2.5.dp, shutterBorderColor, CircleShape)
                         .clickable(
                             enabled = cameraReady,
                             interactionSource = remember { MutableInteractionSource() },
@@ -4669,14 +4985,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             Text(
                                 text = "✕",
                                 color = Color.White,
-                                fontSize = 22.sp,
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                // Sağ bölge: Ön ayarlar hapı + Sıfırla ikonu (PRO) / Ölçüm kısayolu (OTO)
+                // Sağ bölge: Kompakt Sıfırla ikonu + Ön ayarlar hapı
                 Row(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
@@ -4685,7 +5001,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                     if (!isAutoMode) {
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
+                                .size(40.dp)
                                 .semantics { contentDescription = strResetAllCd }
                                 .clip(CircleShape)
                                 .clickable(enabled = cameraReady) { showResetAllDialog = true },
@@ -4693,14 +5009,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
+                                    .size(34.dp)
                                     .clip(CircleShape)
                                     .background(
                                         if (hasAnyManualChange) IrPalette.IrAmber.copy(alpha = 0.16f)
                                         else IrPalette.HudCard
                                     )
                                     .border(
-                                        1.dp,
+                                        0.9.dp,
                                         if (hasAnyManualChange) IrPalette.IrAmber.copy(alpha = 0.7f) else IrPalette.BorderSubtle,
                                         CircleShape
                                     ),
@@ -4708,7 +5024,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             ) {
                                 ResetIcon(
                                     tint = if (hasAnyManualChange) IrPalette.IrAmber else IrPalette.TextSecondary,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                             }
                         }
@@ -4719,11 +5035,10 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         highlighted = showPresetsListDialog,
                         compact = true,
                         enabled = cameraReady,
-                        leadingIcon = { tint -> PresetStarIcon(tint = tint, modifier = Modifier.size(14.dp)) },
+                        leadingIcon = { tint -> PresetStarIcon(tint = tint, modifier = Modifier.size(13.dp)) },
                         onClick = { showPresetsListDialog = true }
                     )
                 }
-            }
         }
     }
 
@@ -5109,17 +5424,17 @@ private fun ModeSegmentItem(
     )
     Box(
         modifier = Modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 40.dp)
+            .sizeIn(minWidth = 42.dp, minHeight = 32.dp)
             .clip(RoundedCornerShape(50))
             .background(bgColor)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 13.dp),
+            .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold
         )
     }
@@ -5135,7 +5450,7 @@ private fun TopBadgeButton(
 ) {
     Box(
         modifier = Modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
             .clip(RoundedCornerShape(50))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -5144,13 +5459,13 @@ private fun TopBadgeButton(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
                 .background(if (active) accentColor.copy(alpha = 0.22f) else IrPalette.HudCard)
-                .border(1.dp, if (active) accentColor else IrPalette.BorderSubtle, RoundedCornerShape(50))
-                .padding(horizontal = 9.dp, vertical = 6.dp)
+                .border(0.9.dp, if (active) accentColor else IrPalette.BorderSubtle, RoundedCornerShape(50))
+                .padding(horizontal = 7.dp, vertical = 4.dp)
         ) {
             Text(
                 text = text,
                 color = if (active) accentColor else IrPalette.TextPrimary,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold
             )
@@ -5168,7 +5483,7 @@ private fun TopIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(46.dp)
+            .size(38.dp)
             .semantics { contentDescription = contentDesc }
             .clip(CircleShape)
             .clickable(onClick = onClick),
@@ -5176,10 +5491,10 @@ private fun TopIconButton(
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
+                .size(30.dp)
                 .clip(CircleShape)
                 .background(if (active) accentColor.copy(alpha = 0.20f) else IrPalette.HudCard)
-                .border(1.dp, if (active) accentColor else IrPalette.BorderSubtle, CircleShape),
+                .border(0.9.dp, if (active) accentColor else IrPalette.BorderSubtle, CircleShape),
             contentAlignment = Alignment.Center
         ) {
             icon(if (active) accentColor else IrPalette.TextSecondary)
@@ -5367,26 +5682,27 @@ private fun ColorHistogramBandPicker(
     selectedBand: ColorBand,
     config: ColorBandsConfig,
     enabled: Boolean,
+    modifier: Modifier = Modifier,
     onSelectBand: (ColorBand) -> Unit
 ) {
     val currentOnSelect by rememberUpdatedState(onSelectBand)
     val allBands = ColorBand.entries
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFF090C11))
-            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(12.dp))
-            .padding(horizontal = 6.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+            .border(0.8.dp, IrPalette.BorderSubtle, RoundedCornerShape(10.dp))
+            .padding(horizontal = 5.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         // Üst: Canlı 48 sütunlu gökkuşağı Hue histogramı + seçili bant çerçevesi (dokun & sürükle)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .height(38.dp)
+                .clip(RoundedCornerShape(7.dp))
                 .background(Color(0xFF05070A))
                 .pointerInput(enabled) {
                     if (!enabled) return@pointerInput
@@ -5481,18 +5797,18 @@ private fun ColorHistogramBandPicker(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(26.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(5.dp))
                         .clickable(enabled = enabled) { onSelectBand(band) },
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(if (isSelected) 18.dp else 13.dp)
+                            .size(if (isSelected) 15.dp else 11.dp)
                             .clip(CircleShape)
                             .background(band.swatchColor)
                             .border(
-                                width = if (isSelected) 2.dp else 1.dp,
+                                width = if (isSelected) 1.8.dp else 0.9.dp,
                                 color = if (isSelected) Color.White else Color.White.copy(alpha = 0.28f),
                                 shape = CircleShape
                             )
@@ -5524,11 +5840,11 @@ private fun <T> SegmentedChoiceRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
+            .clip(RoundedCornerShape(9.dp))
             .background(Color.White.copy(alpha = 0.05f))
-            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(11.dp))
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
+            .border(0.8.dp, IrPalette.BorderSubtle, RoundedCornerShape(9.dp))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         options.forEach { (item, label) ->
@@ -5536,22 +5852,22 @@ private fun <T> SegmentedChoiceRow(
             Box(
                 modifier = Modifier
                     .weight(1f)
-                    .sizeIn(minHeight = 36.dp)
-                    .clip(RoundedCornerShape(8.dp))
+                    .sizeIn(minHeight = 30.dp)
+                    .clip(RoundedCornerShape(7.dp))
                     .background(if (isSel) IrPalette.IrAmber.copy(alpha = 0.20f) else Color.Transparent)
                     .border(
-                        1.dp,
+                        0.8.dp,
                         if (isSel) IrPalette.IrAmber.copy(alpha = 0.85f) else Color.Transparent,
-                        RoundedCornerShape(8.dp)
+                        RoundedCornerShape(7.dp)
                     )
                     .clickable(enabled = enabled) { onSelect(item) }
-                    .padding(horizontal = 6.dp, vertical = 5.dp),
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = label,
                     color = if (isSel) IrPalette.IrAmber else IrPalette.TextSecondary,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -5578,29 +5894,29 @@ private fun ActionPillButton(
 
     Box(
         modifier = modifier
-            .sizeIn(minHeight = 44.dp)
-            .clip(RoundedCornerShape(11.dp))
+            .sizeIn(minHeight = 34.dp)
+            .clip(RoundedCornerShape(9.dp))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(11.dp))
+                .clip(RoundedCornerShape(9.dp))
                 .background(bg)
-                .border(1.dp, border, RoundedCornerShape(11.dp))
-                .padding(horizontal = 10.dp, vertical = 9.dp),
+                .border(0.8.dp, border, RoundedCornerShape(9.dp))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             if (leadingIcon != null) {
                 leadingIcon(contentColor)
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
             }
             Text(
                 text = label,
                 color = contentColor,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -5628,23 +5944,23 @@ private fun TabChip(
 
     Box(
         modifier = modifier
-            .sizeIn(minHeight = 46.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .sizeIn(minHeight = 38.dp)
+            .clip(RoundedCornerShape(8.dp))
             .background(bg)
-            .border(1.dp, borderColor, RoundedCornerShape(9.dp))
+            .border(0.8.dp, borderColor, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 3.dp, vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 3.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(1.dp)
         ) {
             icon?.invoke(contentColor)
             Text(
                 text = title,
                 color = contentColor,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
                 softWrap = false,
@@ -5655,8 +5971,8 @@ private fun TabChip(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 4.dp, end = 5.dp)
-                    .size(5.dp)
+                    .padding(top = 3.dp, end = 4.dp)
+                    .size(4.5.dp)
                     .clip(CircleShape)
                     .background(IrPalette.IrAmber)
             )
@@ -5667,9 +5983,8 @@ private fun TabChip(
 /**
  * Profesyonel optik skala kaydırıcı:
  * - Çift çizgi karışıklığını tamamen ortadan kaldıran dairesel mekanik düğme
- * - Üstte ince ters üçgen varsayılan referans işareti
- * - Altta hassas cetvel çentikleri
- * - Sıfır gecikmeli anında dokunma & sürükleme + değer hapına dokununca sıfırlama
+ * - Üstte ince ters üçgen varsayılan referans işareti + altta hassas cetvel çentikleri
+ * - Sürükleme sırasında onDraggingChange ile Hayalet Mod desteği
  */
 @Composable
 private fun ProGradientSliderRow(
@@ -5683,6 +5998,7 @@ private fun ProGradientSliderRow(
     enabled: Boolean,
     gradient: Brush,
     trailingHeaderContent: (@Composable () -> Unit)? = null,
+    onDraggingChange: (Boolean) -> Unit = {},
     onStepMinus: () -> Unit,
     onStepPlus: () -> Unit,
     onReset: () -> Unit,
@@ -5690,16 +6006,23 @@ private fun ProGradientSliderRow(
 ) {
     val haptic = LocalHapticFeedback.current
     val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnDraggingChange by rememberUpdatedState(onDraggingChange)
     var wasSnapped by remember { mutableStateOf(abs(value - defaultValue) <= snapTolerance * 0.5f) }
     var isDragging by remember { mutableStateOf(false) }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            currentOnDraggingChange(false)
+        }
+    }
+
     val thumbRadiusDp by animateDpAsState(
-        targetValue = if (isDragging) 11.5.dp else 9.5.dp,
+        targetValue = if (isDragging) 10.5.dp else 8.5.dp,
         animationSpec = tween(120),
         label = "thumbRadius"
     )
 
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -5707,39 +6030,41 @@ private fun ProGradientSliderRow(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
                     text = label,
                     color = IrPalette.TextSecondary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Row(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(if (isModified) IrPalette.IrAmber.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(if (isModified) IrPalette.IrAmber.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.10f))
                         .border(
-                            1.dp,
-                            if (isModified) IrPalette.IrAmber.copy(alpha = 0.65f) else Color.Transparent,
-                            RoundedCornerShape(8.dp)
+                            0.8.dp,
+                            if (isModified) IrPalette.IrAmber.copy(alpha = 0.72f) else Color.Transparent,
+                            RoundedCornerShape(7.dp)
                         )
                         .clickable(enabled = enabled, onClick = onReset)
-                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                        .padding(horizontal = 7.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
                 ) {
                     Text(
                         text = valueBadge,
                         color = if (isModified) IrPalette.IrAmber else IrPalette.TextPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold
                     )
                     if (isModified) {
                         ResetIcon(
                             tint = IrPalette.IrAmber.copy(alpha = 0.85f),
-                            modifier = Modifier.size(11.dp)
+                            modifier = Modifier.size(10.dp)
                         )
                     }
                 }
@@ -5747,7 +6072,7 @@ private fun ProGradientSliderRow(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                horizontalArrangement = Arrangement.spacedBy(1.dp)
             ) {
                 trailingHeaderContent?.invoke()
                 StepButton(symbol = "−", enabled = enabled, onClick = onStepMinus)
@@ -5763,11 +6088,11 @@ private fun ProGradientSliderRow(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
+                .height(34.dp)
                 .semantics { contentDescription = "$label $valueBadge" }
                 .pointerInput(enabled, valueRange, defaultValue, snapTolerance) {
                     if (!enabled) return@pointerInput
-                    val padPx = 14.dp.toPx()
+                    val padPx = 12.dp.toPx()
                     fun xToSnapped(x: Float): Float {
                         val usable = (size.width - padPx * 2f).coerceAtLeast(1f)
                         val frac = ((x - padPx) / usable).coerceIn(0f, 1f)
@@ -5787,25 +6112,30 @@ private fun ProGradientSliderRow(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         isDragging = true
-                        currentOnValueChange(xToSnapped(down.position.x))
-                        down.consume()
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            currentOnValueChange(xToSnapped(change.position.x))
-                            change.consume()
+                        currentOnDraggingChange(true)
+                        try {
+                            currentOnValueChange(xToSnapped(down.position.x))
+                            down.consume()
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                currentOnValueChange(xToSnapped(change.position.x))
+                                change.consume()
+                            }
+                        } finally {
+                            isDragging = false
+                            currentOnDraggingChange(false)
                         }
-                        isDragging = false
                     }
                 },
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
-                val padX = 14.dp.toPx()
+                val padX = 12.dp.toPx()
                 val trackW = (size.width - padX * 2f).coerceAtLeast(1f)
                 val trackY = size.height * 0.46f
-                val trackH = 5.dp.toPx()
+                val trackH = 4.5.dp.toPx()
                 val cornerR = trackH * 0.5f
 
                 // 1) Spektrum arka plan rayı
@@ -5814,37 +6144,37 @@ private fun ProGradientSliderRow(
                     topLeft = Offset(padX, trackY - cornerR),
                     size = androidx.compose.ui.geometry.Size(trackW, trackH),
                     cornerRadius = CornerRadius(cornerR, cornerR),
-                    alpha = if (enabled) 0.92f else 0.35f
+                    alpha = if (enabled) 0.94f else 0.35f
                 )
                 drawRoundRect(
                     color = Color.White.copy(alpha = 0.16f),
                     topLeft = Offset(padX, trackY - cornerR),
                     size = androidx.compose.ui.geometry.Size(trackW, trackH),
                     cornerRadius = CornerRadius(cornerR, cornerR),
-                    style = Stroke(width = 0.8.dp.toPx())
+                    style = Stroke(width = 0.7.dp.toPx())
                 )
 
                 // 2) Altta hassas cetvel çentikleri
                 val tickCount = 16
-                val tickTop = trackY + cornerR + 4.dp.toPx()
+                val tickTop = trackY + cornerR + 3.dp.toPx()
                 for (i in 0..tickCount) {
                     val tx = padX + trackW * (i.toFloat() / tickCount)
                     val isMajor = i % 4 == 0
-                    val tickLen = if (isMajor) 6.dp.toPx() else 3.5.dp.toPx()
+                    val tickLen = if (isMajor) 5.dp.toPx() else 2.8.dp.toPx()
                     drawLine(
                         color = Color.White.copy(alpha = if (isMajor) 0.38f else 0.18f),
                         start = Offset(tx, tickTop),
                         end = Offset(tx, tickTop + tickLen),
-                        strokeWidth = if (isMajor) 1.2.dp.toPx() else 0.9.dp.toPx(),
+                        strokeWidth = if (isMajor) 1.1.dp.toPx() else 0.8.dp.toPx(),
                         cap = StrokeCap.Round
                     )
                 }
 
-                // 3) Üstte ince ters üçgen varsayılan değer işareti (dairesel düğmeden tamamen farklı biçim)
+                // 3) Üstte ince ters üçgen varsayılan değer işareti
                 val defX = padX + trackW * defaultFraction
-                val triTop = trackY - cornerR - 8.dp.toPx()
-                val triBottom = trackY - cornerR - 2.5.dp.toPx()
-                val triHalfW = 3.5.dp.toPx()
+                val triTop = trackY - cornerR - 7.dp.toPx()
+                val triBottom = trackY - cornerR - 2.dp.toPx()
+                val triHalfW = 3.dp.toPx()
                 val notchPath = Path().apply {
                     moveTo(defX - triHalfW, triTop)
                     lineTo(defX + triHalfW, triTop)
@@ -5864,38 +6194,35 @@ private fun ProGradientSliderRow(
                         color = Color.White.copy(alpha = 0.90f),
                         start = Offset(defX, trackY),
                         end = Offset(thumbX, trackY),
-                        strokeWidth = 2.dp.toPx(),
+                        strokeWidth = 1.8.dp.toPx(),
                         cap = StrokeCap.Round
                     )
                 }
 
-                // 5) Mekanik dairesel optik düğme (sürüklerken hafif büyür)
+                // 5) Mekanik dairesel optik düğme
                 val r = thumbRadiusDp.toPx()
                 if (isDragging) {
                     drawCircle(
                         color = IrPalette.IrAmber.copy(alpha = 0.24f),
-                        radius = r + 5.dp.toPx(),
+                        radius = r + 4.dp.toPx(),
                         center = Offset(thumbX, trackY)
                     )
                 }
-                // Koyu iç gövde
                 drawCircle(
                     color = IrPalette.HudGlass,
                     radius = r,
                     center = Offset(thumbX, trackY)
                 )
-                // Parlak beyaz halka
                 drawCircle(
                     color = if (enabled) Color.White else Color.White.copy(alpha = 0.35f),
                     radius = r,
                     center = Offset(thumbX, trackY),
-                    style = Stroke(width = 2.4.dp.toPx())
+                    style = Stroke(width = 2.2.dp.toPx())
                 )
-                // Değiştirilmişse ortada sıcak amber nokta
                 if (isModified && enabled) {
                     drawCircle(
                         color = IrPalette.IrAmber,
-                        radius = 3.2.dp.toPx(),
+                        radius = 2.8.dp.toPx(),
                         center = Offset(thumbX, trackY)
                     )
                 }
@@ -5908,23 +6235,23 @@ private fun ProGradientSliderRow(
 private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
-            .size(width = 40.dp, height = 36.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .size(width = 32.dp, height = 28.dp)
+            .clip(RoundedCornerShape(7.dp))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Box(
             modifier = Modifier
-                .size(width = 30.dp, height = 25.dp)
-                .clip(RoundedCornerShape(7.dp))
+                .size(width = 26.dp, height = 22.dp)
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color.White.copy(alpha = 0.08f))
-                .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(7.dp)),
+                .border(0.8.dp, IrPalette.BorderSubtle, RoundedCornerShape(6.dp)),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = symbol,
                 color = IrPalette.TextPrimary,
-                fontSize = 15.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
             )
         }
@@ -5946,7 +6273,7 @@ private fun QuickPillAction(
 
     Box(
         modifier = Modifier
-            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
             .clip(RoundedCornerShape(50))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -5955,16 +6282,16 @@ private fun QuickPillAction(
             modifier = Modifier
                 .clip(RoundedCornerShape(50))
                 .background(bg)
-                .border(1.dp, border, RoundedCornerShape(50))
-                .padding(horizontal = if (compact) 11.dp else 14.dp, vertical = 9.dp),
+                .border(0.9.dp, border, RoundedCornerShape(50))
+                .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             leadingIcon?.invoke(textColor)
             Text(
                 text = text,
                 color = textColor,
-                fontSize = 12.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 softWrap = false

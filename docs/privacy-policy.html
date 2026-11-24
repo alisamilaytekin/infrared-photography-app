@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SpectraS — Privacy Policy / Gizlilik Politikası</title>
+  <style>
+    :root {
+      --bg: #080b10;
+      --card: #121722;
+      --border: rgba(255,255,255,0.1);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --amber: #f5a623;
+      --cyan: #38bdf8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+      background: radial-gradient(circle at top right, #181f30 0%, var(--bg) 55%);
+      color: var(--text);
+      line-height: 1.65;
+      padding: 28px 16px 64px;
+    }
+    .wrap {
+      max-width: 780px;
+      margin: 0 auto;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .badge {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, #ef4444, #e84393 52%, #38bdf8);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 20px;
+      color: #fff;
+      box-shadow: 0 6px 20px rgba(232,67,147,0.35);
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    .subtitle { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+    .lang-btn {
+      background: var(--card);
+      color: var(--amber);
+      border: 1px solid rgba(245,166,35,0.45);
+      border-radius: 999px;
+      padding: 8px 16px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 26px;
+      margin-bottom: 18px;
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+      color: var(--amber);
+    }
+    p, li { color: #dbe4f0; font-size: 0.96rem; }
+    ul { padding-left: 20px; }
+    a { color: var(--cyan); }
+    .pill {
+      display: inline-block;
+      background: rgba(34,197,94,0.14);
+      border: 1px solid rgba(34,197,94,0.4);
+      color: #4ade80;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+    }
+    footer {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 28px;
+    }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="badge">S</div>
+        <div>
+          <h1>SpectraS</h1>
+          <div class="subtitle">Privacy Policy · Gizlilik Politikası</div>
+        </div>
+      </div>
+      <button class="lang-btn" id="toggleLang" onclick="toggleLanguage()">Türkçe'ye Geç</button>
+    </header>
+
+    <!-- ENGLISH -->
+    <main id="lang-en">
+      <div class="card">
+        <span class="pill">100% On-Device · Zero Data Collection</span>
+        <h2>1. Overview</h2>
+        <p><strong>SpectraS</strong> (package <code>com.alisamilaytekin.spectras</code>) is an offline infrared &amp; pro color-grading RAW camera and photo editor application. Your privacy is fundamental: SpectraS processes every camera frame, RAW (DNG) capture, and edited photograph <strong>strictly on your device</strong>.</p>
+        <p><strong>Effective Date:</strong> November 24, 2026</p>
+      </div>
+
+      <div class="card">
+        <h2>2. Data We Collect</h2>
+        <p><strong>We do not collect, transmit, store, sell, or share any personal data.</strong></p>
+        <ul>
+          <li>SpectraS does not require account registration or sign-in.</li>
+          <li>SpectraS does not request internet permission and does not upload photos, EXIF metadata, analytics, or crash logs to any server.</li>
+          <li>Custom color presets and app preferences are stored solely in your device's local private storage (<code>SharedPreferences</code>).</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>3. Device Permissions</h2>
+        <ul>
+          <li><strong>Camera (<code>CAMERA</code>):</strong> Used exclusively to display the live camera preview and capture JPEG and RAW (DNG) photographs when you press the shutter button.</li>
+          <li><strong>Storage on Android 5–9 (<code>WRITE_EXTERNAL_STORAGE</code>):</strong> Used only on legacy Android versions (API 28 and below) to save captured and edited photos into your <code>DCIM/SpectraS</code> folder. On Android 10 and newer, SpectraS uses Android Scoped Storage (<code>MediaStore</code>) and the system Photo Picker without broad storage access.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>4. Third-Party Services</h2>
+        <p>The current version of SpectraS contains no third-party advertising SDKs, tracking pixels, or remote analytics libraries. If optional services (such as Google Play Billing or Google AdMob) are introduced in a future update, this Privacy Policy will be updated transparently beforehand.</p>
+      </div>
+
+      <div class="card">
+        <h2>5. Children's Privacy &amp; Contact</h2>
+        <p>Because SpectraS collects no personal information from anyone, it is safe for users of all ages. If you have any questions about this Privacy Policy, please contact the developer at:</p>
+        <p><a href="mailto:alisamilaytekin@gmail.com">alisamilaytekin@gmail.com</a></p>
+      </div>
+    </main>
+
+    <!-- TURKISH -->
+    <main id="lang-tr" class="hidden">
+      <div class="card">
+        <span class="pill">%100 Cihaz İçi İşleme · Sıfır Veri Toplama</span>
+        <h2>1. Genel Bakış</h2>
+        <p><strong>SpectraS</strong> (paket adı: <code>com.alisamilaytekin.spectras</code>), tamamen çevrimdışı çalışan profesyonel bir kızılötesi / canlı renk derecelendirme RAW kamera ve fotoğraf düzenleme stüdyosudur. Tüm kamera görüntüleri, RAW (DNG) çekimleri ve fotoğraf düzenlemeleri <strong>yalnızca kendi cihazınızda</strong> işlenir.</p>
+        <p><strong>Yürürlük Tarihi:</strong> 24 Kasım 2026</p>
+      </div>
+
+      <div class="card">
+        <h2>2. Toplanan Veriler</h2>
+        <p><strong>Hiçbir kişisel verinizi toplamaz, sunuculara aktarmaz, saklamaz veya üçüncü taraflarla paylaşmayız.</strong></p>
+        <ul>
+          <li>SpectraS hesap oluşturma veya oturum açma gerektirmez.</li>
+          <li>Uygulama internet izni istemez; fotoğraflarınız, EXIF bilgileriniz veya kullanım istatistikleriniz cihaz dışına çıkmaz.</li>
+          <li>Kaydettiğiniz özel renk ön ayarları ve tercihler yalnızca telefonunuzun yerel hafızasında saklanır.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>3. Cihaz İzinleri</h2>
+        <ul>
+          <li><strong>Kamera (<code>CAMERA</code>):</strong> Yalnızca canlı kamera önizlemesini göstermek ve deklanşöre bastığınızda JPEG / RAW (DNG) fotoğraf çekmek için kullanılır.</li>
+          <li><strong>Depolama — Android 5–9 (<code>WRITE_EXTERNAL_STORAGE</code>):</strong> Yalnızca eski Android sürümlerinde çekilen ve düzenlenen fotoğrafları <code>DCIM/SpectraS</code> klasörüne kaydetmek için kullanılır. Android 10 ve sonrasında sistemin güvenli <code>MediaStore</code> ve Fotoğraf Seçici altyapısı kullanılır.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>4. Üçüncü Taraf Hizmetler</h2>
+        <p>SpectraS'ın bu sürümünde hiçbir üçüncü taraf takip aracı, analitik veya reklam SDK'sı yer almaz. Gelecek sürümlerde isteğe bağlı satın alma veya reklam hizmetleri eklenirse bu politika önceden şeffaf biçimde güncellenecektir.</p>
+      </div>
+
+      <div class="card">
+        <h2>5. İletişim</h2>
+        <p>Gizlilik politikamızla ilgili tüm sorularınız için geliştiriciyle doğrudan iletişime geçebilirsiniz:</p>
+        <p><a href="mailto:alisamilaytekin@gmail.com">alisamilaytekin@gmail.com</a></p>
+      </div>
+    </main>
+
+    <footer>© 2026 SpectraS · Ali Şamil Aytekin</footer>
+  </div>
+
+  <script>
+    function toggleLanguage() {
+      const en = document.getElementById('lang-en');
+      const tr = document.getElementById('lang-tr');
+      const btn = document.getElementById('toggleLang');
+      const showingEn = !en.classList.contains('hidden');
+      if (showingEn) {
+        en.classList.add('hidden');
+        tr.classList.remove('hidden');
+        btn.textContent = 'Switch to English';
+      } else {
+        tr.classList.add('hidden');
+        en.classList.remove('hidden');
+        btn.textContent = "Türkçe'ye Geç";
+      }
+    }
+    if ((navigator.language || '').toLowerCase().startsWith('tr')) {
+      toggleLanguage();
+    }
+  </script>
+</body>
+</html>

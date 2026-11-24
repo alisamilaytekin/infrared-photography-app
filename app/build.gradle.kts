@@ -5,25 +5,34 @@ plugins {
 }
 
 android {
-    namespace = "com.example.kameras"
+    namespace = "com.alisamilaytekin.spectras"
     compileSdk = 35
 
     val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
     defaultConfig {
-        applicationId = "com.example.kameras"
+        applicationId = "com.alisamilaytekin.spectras"
         minSdk = 21
-        targetSdk = 34
-        versionCode = 100 + ciRunNumber
-        versionName = "4.2.$ciRunNumber"
+        targetSdk = 35
+        versionCode = 200 + ciRunNumber
+        versionName = "5.0.$ciRunNumber"
     }
 
     signingConfigs {
-        create("kamerasRelease") {
-            storeFile = file("kameras-release.jks")
-            storePassword = "kameras123"
-            keyAlias = "kameras"
-            keyPassword = "kameras123"
+        create("spectrasRelease") {
+            val envStorePath = System.getenv("PLAY_KEYSTORE_PATH")
+            val envStoreFile = envStorePath?.takeIf { it.isNotBlank() }?.let { file(it) }
+            if (envStoreFile != null && envStoreFile.exists()) {
+                storeFile = envStoreFile
+                storePassword = System.getenv("PLAY_KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("PLAY_KEY_ALIAS") ?: "spectras"
+                keyPassword = System.getenv("PLAY_KEY_PASSWORD") ?: ""
+            } else {
+                storeFile = file("kameras-release.jks")
+                storePassword = "kameras123"
+                keyAlias = "kameras"
+                keyPassword = "kameras123"
+            }
             enableV1Signing = true
             enableV2Signing = true
             enableV3Signing = true
@@ -40,7 +49,7 @@ android {
         debug {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("kamerasRelease")
+            signingConfig = signingConfigs.getByName("spectrasRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -49,7 +58,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("kamerasRelease")
+            signingConfig = signingConfigs.getByName("spectrasRelease")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

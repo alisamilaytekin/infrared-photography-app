@@ -1,6 +1,6 @@
 @file:Suppress("SpellCheckingInspection")
 
-package com.example.kameras
+package com.alisamilaytekin.spectras
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -50,6 +50,7 @@ import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -146,7 +147,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-private object IrPalette {
+internal object IrPalette {
     // Optical Precision Instrument palette (OLED obsidian + calibrated graphite + Leica amber)
     val VoidBlack = Color(0xFF000000)
     val HudGlass = Color(0xFF0C0F14)
@@ -170,6 +171,8 @@ private object IrPalette {
 
 class MainActivity : ComponentActivity() {
     private var hasCameraPermission by mutableStateOf(false)
+    private var incomingEditUri by mutableStateOf<Uri?>(null)
+    private var incomingEditNonce by mutableIntStateOf(0)
     @Volatile private var volumeShutterAction: (() -> Unit)? = null
 
     private val permissionLauncher =
@@ -178,9 +181,34 @@ class MainActivity : ComponentActivity() {
                 ?: (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
             hasCameraPermission = camGranted
             if (!camGranted) {
-                Toast.makeText(this, "Kamera izni gerekli", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.status_camera_permission), Toast.LENGTH_LONG).show()
             }
         }
+
+    private fun extractImageUriFromIntent(intent: Intent?): Uri? {
+        if (intent == null) return null
+        return when (intent.action) {
+            Intent.ACTION_SEND -> {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+                }
+            }
+            Intent.ACTION_EDIT, Intent.ACTION_VIEW -> intent.data
+            else -> null
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        extractImageUriFromIntent(intent)?.let { uri ->
+            incomingEditUri = uri
+            incomingEditNonce++
+        }
+    }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
@@ -200,6 +228,10 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(AndroidColor.TRANSPARENT)
         )
+        extractImageUriFromIntent(intent)?.let { uri ->
+            incomingEditUri = uri
+            incomingEditNonce++
+        }
         hasCameraPermission =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
@@ -219,6 +251,8 @@ class MainActivity : ComponentActivity() {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 CameraScreen(
                     hasCameraPermission = hasCameraPermission,
+                    incomingEditUri = incomingEditUri,
+                    incomingEditNonce = incomingEditNonce,
                     onRegisterVolumeShutter = { cb -> volumeShutterAction = cb }
                 )
             }
@@ -226,39 +260,43 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+internal enum class AppMode { AUTO, PRO, STUDIO }
+
+internal enum class FlashMode { OFF, AUTO, ON, TORCH }
+
 // Ana kontrol çipleri: Beyaz Dengesi, Pozlama, Renk, Ölçüm
-private enum class ControlTab { BD, POZ, RENK, OLCUM }
+internal enum class ControlTab { BD, POZ, RENK, OLCUM }
 
 // Beyaz dengesi alt tekil kaydırıcı seçimi (önizleme yüksekliğini korur)
-private enum class WbSubSlider { KELVIN, TINT }
+internal enum class WbSubSlider { KELVIN, TINT }
 
 // Renk çipi üst modları: Genel (Doygunluk/Kontrast), Renk Bantları (Histogram Mikseri), Pipet
-private enum class ColorPanelMode { GENEL, BANTLAR, PIPET }
+internal enum class ColorPanelMode { GENEL, BANTLAR, PIPET }
 
 // Renk çipi alt tekil kaydırıcı seçimi
-private enum class ColorSubSlider { DOYGUNLUK, KONTRAST }
+internal enum class ColorSubSlider { DOYGUNLUK, KONTRAST }
 
 // Noktasal renk pipeti ve renk bantları alt tekil kaydırıcı seçimi
-private enum class PointColorSubSlider { TON, DOYGUNLUK, PARLAKLIK }
+internal enum class PointColorSubSlider { TON, DOYGUNLUK, PARLAKLIK }
 
 // Lightroom / Darkroom tarzı 8 profesyonel renk bandı
-private enum class ColorBand(
+internal enum class ColorBand(
     val index: Int,
-    val label: String,
+    val labelRes: Int,
     val centerHue: Float,
     val swatchColor: Color
 ) {
-    RED(0, "Kırmızı", 0f, Color(0xFFEF4444)),
-    ORANGE(1, "Turuncu", 30f, Color(0xFFF97316)),
-    YELLOW(2, "Sarı", 60f, Color(0xFFEAB308)),
-    GREEN(3, "Yeşil", 120f, Color(0xFF22C55E)),
-    CYAN(4, "Camgöbeği", 180f, Color(0xFF06B6D4)),
-    BLUE(5, "Mavi", 225f, Color(0xFF3B82F6)),
-    PURPLE(6, "Mor", 275f, Color(0xFF8B5CF6)),
-    MAGENTA(7, "Macenta", 320f, Color(0xFFEC4899))
+    RED(0, R.string.band_red, 0f, Color(0xFFEF4444)),
+    ORANGE(1, R.string.band_orange, 30f, Color(0xFFF97316)),
+    YELLOW(2, R.string.band_yellow, 60f, Color(0xFFEAB308)),
+    GREEN(3, R.string.band_green, 120f, Color(0xFF22C55E)),
+    CYAN(4, R.string.band_cyan, 180f, Color(0xFF06B6D4)),
+    BLUE(5, R.string.band_blue, 225f, Color(0xFF3B82F6)),
+    PURPLE(6, R.string.band_purple, 275f, Color(0xFF8B5CF6)),
+    MAGENTA(7, R.string.band_magenta, 320f, Color(0xFFEC4899))
 }
 
-private data class BandHslAdjustment(
+internal data class BandHslAdjustment(
     val deltaHue: Float = 0f,
     val deltaSat: Float = 0f,
     val deltaLum: Float = 0f
@@ -267,7 +305,7 @@ private data class BandHslAdjustment(
         get() = abs(deltaHue) > 0.5f || abs(deltaSat) > 0.01f || abs(deltaLum) > 0.01f
 }
 
-private data class ColorBandsConfig(
+internal data class ColorBandsConfig(
     val bands: List<BandHslAdjustment> = List(8) { BandHslAdjustment() }
 ) {
     val hasAnyModification: Boolean
@@ -284,7 +322,7 @@ private data class ColorBandsConfig(
     }
 }
 
-private class ProHistogramData(
+internal class ProHistogramData(
     val r: FloatArray = FloatArray(48),
     val g: FloatArray = FloatArray(48),
     val b: FloatArray = FloatArray(48),
@@ -295,13 +333,13 @@ private class ProHistogramData(
 )
 
 // Ölçüm kutusu boyutu için tek seçimli (radio) değerler
-private enum class MeteringBoxSize(val norm: Float) {
+internal enum class MeteringBoxSize(val norm: Float) {
     KUCUK(0.18f),
     ORTA(0.32f),
     BUYUK(0.55f)
 }
 
-private enum class ExposureMeteringMode { FULL_SCREEN, BOX_SPOT }
+internal enum class ExposureMeteringMode { FULL_SCREEN, BOX_SPOT }
 
 private class CameraHolder {
     var activeCameraId: String? = null
@@ -312,6 +350,11 @@ private class CameraHolder {
     var activeSurface: Surface? = null
     var isOpening: Boolean = false
     var isDisposed: Boolean = false
+
+    @Volatile var useFrontCamera: Boolean = false
+    @Volatile var hasFlash: Boolean = false
+    @Volatile var flashMode: FlashMode = FlashMode.OFF
+    @Volatile var availableAeModes: IntArray = intArrayOf()
 
     @Volatile var selectedResolution: Size? = null
     @Volatile var activePreviewSize: Size? = null
@@ -346,6 +389,7 @@ private class CameraHolder {
     @Volatile var currentExposureBoxSizeNorm: Float = 0.32f
     @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
     @Volatile var currentColorBands: ColorBandsConfig = ColorBandsConfig()
+    @Volatile var currentChannelSwap: Boolean = false
 
     // Mercek / yakınlaştırma ve RAW/DNG durumu
     @Volatile var zoomRange: Range<Float> = Range(1f, 1f)
@@ -447,18 +491,163 @@ private fun applyPreviewTransform(
     view.setTransform(matrix)
 }
 
-data class CameraPreset(
+internal data class CameraPreset(
     val name: String,
     val kelvin: Float,
     val tint: Float,
     val contrast: Float = DEFAULT_CONTRAST,
-    val saturation: Float = DEFAULT_SATURATION
+    val saturation: Float = DEFAULT_SATURATION,
+    val channelSwap: Boolean = false,
+    val colorBands: ColorBandsConfig = ColorBandsConfig(),
+    val accentHex: Long = 0xFFF5A623L,
+    val isBuiltIn: Boolean = false
 )
 
-private const val KELVIN_MIN = 1f
-private const val KELVIN_MAX = 10000f
-private const val DEFAULT_CONTRAST = 1.0f
-private const val DEFAULT_SATURATION = 1.0f
+internal const val KELVIN_MIN = 1f
+internal const val KELVIN_MAX = 10000f
+internal const val DEFAULT_CONTRAST = 1.0f
+internal const val DEFAULT_SATURATION = 1.0f
+
+internal fun buildBandPreset(vararg entries: Pair<ColorBand, BandHslAdjustment>): ColorBandsConfig {
+    val list = MutableList(8) { BandHslAdjustment() }
+    entries.forEach { (band, adj) -> list[band.index] = adj }
+    return ColorBandsConfig(list)
+}
+
+internal val BUILT_IN_SIGNATURE_PRESETS: List<CameraPreset> = listOf(
+    CameraPreset(
+        name = "Aerochrome IR",
+        kelvin = 5200f,
+        tint = 8f,
+        contrast = 1.14f,
+        saturation = 1.20f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -55f, deltaSat = 0.35f, deltaLum = 0.05f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -130f, deltaSat = 0.55f, deltaLum = 0.10f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 20f, deltaSat = 0.25f, deltaLum = -0.12f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.35f, deltaLum = -0.20f)
+        ),
+        accentHex = 0xFFEF4444L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "IR 590nm Gold (R↔B)",
+        kelvin = 2800f,
+        tint = 5f,
+        contrast = 1.12f,
+        saturation = 1.25f,
+        channelSwap = true,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 12f, deltaSat = 0.25f, deltaLum = 0.08f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -8f, deltaSat = 0.30f, deltaLum = -0.10f)
+        ),
+        accentHex = 0xFFF5A623L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "720nm B&W IR",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.26f,
+        saturation = 0.50f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, -1.0f, 0.05f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0.15f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0.45f),
+            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, 0.55f),
+            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, -0.40f),
+            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.55f),
+            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, -0.20f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, 0.0f)
+        ),
+        accentHex = 0xFFE2E8F0L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Teal & Orange",
+        kelvin = 5600f,
+        tint = -4f,
+        contrast = 1.12f,
+        saturation = 1.10f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(10f, 0.15f, 0f),
+            ColorBand.ORANGE to BandHslAdjustment(-4f, 0.25f, 0.08f),
+            ColorBand.YELLOW to BandHslAdjustment(-22f, 0.10f, 0f),
+            ColorBand.GREEN to BandHslAdjustment(45f, -0.25f, -0.12f),
+            ColorBand.CYAN to BandHslAdjustment(5f, 0.25f, -0.05f),
+            ColorBand.BLUE to BandHslAdjustment(-22f, 0.25f, -0.15f)
+        ),
+        accentHex = 0xFF2DD4BFL,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Cyberpunk Neon",
+        kelvin = 4400f,
+        tint = 28f,
+        contrast = 1.18f,
+        saturation = 1.25f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(-25f, 0.35f, 0.05f),
+            ColorBand.GREEN to BandHslAdjustment(55f, 0.20f, -0.10f),
+            ColorBand.BLUE to BandHslAdjustment(-30f, 0.45f, 0.05f),
+            ColorBand.PURPLE to BandHslAdjustment(22f, 0.50f, 0.10f),
+            ColorBand.MAGENTA to BandHslAdjustment(10f, 0.45f, 0.12f)
+        ),
+        accentHex = 0xFFE84393L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Sin City Crimson",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.24f,
+        saturation = 1.05f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, 0.55f, 0.05f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0f),
+            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, 0f),
+            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, 0f),
+            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.10f),
+            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, 0f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, 0f)
+        ),
+        accentHex = 0xFFDC2626L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Golden Hour Film",
+        kelvin = 6600f,
+        tint = 6f,
+        contrast = 1.06f,
+        saturation = 1.12f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(4f, 0.25f, 0.10f),
+            ColorBand.YELLOW to BandHslAdjustment(-12f, 0.20f, 0.08f),
+            ColorBand.GREEN to BandHslAdjustment(-25f, -0.15f, -0.05f),
+            ColorBand.BLUE to BandHslAdjustment(-10f, -0.15f, -0.05f)
+        ),
+        accentHex = 0xFFF97316L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Natural / Neutral",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = ColorBandsConfig(),
+        accentHex = 0xFF22C55EL,
+        isBuiltIn = true
+    )
+)
 
 private val DEFAULT_SRGB_CCM = floatArrayOf(
     1.65f, -0.50f, -0.15f,
@@ -773,33 +962,35 @@ data class TargetedColorConfig(
     val previewColorInt: Int = 0
 )
 
-private fun getHueName(hue: Float): String {
+internal fun getHueName(context: Context, hue: Float): String {
     val h = (hue % 360f + 360f) % 360f
-    return when (h) {
-        in 0f..15f -> "Kırmızı"
-        in 16f..45f -> "Turuncu / Amber"
-        in 46f..70f -> "Sarı / Yaprak"
-        in 71f..150f -> "Yeşil"
-        in 151f..195f -> "Camgöbeği (Cyan)"
-        in 196f..260f -> "Mavi / Gökyüzü"
-        in 261f..315f -> "Mor / Menekşe"
-        in 316f..345f -> "Macenta / Pembe"
-        else -> "Kırmızı"
+    val resId = when (h) {
+        in 0f..15f -> R.string.hue_red
+        in 16f..45f -> R.string.hue_orange
+        in 46f..70f -> R.string.hue_yellow
+        in 71f..150f -> R.string.hue_green
+        in 151f..195f -> R.string.hue_cyan
+        in 196f..260f -> R.string.hue_blue
+        in 261f..315f -> R.string.hue_purple
+        in 316f..345f -> R.string.hue_magenta
+        else -> R.string.hue_red
     }
+    return context.getString(resId)
 }
 
 /**
- * Lightroom / Darkroom tarzı 8-Bantlı Renk Mikseri + Noktasal Renk Pipeti işlemcisi.
+ * Lightroom / Darkroom tarzı R↔B Kanal Takası + 8-Bantlı Renk Mikseri + Noktasal Renk Pipeti işlemcisi.
  * Tam 360° ton dönüşümlerinde kenar halesi (rainbow halo) oluşturmamak için RGB uzayında yumuşak karıştırma uygular.
  */
-private fun applyTargetedHslToBitmap(
+internal fun applyTargetedHslToBitmap(
     bitmap: Bitmap,
     config: TargetedColorConfig,
-    colorBands: ColorBandsConfig = ColorBandsConfig()
+    colorBands: ColorBandsConfig = ColorBandsConfig(),
+    channelSwap: Boolean = false
 ): Bitmap {
     val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
     val hasBands = colorBands.hasAnyModification
-    if (!hasPoint && !hasBands) {
+    if (!channelSwap && !hasPoint && !hasBands) {
         return bitmap
     }
     val work = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
@@ -833,6 +1024,13 @@ private fun applyTargetedHslToBitmap(
             var r = (px ushr 16) and 0xFF
             var g = (px ushr 8) and 0xFF
             var b = px and 0xFF
+
+            // 0) Gerçek Kızılötesi R↔B Kanal Takası (Channel Swap)
+            if (channelSwap) {
+                val tmp = r
+                r = b
+                b = tmp
+            }
 
             // 1) 8-Bantlı Renk Histogramı Mikseri (pürüzsüz komşu bant geçişi)
             if (hasBands) {
@@ -1032,6 +1230,7 @@ private fun calculateAutoContrastFromPreview(
 
 private const val HSL_SKSL = """
     uniform shader uContent;
+    uniform float uChannelSwap;
     uniform float uTargetHue;
     uniform float uHueWidth;
     uniform float uHueFeather;
@@ -1104,6 +1303,11 @@ private const val HSL_SKSL = """
 
     vec4 main(vec2 fragCoord) {
         vec4 color = uContent.eval(fragCoord);
+
+        // 0) Kızılötesi R↔B Kanal Takası
+        if (uChannelSwap > 0.5) {
+            color.rgb = color.bgr;
+        }
 
         // 1) 8-Bantlı Renk Histogramı Mikseri (Lightroom / Darkroom)
         if (uBandsActive > 0.5) {
@@ -1204,6 +1408,7 @@ private fun updateTextureViewShader(
     view: TextureView?,
     config: TargetedColorConfig,
     colorBands: ColorBandsConfig,
+    channelSwap: Boolean = false,
     bypass: Boolean = false
 ) {
     if (view == null) return
@@ -1211,11 +1416,12 @@ private fun updateTextureViewShader(
         try {
             val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
             val hasBands = colorBands.hasAnyModification
-            if (bypass || (!hasPoint && !hasBands)) {
+            if (bypass || (!channelSwap && !hasPoint && !hasBands)) {
                 view.setRenderEffect(null)
                 return
             }
             val shader = RuntimeShader(HSL_SKSL)
+            shader.setFloatUniform("uChannelSwap", if (channelSwap) 1.0f else 0.0f)
             shader.setFloatUniform("uTargetHue", config.targetHue)
             shader.setFloatUniform("uHueWidth", config.hueWidth)
             shader.setFloatUniform("uHueFeather", config.hueFeather)
@@ -1328,7 +1534,7 @@ private fun perceptualBandPosToHue(pos: Float): Float {
 }
 
 // Önizleme görüntüsünden 48 sütunlu profesyonel RGB + Parlaklık + Algısal Bant Hizalı Renk Tonu (Hue) histogramı üretir
-private fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogramData {
+internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogramData {
     val w = bitmap.width
     val h = bitmap.height
     if (w <= 0 || h <= 0) return ProHistogramData()
@@ -1417,7 +1623,7 @@ private fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogra
 }
 
 // Önizleme görüntüsünde aşırı parlak (yanık) bölgeleri 32x32 ızgara olarak işaretler (zebra uyarısı)
-private fun computeZebraGrid(bitmap: Bitmap, cols: Int = 32, rows: Int = 32, threshold: Float = 240f): BooleanArray {
+internal fun computeZebraGrid(bitmap: Bitmap, cols: Int = 32, rows: Int = 32, threshold: Float = 240f): BooleanArray {
     val grid = BooleanArray(cols * rows)
     val w = bitmap.width
     val h = bitmap.height
@@ -1550,7 +1756,7 @@ private fun autoCalibrateSceneFromPreview(
     )
 }
 
-private fun readExifOrientation(bytes: ByteArray, cacheDir: File): Int {
+internal fun readExifOrientation(bytes: ByteArray, cacheDir: File): Int {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         try {
             return ExifInterface(bytes.inputStream()).getAttributeInt(
@@ -1584,7 +1790,7 @@ private fun jpegDegreesToExifOrientation(degrees: Int): Int {
     }
 }
 
-private fun saveOutputToGallery(
+internal fun saveOutputToGallery(
     context: Context,
     rawBytes: ByteArray?,
     processedBitmap: Bitmap?,
@@ -1595,14 +1801,14 @@ private fun saveOutputToGallery(
     var uri: Uri? = null
     return try {
         val timestamp = System.currentTimeMillis()
-        val displayName = "IMG_$timestamp.jpg"
+        val displayName = "SpectraS_$timestamp.jpg"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val contentValues = ContentValues().apply {
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
                 put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/SpectraS")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
@@ -1610,7 +1816,7 @@ private fun saveOutputToGallery(
                 ?: return false
 
             if (processedBitmap != null) {
-                tempOut = File.createTempFile("kameras_out_", ".jpg", context.cacheDir)
+                tempOut = File.createTempFile("spectras_out_", ".jpg", context.cacheDir)
                 FileOutputStream(tempOut).use { fos ->
                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     fos.flush()
@@ -1639,9 +1845,9 @@ private fun saveOutputToGallery(
             onSavedUri?.invoke(uri)
             true
         } else {
-            // Android 5–9 (API 21–28): DCIM/Kameras klasörüne doğrudan yazıp MediaScanner ile galeriye anında kaydet
+            // Android 5–9 (API 21–28): DCIM/SpectraS klasörüne doğrudan yazıp MediaScanner ile galeriye anında kaydet
             @Suppress("DEPRECATION")
-            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Kameras")
+            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "SpectraS")
             if (!dcimDir.exists()) dcimDir.mkdirs()
             val outFile = File(dcimDir, displayName)
 
@@ -1714,7 +1920,7 @@ private fun saveRawDngToGallery(
                 dngCreator.setOrientation(exifOrientation)
             } catch (_: Exception) {}
             try {
-                dngCreator.setDescription("CameraS Infrared RAW")
+                dngCreator.setDescription("SpectraS Infrared RAW")
             } catch (_: Exception) {}
             dngCreator.writeImage(out, rawImage)
             out.flush()
@@ -1730,7 +1936,7 @@ private fun saveRawDngToGallery(
                 put(MediaStore.Images.Media.DISPLAY_NAME, displayName)
                 put(MediaStore.Images.Media.MIME_TYPE, "image/x-adobe-dng")
                 put(MediaStore.Images.Media.DATE_TAKEN, timestamp)
-                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/SpectraS")
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             // Bazı OEM'ler DNG'yi Images.Media yerine Files koleksiyonunda kabul eder
@@ -1743,7 +1949,7 @@ private fun saveRawDngToGallery(
                 val fileValues = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/x-adobe-dng")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/Kameras")
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DCIM}/SpectraS")
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 uri = resolver.insert(MediaStore.Files.getContentUri("external"), fileValues)
@@ -1757,7 +1963,7 @@ private fun saveRawDngToGallery(
             true
         } else {
             @Suppress("DEPRECATION")
-            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "Kameras")
+            val dcimDir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM), "SpectraS")
             if (!dcimDir.exists()) dcimDir.mkdirs()
             val outFile = File(dcimDir, displayName)
             FileOutputStream(outFile).use { fos ->
@@ -1806,7 +2012,7 @@ private fun decodeThumbnailFromBytes(bytes: ByteArray, cacheDir: File): Bitmap? 
 }
 
 // Tüm üreticilerin (Samsung, Xiaomi, Pixel, OnePlus/OPPO, Huawei vb.) Galeri uygulamalarını 4 kademeli yedekle açar
-private fun openGallerySafely(context: Context, lastUri: Uri?): Boolean {
+internal fun openGallerySafely(context: Context, lastUri: Uri?): Boolean {
     val candidates = buildList<Intent> {
         if (lastUri != null) {
             add(
@@ -1846,6 +2052,8 @@ private fun openGallerySafely(context: Context, lastUri: Uri?): Boolean {
 @Composable
 fun CameraScreen(
     hasCameraPermission: Boolean,
+    incomingEditUri: Uri? = null,
+    incomingEditNonce: Int = 0,
     onRegisterVolumeShutter: ((() -> Unit)?) -> Unit = {}
 ) {
     val context = LocalContext.current
@@ -1857,11 +2065,39 @@ fun CameraScreen(
     val cameraHandler = remember { Handler(cameraThread.looper) }
     val shutterSound = remember { try { MediaActionSound() } catch (_: Throwable) { null } }
     val coroutineScope = rememberCoroutineScope()
-    val turkishLocale = remember { Locale("tr", "TR") }
+    val appLocale = remember { Locale.getDefault() }
     var shownPreTiramisuHslNotice by remember { mutableStateOf(false) }
 
+    val hasFrontCamera = remember {
+        try {
+            val ids = cameraManager.cameraIdList
+            val hasBack = ids.any {
+                try {
+                    cameraManager.getCameraCharacteristics(it)
+                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                } catch (_: Exception) { false }
+            }
+            val hasFront = ids.any {
+                try {
+                    cameraManager.getCameraCharacteristics(it)
+                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+                } catch (_: Exception) { false }
+            }
+            hasBack && hasFront
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     var cameraReady by remember { mutableStateOf(false) }
+    var isStudioMode by remember { mutableStateOf(incomingEditUri != null) }
+    var studioPhotoUri by remember { mutableStateOf<Uri?>(incomingEditUri) }
+    var studioPhotoNonce by remember { mutableIntStateOf(incomingEditNonce) }
     var isAutoMode by remember { mutableStateOf(true) }
+    var useFrontCamera by remember { mutableStateOf(false) }
+    var hasFlash by remember { mutableStateOf(false) }
+    var flashMode by remember { mutableStateOf(FlashMode.OFF) }
+    var channelSwapEnabled by remember { mutableStateOf(false) }
     var kelvinValue by remember { mutableFloatStateOf(5500f) }
     var tintValue by remember { mutableFloatStateOf(0f) }
     var contrastValue by remember { mutableFloatStateOf(DEFAULT_CONTRAST) }
@@ -1994,34 +2230,56 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(targetedColorConfig, colorBandsConfig, isAutoMode, isComparingAuto, textureViewInstance) {
+    LaunchedEffect(incomingEditNonce) {
+        if (incomingEditUri != null) {
+            studioPhotoUri = incomingEditUri
+            studioPhotoNonce++
+            isStudioMode = true
+        }
+    }
+
+    LaunchedEffect(targetedColorConfig, colorBandsConfig, channelSwapEnabled, isAutoMode, isComparingAuto, textureViewInstance) {
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
+        holder.currentChannelSwap = channelSwapEnabled
         updateTextureViewShader(
             view = textureViewInstance,
             config = targetedColorConfig,
             colorBands = colorBandsConfig,
+            channelSwap = channelSwapEnabled,
             bypass = isAutoMode || isComparingAuto
         )
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !shownPreTiramisuHslNotice && !isAutoMode) {
-            val hasGrading = colorBandsConfig.hasAnyModification ||
+            val hasGrading = channelSwapEnabled || colorBandsConfig.hasAnyModification ||
                 (targetedColorConfig.isActive && (targetedColorConfig.deltaHue != 0f || targetedColorConfig.deltaSat != 0f || targetedColorConfig.deltaLum != 0f))
             if (hasGrading) {
                 shownPreTiramisuHslNotice = true
-                showStatus("Canlı renk önizlemesi Android 13+ gerektirir; çekilen fotoğrafa uygulanır")
+                showStatus(context.getString(R.string.status_pre_tiramisu_hsl))
             }
         }
     }
 
     fun savePresetsToStorage() {
         val jsonArray = JSONArray()
-        savedPresets.forEach {
+        savedPresets.forEach { preset ->
             jsonArray.put(JSONObject().apply {
-                put("name", it.name)
-                put("kelvin", it.kelvin.toDouble())
-                put("tint", it.tint.toDouble())
-                put("contrast", it.contrast.toDouble())
-                put("saturation", it.saturation.toDouble())
+                put("name", preset.name)
+                put("kelvin", preset.kelvin.toDouble())
+                put("tint", preset.tint.toDouble())
+                put("contrast", preset.contrast.toDouble())
+                put("saturation", preset.saturation.toDouble())
+                put("channelSwap", preset.channelSwap)
+                if (preset.colorBands.hasAnyModification) {
+                    val bandsArr = JSONArray()
+                    preset.colorBands.bands.forEach { adj ->
+                        bandsArr.put(JSONObject().apply {
+                            put("h", adj.deltaHue.toDouble())
+                            put("s", adj.deltaSat.toDouble())
+                            put("l", adj.deltaLum.toDouble())
+                        })
+                    }
+                    put("bands", bandsArr)
+                }
             })
         }
         sharedPrefs.edit { putString("presets_list", jsonArray.toString()) }
@@ -2035,31 +2293,34 @@ fun CameraScreen(
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val name = obj.getString("name")
+                val bandsArr = obj.optJSONArray("bands")
+                val bandsConfig = if (bandsArr != null && bandsArr.length() == 8) {
+                    ColorBandsConfig(
+                        List(8) { idx ->
+                            val bObj = bandsArr.optJSONObject(idx)
+                            BandHslAdjustment(
+                                deltaHue = bObj?.optDouble("h", 0.0)?.toFloat() ?: 0f,
+                                deltaSat = bObj?.optDouble("s", 0.0)?.toFloat() ?: 0f,
+                                deltaLum = bObj?.optDouble("l", 0.0)?.toFloat() ?: 0f
+                            )
+                        }
+                    )
+                } else {
+                    ColorBandsConfig()
+                }
                 savedPresets.add(
                     CameraPreset(
                         name = name,
                         kelvin = obj.getDouble("kelvin").toFloat(),
                         tint = obj.getDouble("tint").toFloat(),
                         contrast = obj.optDouble("contrast", DEFAULT_CONTRAST.toDouble()).toFloat(),
-                        saturation = obj.optDouble("saturation", DEFAULT_SATURATION.toDouble()).toFloat()
+                        saturation = obj.optDouble("saturation", DEFAULT_SATURATION.toDouble()).toFloat(),
+                        channelSwap = obj.optBoolean("channelSwap", false),
+                        colorBands = bandsConfig
                     )
                 )
             }
         } catch (_: Exception) {
-        }
-
-        if (savedPresets.isEmpty() && !sharedPrefs.getBoolean("presets_seeded_v8", false)) {
-            savedPresets.addAll(
-                listOf(
-                    CameraPreset("IRChrome Doğal", 3348f, 13f, 1.00f, 1.15f),
-                    CameraPreset("590nm Altın", 2400f, 8f, 1.05f, 1.25f),
-                    CameraPreset("720nm Klasik IR", 1800f, 0f, 1.10f, 0.90f)
-                )
-            )
-            savePresetsToStorage()
-            sharedPrefs.edit { putBoolean("presets_seeded_v8", true) }
-        } else if (savedPresets.isNotEmpty() && !sharedPrefs.getBoolean("presets_seeded_v8", false)) {
-            sharedPrefs.edit { putBoolean("presets_seeded_v8", true) }
         }
     }
 
@@ -2077,8 +2338,11 @@ fun CameraScreen(
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
+        holder.currentChannelSwap = channelSwapEnabled
         holder.currentZoomRatio = zoomRatio
         holder.rawCaptureEnabled = rawEnabled
+        holder.flashMode = flashMode
+        holder.useFrontCamera = useFrontCamera
     }
 
     fun applyCamera2Settings(
@@ -2096,7 +2360,40 @@ fun CameraScreen(
         compatibilityFallback: Boolean = false
     ) {
         builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO)
-        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        val desiredFlash = if (holder.hasFlash) holder.flashMode else FlashMode.OFF
+        when (desiredFlash) {
+            FlashMode.TORCH -> {
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
+            }
+            FlashMode.AUTO -> {
+                if (isStillCapture && holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                }
+            }
+            FlashMode.ON -> {
+                if (isStillCapture) {
+                    if (holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    } else {
+                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
+                    }
+                } else {
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                }
+            }
+            FlashMode.OFF -> {
+                builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+            }
+        }
         when {
             holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) -> {
                 builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -2354,7 +2651,7 @@ fun CameraScreen(
                     saturationValue = DEFAULT_SATURATION
                     measureAndApplyExposureMetering(applyEvAdjust = true)
                     updatePreviewSettings()
-                    showStatus("Oto denge: ${cal.kelvin.toInt()}K · Ton ${formatSigned(cal.tint)}")
+                    showStatus(context.getString(R.string.status_auto_cal_fmt, cal.kelvin.toInt(), formatSigned(cal.tint)))
                 }
             } finally {
                 bmp.recycle()
@@ -2377,8 +2674,8 @@ fun CameraScreen(
                         exposureEvIndex = (exposureEvIndex + res.recommendedEvIndexDelta).coerceIn(aeRange.lower, aeRange.upper)
                     }
                     updatePreviewSettings()
-                    val formatted = String.format(turkishLocale, "%.2f", res.recommendedContrast)
-                    showStatus("Oto kontrast: ${formatted}x")
+                    val formatted = String.format(appLocale, "%.2f", res.recommendedContrast)
+                    showStatus(context.getString(R.string.status_auto_contrast_fmt, formatted))
                 }
             } finally {
                 bmp.recycle()
@@ -2442,10 +2739,15 @@ fun CameraScreen(
                 synchronized(holder) { holder.isOpening = false }
                 return
             }
+            val desiredFacing = if (holder.useFrontCamera) {
+                CameraCharacteristics.LENS_FACING_FRONT
+            } else {
+                CameraCharacteristics.LENS_FACING_BACK
+            }
             val cameraId = cameraIdList.firstOrNull { id ->
                 try {
                     cameraManager.getCameraCharacteristics(id)
-                        .get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+                        .get(CameraCharacteristics.LENS_FACING) == desiredFacing
                 } catch (_: Exception) {
                     false
                 }
@@ -2453,6 +2755,17 @@ fun CameraScreen(
             holder.activeCameraId = cameraId
 
             val chars = cameraManager.getCameraCharacteristics(cameraId)
+            val flashAvailable = chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            val aeModes = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_MODES) ?: intArrayOf()
+            holder.hasFlash = flashAvailable
+            holder.availableAeModes = aeModes
+            if (!flashAvailable) {
+                holder.flashMode = FlashMode.OFF
+            }
+            mainHandler.post {
+                hasFlash = flashAvailable
+                if (!flashAvailable) flashMode = FlashMode.OFF
+            }
             val map = chars.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
             if (map == null) {
                 synchronized(holder) { holder.isOpening = false }
@@ -2648,7 +2961,7 @@ fun CameraScreen(
                                         holder.previewFallbackLevel = 0
                                         mainHandler.post {
                                             rawEnabled = false
-                                            showStatus("Bu çözünürlükte RAW desteklenmedi, JPEG moduna geçildi")
+                                            showStatus(context.getString(R.string.status_raw_unsupported_res))
                                         }
                                         if (closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)) {
                                             cameraHandler.post { startCameraInternal(surfaceTexture) }
@@ -2657,7 +2970,7 @@ fun CameraScreen(
                                         closeCameraInternal(releaseReader = true)
                                         mainHandler.post {
                                             cameraReady = false
-                                            showStatus("Bu çözünürlük desteklenmedi")
+                                            showStatus(context.getString(R.string.status_res_unsupported))
                                         }
                                     }
                                 }
@@ -2735,7 +3048,12 @@ fun CameraScreen(
             Surface.ROTATION_270 -> 270
             else -> 0
         }
-        val jpegOrientation = (sensorOrientation - rotationCompensation + 360) % 360
+        val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
+        val jpegOrientation = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+            (sensorOrientation + rotationCompensation) % 360
+        } else {
+            (sensorOrientation - rotationCompensation + 360) % 360
+        }
 
         val snapAuto = holder.currentAutoMode
         val snapKelvin = holder.currentKelvin
@@ -2774,11 +3092,13 @@ fun CameraScreen(
 
             val snapTargetedColor = holder.currentTargetedColor
             val snapColorBands = holder.currentColorBands
+            val snapChannelSwap = holder.currentChannelSwap
             val snapApplyColorGrading = !snapAuto
             coroutineScope.launch(Dispatchers.Default) {
                 val hasSelectiveHsl = snapApplyColorGrading && (
-                    (snapTargetedColor.isActive &&
-                        (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)) ||
+                    snapChannelSwap ||
+                        (snapTargetedColor.isActive &&
+                            (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)) ||
                         snapColorBands.hasAnyModification
                     )
 
@@ -2803,7 +3123,7 @@ fun CameraScreen(
                             }
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
-                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands)
+                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap)
                                 saveOutputToGallery(context, null, graded, orientation, onSaved)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
@@ -2844,9 +3164,9 @@ fun CameraScreen(
                         )
                         withContext(Dispatchers.Main) {
                             if (savedRaw) {
-                                showStatus("RAW (DNG) kaydedildi")
+                                showStatus(context.getString(R.string.status_raw_saved))
                             } else {
-                                showStatus("RAW kaydedilemedi (JPEG kaydedildi)")
+                                showStatus(context.getString(R.string.status_raw_failed_jpeg_ok))
                             }
                         }
                     }
@@ -2920,13 +3240,27 @@ fun CameraScreen(
                 shotResultDeferred.complete(null)
                 holder.isTakingPhoto = false
                 Log.e("CameraScreen", "Failed to capture photo even with fallback", e2)
-                mainHandler.post { showStatus("Çekim başarısız oldu, tekrar deneyin") }
+                mainHandler.post { showStatus(context.getString(R.string.status_capture_failed)) }
             }
         }
     }
 
-    LaunchedEffect(hasCameraPermission, textureViewInstance, surfaceGeneration) {
-        if (hasCameraPermission && holder.device == null && !holder.isOpening && !holder.isClosingDevice) {
+    val currentIsStudioMode by rememberUpdatedState(isStudioMode)
+
+    LaunchedEffect(isStudioMode) {
+        if (isStudioMode) {
+            isPickerActive = false
+            isColorPipetteActive = false
+            isExposureBoxPicking = false
+            cameraHandler.post { closeCameraInternal(releaseReader = true) }
+        } else {
+            holder.previewFallbackLevel = 0
+            surfaceGeneration += 1
+        }
+    }
+
+    LaunchedEffect(hasCameraPermission, textureViewInstance, surfaceGeneration, isStudioMode) {
+        if (!isStudioMode && hasCameraPermission && holder.device == null && !holder.isOpening && !holder.isClosingDevice) {
             textureViewInstance?.let { tv ->
                 if (tv.isAvailable) {
                     tv.surfaceTexture?.let { startCamera(it) }
@@ -2939,7 +3273,7 @@ fun CameraScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 holder.previewFallbackLevel = 0
-                if (holder.device == null && !holder.isOpening) {
+                if (!currentIsStudioMode && holder.device == null && !holder.isOpening) {
                     textureViewInstance?.let { tv ->
                         if (tv.isAvailable) {
                             tv.surfaceTexture?.let { startCamera(it) }
@@ -2960,8 +3294,8 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(cameraReady, meteringMode, exposureBoxNorm, exposureBoxSizeNorm, surfaceGeneration) {
-        while (cameraReady) {
+    LaunchedEffect(cameraReady, isStudioMode, meteringMode, exposureBoxNorm, exposureBoxSizeNorm, surfaceGeneration) {
+        while (cameraReady && !isStudioMode) {
             if (!holder.isTakingPhoto) {
                 measureAndApplyExposureMetering(applyEvAdjust = false)
             }
@@ -2979,6 +3313,7 @@ fun CameraScreen(
     val isEvModified = exposureEvIndex != 0
     val isColorModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f ||
         abs(contrastValue - DEFAULT_CONTRAST) > 0.02f ||
+        channelSwapEnabled ||
         targetedColorConfig.isActive ||
         colorBandsConfig.hasAnyModification
     val isMeteringModified = meteringMode == ExposureMeteringMode.BOX_SPOT
@@ -2987,12 +3322,15 @@ fun CameraScreen(
     // Arayüz metin kaynakları
     val strModeAuto = stringResource(R.string.mode_auto)
     val strModePro = stringResource(R.string.mode_pro)
+    val strModeStudio = stringResource(R.string.mode_studio)
     val strWbShort = stringResource(R.string.label_wb_short)
     val strTintShort = stringResource(R.string.label_tint)
     val strEvShort = stringResource(R.string.label_ev_short)
     val strResFallback = stringResource(R.string.label_res_fallback)
     val strGridCd = stringResource(R.string.cd_grid_toggle)
     val strPanelCd = stringResource(R.string.cd_panel_toggle)
+    val strFlashCd = stringResource(R.string.cd_flash_toggle)
+    val strFlipCameraCd = stringResource(R.string.cd_flip_camera)
     val strShutterCd = stringResource(R.string.cd_shutter)
     val strAllReset = stringResource(R.string.status_all_reset)
     val strHighlightOn = stringResource(R.string.status_highlight_on)
@@ -3018,6 +3356,9 @@ fun CameraScreen(
     val strTimerCd = stringResource(R.string.cd_timer_toggle)
     val strResetAllCd = stringResource(R.string.cd_reset_all)
     val strCancelPick = stringResource(R.string.action_cancel_pick)
+    val strBadgeZebra = stringResource(R.string.badge_zebra)
+    val strBadgeBox = stringResource(R.string.badge_box)
+    val strBadgeSwap = stringResource(R.string.badge_channel_swap)
 
     fun triggerCaptureWithTimer() {
         if (timerCountdown > 0) {
@@ -3041,8 +3382,8 @@ fun CameraScreen(
         }
     }
 
-    DisposableEffect(cameraReady) {
-        onRegisterVolumeShutter(if (cameraReady) { { triggerCaptureWithTimer() } } else null)
+    DisposableEffect(cameraReady, isStudioMode) {
+        onRegisterVolumeShutter(if (cameraReady && !isStudioMode) { { triggerCaptureWithTimer() } } else null)
         onDispose { onRegisterVolumeShutter(null) }
     }
 
@@ -3071,6 +3412,32 @@ fun CameraScreen(
         label = "ghostChromeAlpha"
     )
 
+    if (isStudioMode) {
+        PhotoEditorScreen(
+            initialUri = studioPhotoUri ?: lastCapturedUri,
+            photoNonce = studioPhotoNonce,
+            lastCapturedUri = lastCapturedUri,
+            savedPresets = savedPresets.toList(),
+            onSaveCustomPreset = { preset ->
+                savedPresets.removeAll { it.name.equals(preset.name, ignoreCase = true) }
+                savedPresets.add(preset)
+                savePresetsToStorage()
+            },
+            onDeleteCustomPreset = { preset ->
+                savedPresets.remove(preset)
+                savePresetsToStorage()
+            },
+            onSwitchToCamera = { wantPro ->
+                isAutoMode = !wantPro
+                isStudioMode = false
+            },
+            onPhotoSaved = { savedUri ->
+                lastCapturedUri = savedUri
+            }
+        )
+        return
+    }
+
     // Ana dikey yerleşim: İnce üst araç çubuğu → Tam genişlikli vizör + yarı saydam yüzen Pro panel → Kompakt deklanşör çubuğu
     Column(
         modifier = Modifier
@@ -3079,21 +3446,21 @@ fun CameraScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // 1) ÜST ARAÇ ÇUBUĞU: Kompakt mod anahtarı + ince keskin vektör hızlı araçlar
+        // 1) ÜST ARAÇ ÇUBUĞU: Kompakt mod anahtarı (Oto | Pro | Stüdyo) + hızlı kamera araçları
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 2.dp),
+                .padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Sol: Zarif Oto / Pro kapsül anahtarı (Oto yeşil, Pro amber)
+            // Sol: Zarif Oto / Pro / Stüdyo kapsül anahtarı
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
                     .background(IrPalette.HudCard)
                     .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(50))
-                    .padding(3.dp),
+                    .padding(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ModeSegmentItem(
@@ -3126,9 +3493,18 @@ fun CameraScreen(
                         updatePreviewSettings()
                     }
                 )
+                ModeSegmentItem(
+                    text = strModeStudio,
+                    selected = false,
+                    activeColor = IrPalette.IrCyan,
+                    enabled = true,
+                    onClick = {
+                        isStudioMode = true
+                    }
+                )
             }
 
-            // Sağ: Çözünürlük · RAW · Izgara · Terazi · Zamanlayıcı
+            // Sağ: Çözünürlük · RAW · Flaş · Izgara · Terazi · Zamanlayıcı
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
@@ -3159,13 +3535,39 @@ fun CameraScreen(
                     )
                 }
 
+                if (hasFlash) {
+                    TopIconButton(
+                        active = flashMode != FlashMode.OFF,
+                        accentColor = if (flashMode == FlashMode.TORCH) IrPalette.IrEmerald else IrPalette.IrAmber,
+                        contentDesc = strFlashCd,
+                        onClick = {
+                            flashMode = when (flashMode) {
+                                FlashMode.OFF -> FlashMode.AUTO
+                                FlashMode.AUTO -> FlashMode.ON
+                                FlashMode.ON -> FlashMode.TORCH
+                                FlashMode.TORCH -> FlashMode.OFF
+                            }
+                            updatePreviewSettings()
+                            val flashLabel = when (flashMode) {
+                                FlashMode.OFF -> context.getString(R.string.flash_off)
+                                FlashMode.AUTO -> context.getString(R.string.flash_auto)
+                                FlashMode.ON -> context.getString(R.string.flash_on)
+                                FlashMode.TORCH -> context.getString(R.string.flash_torch)
+                            }
+                            showStatus(context.getString(R.string.status_flash_set, flashLabel))
+                        }
+                    ) { tint ->
+                        FlashIcon(mode = flashMode, tint = tint, modifier = Modifier.size(14.dp))
+                    }
+                }
+
                 TopIconButton(
                     active = showGrid,
                     accentColor = IrPalette.IrAmber,
                     contentDesc = strGridCd,
                     onClick = { showGrid = !showGrid }
                 ) { tint ->
-                    GridIcon(tint = tint, modifier = Modifier.size(14.dp))
+                    GridIcon(tint = tint, modifier = Modifier.size(13.dp))
                 }
 
                 TopIconButton(
@@ -3177,7 +3579,7 @@ fun CameraScreen(
                         showStatus(if (showLevel) strLevelOn else strLevelOff)
                     }
                 ) { tint ->
-                    LevelIcon(tint = tint, modifier = Modifier.size(15.dp))
+                    LevelIcon(tint = tint, modifier = Modifier.size(14.dp))
                 }
 
                 TopIconButton(
@@ -3195,7 +3597,7 @@ fun CameraScreen(
                             10 -> strTimer10s
                             else -> strTimerOff
                         }
-                        showStatus("Zamanlayıcı: $lbl")
+                        showStatus(context.getString(R.string.status_timer_set, lbl))
                     }
                 ) { tint ->
                     if (timerSeconds > 0) {
@@ -3207,7 +3609,7 @@ fun CameraScreen(
                             fontFamily = FontFamily.Monospace
                         )
                     } else {
-                        TimerIcon(tint = tint, modifier = Modifier.size(14.dp))
+                        TimerIcon(tint = tint, modifier = Modifier.size(13.dp))
                     }
                 }
             }
@@ -3300,9 +3702,10 @@ fun CameraScreen(
                                                     view = view,
                                                     config = targetedColorConfig,
                                                     colorBands = colorBandsConfig,
+                                                    channelSwap = channelSwapEnabled,
                                                     bypass = isAutoMode || isComparingAuto
                                                 )
-                                                showStatus("${getHueName(hsv[0])} seçildi")
+                                                showStatus(context.getString(R.string.status_color_picked, getHueName(context, hsv[0])))
                                             } finally {
                                                 bitmap.recycle()
                                             }
@@ -3580,7 +3983,7 @@ fun CameraScreen(
                                     color = IrPalette.TextTertiary,
                                     fontSize = 11.sp
                                 )
-                                val evFormatted = formatSignedDecimal(evDisplayVal, turkishLocale)
+                                val evFormatted = formatSignedDecimal(evDisplayVal, appLocale)
                                 StatusTelemetryChip(
                                     text = "$strEvShort $evFormatted",
                                     accentColor = if ((!isAutoMode && activeTab == ControlTab.POZ && !isDeckCollapsed) || isEvModified) IrPalette.IrAmber else IrPalette.TextPrimary,
@@ -3806,7 +4209,7 @@ fun CameraScreen(
                             ) {
                                 availableZoomOptions.forEach { z ->
                                     val isSelected = abs(zoomRatio - z) < 0.08f
-                                    val zLabel = if (z < 0.99f) String.format(turkishLocale, "%.1fx", z) else "${z.toInt()}x"
+                                    val zLabel = if (z < 0.99f) String.format(appLocale, "%.1fx", z) else "${z.toInt()}x"
                                     val chipBg by animateColorAsState(
                                         targetValue = if (isSelected) IrPalette.IrAmber else Color.Transparent,
                                         animationSpec = tween(160),
@@ -3836,14 +4239,15 @@ fun CameraScreen(
                             }
                         }
 
-                        // Sağ slot: Kompakt aktif araç rozeti (ZEBRA / KUTU)
+                        // Sağ slot: Kompakt aktif araç rozeti (R↔B / ZEBRA / KUTU)
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterEnd
                         ) {
                             val badgeInfo: Pair<String, Color>? = when {
-                                showZebra -> "ZEBRA" to IrPalette.IrCoral
-                                meteringMode == ExposureMeteringMode.BOX_SPOT -> "KUTU" to IrPalette.IrAmber
+                                !isAutoMode && channelSwapEnabled -> strBadgeSwap to IrPalette.IrCyan
+                                showZebra -> strBadgeZebra to IrPalette.IrCoral
+                                meteringMode == ExposureMeteringMode.BOX_SPOT -> strBadgeBox to IrPalette.IrAmber
                                 else -> null
                             }
                             if (badgeInfo != null) {
@@ -3903,7 +4307,7 @@ fun CameraScreen(
                                     SegmentedChoiceRow(
                                         options = listOf(
                                             WbSubSlider.KELVIN to "${stringResource(R.string.sub_kelvin)} · ${kelvinValue.toInt()}K",
-                                            WbSubSlider.TINT to "${stringResource(R.string.sub_tint)} · ${formatSigned(tintValue)}"
+                                            WbSubSlider.TINT to "${stringResource(R.string.sub_tint_wb)} · ${formatSigned(tintValue)}"
                                         ),
                                         selected = activeWbSubSlider,
                                         enabled = cameraReady,
@@ -4015,7 +4419,7 @@ fun CameraScreen(
                                     if (aeRange.upper > aeRange.lower) {
                                         val minEv = aeRange.lower.toFloat()
                                         val maxEv = aeRange.upper.toFloat()
-                                        val evBadge = "${formatSignedDecimal(evDisplayVal, turkishLocale)} $strEvShort"
+                                        val evBadge = "${formatSignedDecimal(evDisplayVal, appLocale)} $strEvShort"
                                         ProGradientSliderRow(
                                             label = stringResource(R.string.slider_exposure),
                                             valueBadge = evBadge,
@@ -4116,8 +4520,8 @@ fun CameraScreen(
 
                                     when (colorPanelMode) {
                                         ColorPanelMode.GENEL -> {
-                                            val satStr = String.format(turkishLocale, "%.2f", saturationValue)
-                                            val conStr = String.format(turkishLocale, "%.2f", contrastValue)
+                                            val satStr = String.format(appLocale, "%.2f", saturationValue)
+                                            val conStr = String.format(appLocale, "%.2f", contrastValue)
                                             SegmentedChoiceRow(
                                                 options = listOf(
                                                     ColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${satStr}x",
@@ -4205,7 +4609,7 @@ fun CameraScreen(
                                                 modifier = Modifier
                                                     .fillMaxWidth()
                                                     .alpha(ghostChromeAlpha),
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 ActionPillButton(
@@ -4214,16 +4618,34 @@ fun CameraScreen(
                                                     accentColor = IrPalette.IrAmber,
                                                     enabled = cameraReady,
                                                     modifier = Modifier.weight(1f),
-                                                    leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(13.dp)) },
+                                                    leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(12.dp)) },
                                                     onClick = { runAutoContrast() }
+                                                )
+                                                ActionPillButton(
+                                                    label = stringResource(R.string.action_channel_swap),
+                                                    selected = channelSwapEnabled,
+                                                    accentColor = IrPalette.IrCyan,
+                                                    enabled = cameraReady,
+                                                    modifier = Modifier.weight(1f),
+                                                    leadingIcon = { tint -> SwapChannelIcon(tint = tint, modifier = Modifier.size(12.dp)) },
+                                                    onClick = {
+                                                        channelSwapEnabled = !channelSwapEnabled
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        showStatus(
+                                                            context.getString(
+                                                                if (channelSwapEnabled) R.string.status_channel_swap_on
+                                                                else R.string.status_channel_swap_off
+                                                            )
+                                                        )
+                                                    }
                                                 )
                                                 ActionPillButton(
                                                     label = stringResource(R.string.action_color_pipette),
                                                     selected = isColorPipetteActive,
                                                     accentColor = IrPalette.IrTeal,
                                                     enabled = cameraReady,
-                                                    modifier = Modifier.weight(1f),
-                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(13.dp)) },
+                                                    modifier = Modifier.weight(0.85f),
+                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(12.dp)) },
                                                     onClick = {
                                                         colorPanelMode = ColorPanelMode.PIPET
                                                         isColorPipetteActive = true
@@ -4237,6 +4659,7 @@ fun CameraScreen(
 
                                         ColorPanelMode.BANTLAR -> {
                                             val bandAdj = colorBandsConfig.get(selectedColorBand)
+                                            val bandLabel = stringResource(selectedColorBand.labelRes)
                                             val bandShiftedHue = (((selectedColorBand.centerHue + bandAdj.deltaHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
                                             val bandHasHueShift = abs(bandAdj.deltaHue) > 1f
 
@@ -4280,9 +4703,9 @@ fun CameraScreen(
                                                     }
                                                     Text(
                                                         text = if (bandHasHueShift) {
-                                                            "${selectedColorBand.label} → ${getHueName(bandShiftedHue)}"
+                                                            "$bandLabel → ${getHueName(context, bandShiftedHue)}"
                                                         } else {
-                                                            selectedColorBand.label
+                                                            bandLabel
                                                         },
                                                         color = IrPalette.TextPrimary,
                                                         fontSize = 11.sp,
@@ -4367,7 +4790,7 @@ fun CameraScreen(
                                                         }
                                                     }
                                                     ProGradientSliderRow(
-                                                        label = "${selectedColorBand.label} · ${stringResource(R.string.sub_tint)}",
+                                                        label = "$bandLabel · ${stringResource(R.string.sub_tint)}",
                                                         valueBadge = "${formatSigned(bandAdj.deltaHue)}°",
                                                         isModified = abs(bandAdj.deltaHue) > 0.5f,
                                                         value = bandAdj.deltaHue,
@@ -4398,7 +4821,7 @@ fun CameraScreen(
                                                 }
 
                                                 PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
-                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.slider_saturation)}",
+                                                    label = "$bandLabel · ${stringResource(R.string.slider_saturation)}",
                                                     valueBadge = "${formatSigned(bandAdj.deltaSat * 100f)}%",
                                                     isModified = abs(bandAdj.deltaSat) > 0.02f,
                                                     value = bandAdj.deltaSat,
@@ -4430,7 +4853,7 @@ fun CameraScreen(
                                                 )
 
                                                 PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
-                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.sub_lum_short)}",
+                                                    label = "$bandLabel · ${stringResource(R.string.sub_lum_short)}",
                                                     valueBadge = "${formatSigned(bandAdj.deltaLum * 100f)}%",
                                                     isModified = abs(bandAdj.deltaLum) > 0.02f,
                                                     value = bandAdj.deltaLum,
@@ -4508,9 +4931,9 @@ fun CameraScreen(
                                                         }
                                                         Text(
                                                             text = if (hasHueShift) {
-                                                                getHueName(shiftedHue)
+                                                                getHueName(context, shiftedHue)
                                                             } else {
-                                                                "${getHueName(targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)"
+                                                                "${getHueName(context, targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)"
                                                             },
                                                             color = IrPalette.IrTeal,
                                                             fontSize = 11.sp,
@@ -4906,10 +5329,11 @@ fun CameraScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-                // Sol bölge: 46dp kompakt dairesel Galeri küçük resmi
-                Box(
+                // Sol bölge: 46dp Galeri (dokun: Stüdyoda düzenle, uzun bas: Galeri) + 36dp Ön/Arka Kamera
+                Row(
                     modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterStart
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -4918,11 +5342,19 @@ fun CameraScreen(
                             .clip(CircleShape)
                             .background(IrPalette.HudCard)
                             .border(1.3.dp, Color.White.copy(alpha = 0.34f), CircleShape)
-                            .clickable {
-                                if (!openGallerySafely(context, lastCapturedUri)) {
-                                    showStatus("Galeri açılamadı")
+                            .combinedClickable(
+                                onClick = {
+                                    studioPhotoUri = lastCapturedUri
+                                    studioPhotoNonce++
+                                    isStudioMode = true
+                                },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    if (!openGallerySafely(context, lastCapturedUri)) {
+                                        showStatus(context.getString(R.string.status_gallery_open_failed))
+                                    }
                                 }
-                            },
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         val thumb = lastCapturedThumb
@@ -4935,6 +5367,54 @@ fun CameraScreen(
                             )
                         } else {
                             GalleryIcon(tint = IrPalette.TextSecondary, modifier = Modifier.size(18.dp))
+                        }
+                    }
+
+                    if (hasFrontCamera) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .semantics { contentDescription = strFlipCameraCd }
+                                .clip(CircleShape)
+                                .clickable(enabled = cameraReady) {
+                                    useFrontCamera = !useFrontCamera
+                                    holder.useFrontCamera = useFrontCamera
+                                    holder.selectedResolution = null
+                                    holder.previewFallbackLevel = 0
+                                    zoomRatio = 1f
+                                    holder.currentZoomRatio = 1f
+                                    if (useFrontCamera && flashMode != FlashMode.OFF) {
+                                        flashMode = FlashMode.OFF
+                                        holder.flashMode = FlashMode.OFF
+                                    }
+                                    showStatus(
+                                        context.getString(
+                                            if (useFrontCamera) R.string.status_camera_front
+                                            else R.string.status_camera_back
+                                        )
+                                    )
+                                    cameraHandler.post { closeCameraInternal(releaseReader = true) }
+                                    surfaceGeneration += 1
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(if (useFrontCamera) IrPalette.IrCyan.copy(alpha = 0.16f) else IrPalette.HudCard)
+                                    .border(
+                                        0.9.dp,
+                                        if (useFrontCamera) IrPalette.IrCyan.copy(alpha = 0.7f) else IrPalette.BorderSubtle,
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                FlipCameraIcon(
+                                    tint = if (useFrontCamera) IrPalette.IrCyan else IrPalette.TextPrimary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -5071,6 +5551,7 @@ fun CameraScreen(
                         exposureEvIndex = 0
                         saturationValue = DEFAULT_SATURATION
                         contrastValue = DEFAULT_CONTRAST
+                        channelSwapEnabled = false
                         targetedColorConfig = TargetedColorConfig()
                         colorBandsConfig = ColorBandsConfig()
                         isPickerActive = false
@@ -5095,8 +5576,24 @@ fun CameraScreen(
         )
     }
 
-    // Ön Ayarlar Listesi Diyalogu
+    // Görünümler & Ön Ayarlar Listesi Diyalogu (Hazır Kızılötesi/Sinema Görünümleri + Özel Ön Ayarlar)
     if (showPresetsListDialog) {
+        val applyPresetToCamera: (CameraPreset) -> Unit = { preset ->
+            isPickerActive = false
+            isColorPipetteActive = false
+            isExposureBoxPicking = false
+            isAutoMode = false
+            kelvinValue = preset.kelvin
+            tintValue = preset.tint
+            contrastValue = preset.contrast
+            saturationValue = preset.saturation
+            channelSwapEnabled = preset.channelSwap
+            colorBandsConfig = preset.colorBands
+            targetedColorConfig = TargetedColorConfig()
+            updatePreviewSettings()
+            showPresetsListDialog = false
+            showStatus(context.getString(R.string.status_preset_applied, preset.name))
+        }
         AlertDialog(
             onDismissRequest = { showPresetsListDialog = false },
             containerColor = IrPalette.SurfaceElevated,
@@ -5110,13 +5607,13 @@ fun CameraScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.dialog_presets_title),
-                        fontSize = 18.sp,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
                         text = stringResource(R.string.dialog_presets_new),
                         color = IrPalette.IrAmber,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -5125,32 +5622,121 @@ fun CameraScreen(
                                 showPresetsListDialog = false
                                 showSaveDialog = true
                             }
-                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .padding(horizontal = 9.dp, vertical = 5.dp)
                     )
                 }
             },
             text = {
-                if (savedPresets.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.dialog_presets_empty),
-                        color = IrPalette.TextSecondary,
-                        fontSize = 13.sp
-                    )
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(savedPresets, key = { it.name }) { preset ->
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 390.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)
+                ) {
+                    item(key = "hdr_builtin") {
+                        Text(
+                            text = stringResource(R.string.presets_section_builtin),
+                            color = IrPalette.IrAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
+                        )
+                    }
+                    items(BUILT_IN_SIGNATURE_PRESETS, key = { "bi_${it.name}" }) { preset ->
+                        val isMatching = !isAutoMode &&
+                            abs(kelvinValue - preset.kelvin) < 5f &&
+                            abs(tintValue - preset.tint) < 1f &&
+                            channelSwapEnabled == preset.channelSwap &&
+                            colorBandsConfig == preset.colorBands
+                        val dotColor = Color(preset.accentHex)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(
+                                    if (isMatching) dotColor.copy(alpha = 0.18f)
+                                    else Color.White.copy(alpha = 0.05f)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isMatching) dotColor else Color.White.copy(alpha = 0.10f),
+                                    RoundedCornerShape(11.dp)
+                                )
+                                .clickable { applyPresetToCamera(preset) }
+                                .padding(horizontal = 11.dp, vertical = 9.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(dotColor)
+                                        .border(1.dp, Color.White.copy(alpha = 0.65f), CircleShape)
+                                )
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = preset.name,
+                                        color = if (isMatching) dotColor else IrPalette.TextPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "$strWbShort ${preset.kelvin.toInt()}K · C ${String.format(appLocale, "%.2f", preset.contrast)}x · S ${String.format(appLocale, "%.2f", preset.saturation)}x",
+                                        color = IrPalette.TextSecondary,
+                                        fontSize = 11.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                            if (preset.channelSwap) {
+                                Text(
+                                    text = strBadgeSwap,
+                                    color = IrPalette.IrCyan,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(IrPalette.IrCyan.copy(alpha = 0.16f))
+                                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    item(key = "hdr_custom") {
+                        Text(
+                            text = stringResource(R.string.presets_section_custom),
+                            color = IrPalette.TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
+                        )
+                    }
+                    if (savedPresets.isEmpty()) {
+                        item(key = "empty_custom") {
+                            Text(
+                                text = stringResource(R.string.dialog_presets_empty),
+                                color = IrPalette.TextTertiary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    } else {
+                        items(savedPresets, key = { "u_${it.name}" }) { preset ->
                             val isMatching = !isAutoMode &&
                                 abs(kelvinValue - preset.kelvin) < 5f &&
-                                abs(tintValue - preset.tint) < 1f
+                                abs(tintValue - preset.tint) < 1f &&
+                                channelSwapEnabled == preset.channelSwap
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
+                                    .clip(RoundedCornerShape(11.dp))
                                     .background(
                                         if (isMatching) IrPalette.IrAmber.copy(alpha = 0.18f)
                                         else Color.White.copy(alpha = 0.05f)
@@ -5158,54 +5744,45 @@ fun CameraScreen(
                                     .border(
                                         1.dp,
                                         if (isMatching) IrPalette.IrAmber else Color.White.copy(alpha = 0.10f),
-                                        RoundedCornerShape(12.dp)
+                                        RoundedCornerShape(11.dp)
                                     )
-                                    .clickable {
-                                        isPickerActive = false
-                                        isColorPipetteActive = false
-                                        isExposureBoxPicking = false
-                                        isAutoMode = false
-                                        kelvinValue = preset.kelvin
-                                        tintValue = preset.tint
-                                        contrastValue = preset.contrast
-                                        saturationValue = preset.saturation
-                                        updatePreviewSettings()
-                                        showPresetsListDialog = false
-                                        showStatus("${preset.name} yüklendi")
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    .clickable { applyPresetToCamera(preset) }
+                                    .padding(horizontal = 11.dp, vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
                                     Text(
                                         text = preset.name,
                                         color = if (isMatching) IrPalette.IrAmber else IrPalette.TextPrimary,
-                                        fontSize = 14.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.Bold
                                     )
                                     Text(
-                                        text = "$strWbShort ${preset.kelvin.toInt()}K · $strTintShort ${formatSigned(preset.tint)} · K ${String.format(turkishLocale, "%.2f", preset.contrast)}x · D ${String.format(turkishLocale, "%.2f", preset.saturation)}x",
+                                        text = "$strWbShort ${preset.kelvin.toInt()}K · $strTintShort ${formatSigned(preset.tint)} · C ${String.format(appLocale, "%.2f", preset.contrast)}x${if (preset.channelSwap) " · $strBadgeSwap" else ""}",
                                         color = IrPalette.TextSecondary,
-                                        fontSize = 12.sp,
+                                        fontSize = 11.sp,
                                         fontFamily = FontFamily.Monospace
                                     )
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .size(48.dp)
+                                        .size(38.dp)
                                         .clip(CircleShape)
                                         .clickable {
                                             savedPresets.remove(preset)
                                             savePresetsToStorage()
-                                            showStatus("${preset.name} silindi")
+                                            showStatus(context.getString(R.string.status_preset_deleted, preset.name))
                                         },
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "✕",
                                         color = IrPalette.TextSecondary,
-                                        fontSize = 14.sp
+                                        fontSize = 13.sp
                                     )
                                 }
                             }
@@ -5238,7 +5815,7 @@ fun CameraScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "$strWbShort ${kelvinValue.toInt()}K · $strTintShort ${formatSigned(tintValue)} · K ${String.format(turkishLocale, "%.2f", contrastValue)}x · D ${String.format(turkishLocale, "%.2f", saturationValue)}x",
+                        text = "$strWbShort ${kelvinValue.toInt()}K · $strTintShort ${formatSigned(tintValue)} · C ${String.format(appLocale, "%.2f", contrastValue)}x · S ${String.format(appLocale, "%.2f", saturationValue)}x${if (channelSwapEnabled) " · $strBadgeSwap" else ""}",
                         color = IrPalette.IrAmber,
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace
@@ -5273,13 +5850,15 @@ fun CameraScreen(
                                     kelvin = kelvinValue,
                                     tint = tintValue,
                                     contrast = contrastValue,
-                                    saturation = saturationValue
+                                    saturation = saturationValue,
+                                    channelSwap = channelSwapEnabled,
+                                    colorBands = colorBandsConfig
                                 )
                             )
                             savePresetsToStorage()
                             presetNameInput = ""
                             showSaveDialog = false
-                            showStatus("$trimmed kaydedildi")
+                            showStatus(context.getString(R.string.status_preset_saved, trimmed))
                         } else {
                             showStatus(strEnterName)
                         }
@@ -5312,7 +5891,7 @@ fun CameraScreen(
                 holder.previewFallbackLevel = 0
                 holder.activePreviewSize = null
                 showResolutionDialog = false
-                showStatus("Çözünürlük: ${formatMegapixels(res)} (${formatAspectRatioTag(res)})")
+                showStatus(context.getString(R.string.status_res_fmt, formatMegapixels(res), formatAspectRatioTag(res)))
                 restartForResolution(res)
             },
             onDismiss = { showResolutionDialog = false }
@@ -5405,7 +5984,7 @@ fun CameraScreen(
 }
 
 @Composable
-private fun ModeSegmentItem(
+internal fun ModeSegmentItem(
     text: String,
     selected: Boolean,
     activeColor: Color,
@@ -5424,24 +6003,26 @@ private fun ModeSegmentItem(
     )
     Box(
         modifier = Modifier
-            .sizeIn(minWidth = 42.dp, minHeight = 32.dp)
+            .sizeIn(minWidth = 36.dp, minHeight = 30.dp)
             .clip(RoundedCornerShape(50))
             .background(bgColor)
             .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 10.dp),
+            .padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = textColor,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false
         )
     }
 }
 
 @Composable
-private fun TopBadgeButton(
+internal fun TopBadgeButton(
     text: String,
     active: Boolean,
     accentColor: Color,
@@ -5450,7 +6031,7 @@ private fun TopBadgeButton(
 ) {
     Box(
         modifier = Modifier
-            .sizeIn(minWidth = 40.dp, minHeight = 40.dp)
+            .sizeIn(minWidth = 34.dp, minHeight = 36.dp)
             .clip(RoundedCornerShape(50))
             .clickable(enabled = enabled, onClick = onClick),
         contentAlignment = Alignment.Center
@@ -5460,21 +6041,23 @@ private fun TopBadgeButton(
                 .clip(RoundedCornerShape(50))
                 .background(if (active) accentColor.copy(alpha = 0.22f) else IrPalette.HudCard)
                 .border(0.9.dp, if (active) accentColor else IrPalette.BorderSubtle, RoundedCornerShape(50))
-                .padding(horizontal = 7.dp, vertical = 4.dp)
+                .padding(horizontal = 6.dp, vertical = 4.dp)
         ) {
             Text(
                 text = text,
                 color = if (active) accentColor else IrPalette.TextPrimary,
-                fontSize = 10.sp,
+                fontSize = 9.5.sp,
                 fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false
             )
         }
     }
 }
 
 @Composable
-private fun TopIconButton(
+internal fun TopIconButton(
     active: Boolean,
     accentColor: Color,
     contentDesc: String,
@@ -5483,7 +6066,7 @@ private fun TopIconButton(
 ) {
     Box(
         modifier = Modifier
-            .size(38.dp)
+            .size(33.dp)
             .semantics { contentDescription = contentDesc }
             .clip(CircleShape)
             .clickable(onClick = onClick),
@@ -5491,7 +6074,7 @@ private fun TopIconButton(
     ) {
         Box(
             modifier = Modifier
-                .size(30.dp)
+                .size(28.dp)
                 .clip(CircleShape)
                 .background(if (active) accentColor.copy(alpha = 0.20f) else IrPalette.HudCard)
                 .border(0.9.dp, if (active) accentColor else IrPalette.BorderSubtle, CircleShape),
@@ -5534,7 +6117,7 @@ private fun StatusTelemetryChip(
  * Lightroom / Sony Alpha / Halide tarzı yumuşatılmış RGB kanalları + parlaklık zarfı + gölge/vurgu taşma uyarıları.
  */
 @Composable
-private fun LiveHistogramOverlay(
+internal fun LiveHistogramOverlay(
     data: ProHistogramData,
     modifier: Modifier = Modifier
 ) {
@@ -5677,7 +6260,7 @@ private fun LiveHistogramOverlay(
  * histograma dokunarak veya sürükleyerek (ya da alt renk noktalarından) 8 banttan birini anında seçersiniz.
  */
 @Composable
-private fun ColorHistogramBandPicker(
+internal fun ColorHistogramBandPicker(
     hueBins: FloatArray,
     selectedBand: ColorBand,
     config: ColorBandsConfig,
@@ -5830,7 +6413,7 @@ private fun ColorHistogramBandPicker(
 }
 
 @Composable
-private fun <T> SegmentedChoiceRow(
+internal fun <T> SegmentedChoiceRow(
     options: List<Pair<T, String>>,
     selected: T,
     enabled: Boolean,
@@ -5878,7 +6461,7 @@ private fun <T> SegmentedChoiceRow(
 }
 
 @Composable
-private fun ActionPillButton(
+internal fun ActionPillButton(
     label: String,
     selected: Boolean,
     accentColor: Color,
@@ -5926,7 +6509,7 @@ private fun ActionPillButton(
 }
 
 @Composable
-private fun TabChip(
+internal fun TabChip(
     title: String,
     selected: Boolean,
     hasActiveIndicator: Boolean,
@@ -5987,7 +6570,7 @@ private fun TabChip(
  * - Sürükleme sırasında onDraggingChange ile Hayalet Mod desteği
  */
 @Composable
-private fun ProGradientSliderRow(
+internal fun ProGradientSliderRow(
     label: String,
     valueBadge: String,
     isModified: Boolean,
@@ -6259,7 +6842,7 @@ private fun StepButton(symbol: String, enabled: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun QuickPillAction(
+internal fun QuickPillAction(
     text: String,
     highlighted: Boolean = false,
     compact: Boolean = false,
@@ -6548,7 +7131,7 @@ private fun ResolutionItemRow(
 // --- Özel Keskin Vektör İkonları (Canvas) ---
 
 @Composable
-private fun GridIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun GridIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         val x1 = size.width / 3f
@@ -6563,7 +7146,7 @@ private fun GridIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ChevronIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ChevronIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 2.dp.toPx()
         val path = Path().apply {
@@ -6580,7 +7163,7 @@ private fun ChevronIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TimerIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun TimerIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         val cx = size.width * 0.5f
@@ -6593,7 +7176,7 @@ private fun TimerIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LevelIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun LevelIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.6.dp.toPx()
         val cy = size.height * 0.5f
@@ -6604,7 +7187,7 @@ private fun LevelIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ShieldIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ShieldIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         val path = Path().apply {
@@ -6621,7 +7204,7 @@ private fun ShieldIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ZebraIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ZebraIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         drawRoundRect(
@@ -6636,7 +7219,7 @@ private fun ZebraIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun TargetCrosshairIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun TargetCrosshairIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         val cx = size.width * 0.5f
@@ -6651,7 +7234,7 @@ private fun TargetCrosshairIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PipetteIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun PipetteIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         drawLine(tint, Offset(size.width * 0.22f, size.height * 0.78f), Offset(size.width * 0.70f, size.height * 0.30f), stroke, cap = StrokeCap.Round)
@@ -6661,7 +7244,7 @@ private fun PipetteIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun SparkleAutoIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun SparkleAutoIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val cx = size.width * 0.5f
         val cy = size.height * 0.5f
@@ -6678,7 +7261,7 @@ private fun SparkleAutoIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ResetIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ResetIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.6.dp.toPx()
         drawArc(
@@ -6694,7 +7277,7 @@ private fun ResetIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun GalleryIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun GalleryIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         drawRoundRect(
@@ -6715,7 +7298,7 @@ private fun GalleryIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun PresetStarIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun PresetStarIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         val cx = size.width * 0.5f
@@ -6736,7 +7319,7 @@ private fun PresetStarIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun WhiteBalanceIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun WhiteBalanceIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         val cx = size.width * 0.5f
@@ -6755,7 +7338,7 @@ private fun WhiteBalanceIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ExposureIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ExposureIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         drawRoundRect(
@@ -6763,7 +7346,6 @@ private fun ExposureIcon(tint: Color, modifier: Modifier = Modifier) {
             cornerRadius = CornerRadius(3.dp.toPx(), 3.dp.toPx()),
             style = Stroke(width = stroke)
         )
-        // Çapraz bölme çizgisi + sol üstte artı, sağ altta eksi
         drawLine(tint, Offset(size.width * 0.22f, size.height * 0.78f), Offset(size.width * 0.78f, size.height * 0.22f), stroke, cap = StrokeCap.Round)
         drawLine(tint, Offset(size.width * 0.22f, size.height * 0.32f), Offset(size.width * 0.44f, size.height * 0.32f), stroke, cap = StrokeCap.Round)
         drawLine(tint, Offset(size.width * 0.33f, size.height * 0.21f), Offset(size.width * 0.33f, size.height * 0.43f), stroke, cap = StrokeCap.Round)
@@ -6772,7 +7354,7 @@ private fun ExposureIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun ColorWheelIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun ColorWheelIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         val r = size.minDimension * 0.26f
@@ -6783,7 +7365,7 @@ private fun ColorWheelIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun MeteringFrameIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun MeteringFrameIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.5.dp.toPx()
         val m = size.minDimension * 0.12f
@@ -6803,7 +7385,7 @@ private fun MeteringFrameIcon(tint: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun CompareEyeIcon(tint: Color, modifier: Modifier = Modifier) {
+internal fun CompareEyeIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.4.dp.toPx()
         val cy = size.height * 0.5f
@@ -6818,7 +7400,106 @@ private fun CompareEyeIcon(tint: Color, modifier: Modifier = Modifier) {
     }
 }
 
-private fun formatSigned(value: Float): String {
+@Composable
+internal fun FlashIcon(mode: FlashMode, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.4.dp.toPx()
+        val bolt = Path().apply {
+            moveTo(size.width * 0.58f, size.height * 0.06f)
+            lineTo(size.width * 0.22f, size.height * 0.54f)
+            lineTo(size.width * 0.50f, size.height * 0.54f)
+            lineTo(size.width * 0.38f, size.height * 0.94f)
+            lineTo(size.width * 0.78f, size.height * 0.44f)
+            lineTo(size.width * 0.50f, size.height * 0.44f)
+            close()
+        }
+        if (mode == FlashMode.ON || mode == FlashMode.TORCH) {
+            drawPath(bolt, color = tint, style = Fill)
+        } else {
+            drawPath(bolt, color = tint, style = Stroke(width = stroke, join = StrokeJoin.Round))
+        }
+        if (mode == FlashMode.OFF) {
+            drawLine(
+                color = tint,
+                start = Offset(size.width * 0.14f, size.height * 0.14f),
+                end = Offset(size.width * 0.86f, size.height * 0.86f),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round
+            )
+        } else if (mode == FlashMode.AUTO) {
+            drawCircle(tint, radius = size.minDimension * 0.10f, center = Offset(size.width * 0.82f, size.height * 0.82f))
+        }
+    }
+}
+
+@Composable
+internal fun FlipCameraIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        drawArc(
+            color = tint,
+            startAngle = 200f,
+            sweepAngle = 140f,
+            useCenter = false,
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
+        )
+        drawArc(
+            color = tint,
+            startAngle = 20f,
+            sweepAngle = 140f,
+            useCenter = false,
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
+        )
+        drawLine(tint, Offset(size.width * 0.80f, size.height * 0.18f), Offset(size.width * 0.90f, size.height * 0.38f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.68f, size.height * 0.32f), Offset(size.width * 0.90f, size.height * 0.38f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.20f, size.height * 0.82f), Offset(size.width * 0.10f, size.height * 0.62f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.32f, size.height * 0.68f), Offset(size.width * 0.10f, size.height * 0.62f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+internal fun SwapChannelIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.4.dp.toPx()
+        drawLine(tint, Offset(size.width * 0.14f, size.height * 0.32f), Offset(size.width * 0.84f, size.height * 0.32f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.66f, size.height * 0.16f), Offset(size.width * 0.84f, size.height * 0.32f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.66f, size.height * 0.48f), Offset(size.width * 0.84f, size.height * 0.32f), stroke, cap = StrokeCap.Round)
+
+        drawLine(tint, Offset(size.width * 0.86f, size.height * 0.68f), Offset(size.width * 0.16f, size.height * 0.68f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.34f, size.height * 0.52f), Offset(size.width * 0.16f, size.height * 0.68f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.34f, size.height * 0.84f), Offset(size.width * 0.16f, size.height * 0.68f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+internal fun ShareIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.4.dp.toPx()
+        val r = size.minDimension * 0.13f
+        val pLeft = Offset(size.width * 0.22f, size.height * 0.50f)
+        val pTop = Offset(size.width * 0.76f, size.height * 0.20f)
+        val pBot = Offset(size.width * 0.76f, size.height * 0.80f)
+        drawLine(tint, pLeft, pTop, stroke, cap = StrokeCap.Round)
+        drawLine(tint, pLeft, pBot, stroke, cap = StrokeCap.Round)
+        drawCircle(tint, radius = r, center = pLeft)
+        drawCircle(tint, radius = r, center = pTop)
+        drawCircle(tint, radius = r, center = pBot)
+    }
+}
+
+@Composable
+internal fun SaveIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.5.dp.toPx()
+        val cx = size.width * 0.50f
+        drawLine(tint, Offset(cx, size.height * 0.12f), Offset(cx, size.height * 0.66f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.28f, size.height * 0.46f), Offset(cx, size.height * 0.68f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.72f, size.height * 0.46f), Offset(cx, size.height * 0.68f), stroke, cap = StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.16f, size.height * 0.86f), Offset(size.width * 0.84f, size.height * 0.86f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+internal fun formatSigned(value: Float): String {
     val intVal = value.roundToInt()
     return when {
         intVal > 0 -> "+$intVal"
@@ -6827,11 +7508,11 @@ private fun formatSigned(value: Float): String {
     }
 }
 
-private fun formatSignedDecimal(value: Float, locale: Locale): String {
+internal fun formatSignedDecimal(value: Float, locale: Locale): String {
     val formatted = String.format(locale, "%.1f", abs(value))
     return when {
         value > 0.05f -> "+$formatted"
         value < -0.05f -> "−$formatted"
-        else -> "0,0"
+        else -> String.format(locale, "%.1f", 0f)
     }
 }

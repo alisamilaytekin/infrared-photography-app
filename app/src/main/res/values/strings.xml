@@ -1,142 +1,216 @@
 <resources>
-    <string name="app_name">CameraS</string>
+    <string name="app_name">SpectraS</string>
 
-    <!-- Modlar ve üst çubuk -->
-    <string name="mode_auto">Oto</string>
+    <!-- Modes and top bar -->
+    <string name="mode_auto">Auto</string>
     <string name="mode_pro">Pro</string>
-    <string name="label_wb_short">BD</string>
-    <string name="label_tint">Ton</string>
+    <string name="mode_studio">Edit</string>
+    <string name="label_wb_short">WB</string>
+    <string name="label_tint">Tint</string>
     <string name="label_ev_short">EV</string>
-    <string name="label_res_fallback">Çözünürlük</string>
-    <string name="cd_grid_toggle">Izgarayı aç veya kapat</string>
-    <string name="cd_panel_toggle">Ayar panelini aç veya kapat</string>
+    <string name="label_res_fallback">Resolution</string>
+    <string name="cd_grid_toggle">Toggle grid</string>
+    <string name="cd_panel_toggle">Expand or collapse control panel</string>
+    <string name="cd_flash_toggle">Cycle flash mode</string>
+    <string name="cd_flip_camera">Switch front or back camera</string>
 
-    <!-- Ana çipler (anlaşılır Türkçe etiketler) -->
-    <string name="chip_wb">Beyaz D.</string>
-    <string name="chip_exposure">Pozlama</string>
-    <string name="chip_color">Renk</string>
-    <string name="chip_metering">Ölçüm</string>
+    <!-- Flash modes -->
+    <string name="flash_off">Off</string>
+    <string name="flash_auto">Auto</string>
+    <string name="flash_on">On</string>
+    <string name="flash_torch">Torch</string>
+    <string name="status_flash_set">Flash: %1$s</string>
+    <string name="status_camera_front">Front camera</string>
+    <string name="status_camera_back">Rear camera</string>
 
-    <!-- Alt seçiciler -->
-    <string name="sub_kelvin">Sıcaklık</string>
-    <string name="sub_tint">Ton</string>
-    <string name="sub_sat_short">Doyg.</string>
-    <string name="sub_lum_short">Parl.</string>
+    <!-- Main control tabs -->
+    <string name="chip_wb">WB</string>
+    <string name="chip_exposure">Exposure</string>
+    <string name="chip_color">Color</string>
+    <string name="chip_metering">Metering</string>
 
-    <!-- Kaydırıcı etiketleri -->
-    <string name="slider_kelvin">Renk sıcaklığı</string>
-    <string name="slider_tint">Ton (yeşil–macenta)</string>
-    <string name="slider_exposure">Pozlama (EV)</string>
-    <string name="slider_saturation">Doygunluk</string>
-    <string name="slider_contrast">Kontrast</string>
-    <string name="slider_point_hue">Renk tonu</string>
-    <string name="slider_point_sat">Renk doygunluğu</string>
-    <string name="slider_point_lum">Renk parlaklığı</string>
+    <!-- Sub-selectors -->
+    <string name="sub_kelvin">Temp</string>
+    <string name="sub_tint">Hue</string>
+    <string name="sub_tint_wb">Tint</string>
+    <string name="sub_sat_short">Sat.</string>
+    <string name="sub_lum_short">Lum.</string>
 
-    <!-- Hızlı eylemler -->
-    <string name="action_auto_calibrate">Oto denge</string>
-    <string name="action_spot_wb">Noktasal BD</string>
-    <string name="action_spot_wb_active">Seçici açık</string>
-    <string name="action_color_pipette">Renk pipeti</string>
-    <string name="action_color_pipette_active">Pipet açık</string>
-    <string name="action_auto_contrast">Oto kontrast</string>
-    <string name="action_reset_all">Tümünü sıfırla</string>
-    <string name="action_remove">Kaldır</string>
-    <string name="action_highlight_guard">Vurgu koruma</string>
-    <string name="action_center_box">Merkeze al</string>
-    <string name="action_cancel_pick">İptal</string>
+    <!-- Slider labels -->
+    <string name="slider_kelvin">Color temperature</string>
+    <string name="slider_tint">Tint (green–magenta)</string>
+    <string name="slider_exposure">Exposure (EV)</string>
+    <string name="slider_saturation">Saturation</string>
+    <string name="slider_contrast">Contrast</string>
+    <string name="slider_point_hue">Color hue</string>
+    <string name="slider_point_sat">Color saturation</string>
+    <string name="slider_point_lum">Color luminance</string>
 
-    <!-- Ölçüm -->
-    <string name="metering_full">Tüm ekran</string>
-    <string name="metering_box">Kutu ölçüm</string>
-    <string name="metering_size_label">Kutu boyutu</string>
-    <string name="metering_size_small">Küçük</string>
-    <string name="metering_size_medium">Orta</string>
-    <string name="metering_size_large">Büyük</string>
-    <string name="metering_pinch_hint">Önizlemede dokunarak taşıyın, iki parmakla boyutlandırın</string>
-    <string name="metering_full_hint">Işık tüm sahneden ölçülür · Noktasal ölçüm için önizlemeye dokunun</string>
+    <!-- Quick actions -->
+    <string name="action_auto_calibrate">Auto WB</string>
+    <string name="action_spot_wb">Spot WB</string>
+    <string name="action_spot_wb_active">Picker on</string>
+    <string name="action_color_pipette">Pipette</string>
+    <string name="action_color_pipette_active">Pipette on</string>
+    <string name="action_auto_contrast">Auto Contrast</string>
+    <string name="action_channel_swap">R↔B Swap</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">Reset all</string>
+    <string name="action_remove">Remove</string>
+    <string name="action_highlight_guard">Highlight guard</string>
+    <string name="action_center_box">Center</string>
+    <string name="action_cancel_pick">Cancel</string>
 
-    <!-- Renk genişliği ve renk mikseri -->
-    <string name="range_narrow">Dar</string>
-    <string name="range_balanced">Dengeli</string>
-    <string name="range_wide">Geniş</string>
-    <string name="color_mode_general">Genel</string>
-    <string name="color_mode_bands">Bantlar</string>
-    <string name="color_mode_pipette">Pipet</string>
-    <string name="action_reset_band">Bandı sıfırla</string>
-    <string name="action_reset_all_bands">Tümünü sıfırla</string>
-    <string name="action_pick_again">Yeniden seç</string>
-    <string name="pipette_empty_hint">Önizlemede düzenlemek istediğiniz renge dokunmak için pipeti açın</string>
+    <!-- Metering -->
+    <string name="metering_full">Full frame</string>
+    <string name="metering_box">Spot box</string>
+    <string name="metering_size_label">Box size</string>
+    <string name="metering_size_small">Small</string>
+    <string name="metering_size_medium">Medium</string>
+    <string name="metering_size_large">Large</string>
+    <string name="metering_pinch_hint">Tap to move the metering box, pinch with two fingers to resize</string>
+    <string name="metering_full_hint">Metering full scene · Tap preview for spot box metering</string>
 
-    <!-- Alt çubuk -->
-    <string name="action_presets">Ön ayar</string>
-    <string name="cd_shutter">Fotoğraf çek</string>
+    <!-- Color range and mixer -->
+    <string name="range_narrow">Narrow</string>
+    <string name="range_balanced">Balanced</string>
+    <string name="range_wide">Wide</string>
+    <string name="color_mode_general">General</string>
+    <string name="color_mode_bands">Bands</string>
+    <string name="color_mode_pipette">Pipette</string>
+    <string name="action_reset_band">Reset band</string>
+    <string name="action_reset_all_bands">Reset all</string>
+    <string name="action_pick_again">Re-pick</string>
+    <string name="pipette_empty_hint">Activate the pipette and tap any color on screen to shift it 360°</string>
 
-    <!-- Diyaloglar -->
-    <string name="dialog_presets_title">Ön ayarlar</string>
-    <string name="dialog_presets_new">+ Yeni kaydet</string>
-    <string name="dialog_presets_empty">Kayıtlı ön ayar bulunamadı. Mevcut ayarlarınızı kaydetmek için “+ Yeni kaydet” düğmesine dokunun.</string>
-    <string name="dialog_save_preset_title">Ön ayar kaydet</string>
-    <string name="dialog_preset_name_label">Ön ayar adı</string>
-    <string name="dialog_preset_name_hint">Örn. Sarı ışıklı oda, Gün ışığı</string>
-    <string name="dialog_save">Kaydet</string>
-    <string name="dialog_cancel">Vazgeç</string>
-    <string name="dialog_close">Kapat</string>
-    <string name="dialog_confirm">Sıfırla</string>
+    <!-- Color band & hue names -->
+    <string name="band_red">Red</string>
+    <string name="band_orange">Orange</string>
+    <string name="band_yellow">Yellow</string>
+    <string name="band_green">Green</string>
+    <string name="band_cyan">Cyan</string>
+    <string name="band_blue">Blue</string>
+    <string name="band_purple">Purple</string>
+    <string name="band_magenta">Magenta</string>
 
-    <string name="dialog_reset_all_title">Tüm ayarlar sıfırlansın mı?</string>
-    <string name="dialog_reset_all_message">Beyaz dengesi, ton, pozlama, doygunluk, kontrast ve renk pipeti ayarları varsayılan değerlere döndürülecek.</string>
+    <string name="hue_red">Red</string>
+    <string name="hue_orange">Orange / Amber</string>
+    <string name="hue_yellow">Yellow / Foliage</string>
+    <string name="hue_green">Green</string>
+    <string name="hue_cyan">Cyan</string>
+    <string name="hue_blue">Blue / Sky</string>
+    <string name="hue_purple">Purple / Violet</string>
+    <string name="hue_magenta">Magenta / Pink</string>
 
-    <!-- Çözünürlük seçici -->
-    <string name="dialog_resolution_title">Fotoğraf çözünürlüğü</string>
-    <string name="dialog_resolution_subtitle">Önce en-boy oranını, ardından çözünürlüğü seçin</string>
-    <string name="dialog_resolution_advanced">Gelişmiş çözünürlükler</string>
-    <string name="dialog_resolution_recommended">Önerilen</string>
+    <!-- Bottom dock -->
+    <string name="action_presets">Looks</string>
+    <string name="cd_shutter">Capture photo</string>
 
-    <!-- Bildirimler -->
-    <string name="status_camera_permission">Kamera izni gerekli</string>
-    <string name="status_all_reset">Tüm ayarlar sıfırlandı</string>
-    <string name="status_highlight_on">Vurgu koruma açıldı</string>
-    <string name="status_highlight_off">Vurgu koruma kapatıldı</string>
-    <string name="status_tap_color">Önizlemede bir renge dokunun</string>
-    <string name="status_tap_wb">Önizlemede beyaz/gri bir alana dokunun</string>
-    <string name="status_enter_name">Lütfen bir ad girin</string>
-    <string name="status_box_centered">Ölçüm kutusu merkeze alındı</string>
+    <!-- Dialogs -->
+    <string name="dialog_presets_title">Looks &amp; Presets</string>
+    <string name="dialog_presets_new">+ Save current</string>
+    <string name="presets_section_builtin">Signature Infrared &amp; Cinema Looks</string>
+    <string name="presets_section_custom">My Custom Presets</string>
+    <string name="dialog_presets_empty">No custom presets saved yet. Tap “+ Save current” to save your color recipe.</string>
+    <string name="dialog_save_preset_title">Save Preset</string>
+    <string name="dialog_preset_name_label">Preset name</string>
+    <string name="dialog_preset_name_hint">e.g. Autumn IR, Golden Forest</string>
+    <string name="dialog_save">Save</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_close">Close</string>
+    <string name="dialog_confirm">Reset</string>
 
-    <!-- Ek özellikler -->
-    <string name="action_compare">Karşılaştır</string>
-    <string name="banner_compare_auto">Oto önizleme (karşılaştırma)</string>
+    <string name="dialog_reset_all_title">Reset all adjustments?</string>
+    <string name="dialog_reset_all_message">White balance, tint, exposure, saturation, contrast, channel swap, color bands, and pipette settings will return to default.</string>
+
+    <!-- Resolution picker -->
+    <string name="dialog_resolution_title">Photo Resolution</string>
+    <string name="dialog_resolution_subtitle">Choose aspect ratio first, then resolution</string>
+    <string name="dialog_resolution_advanced">Advanced resolutions</string>
+    <string name="dialog_resolution_recommended">Recommended</string>
+    <string name="dialog_resolution_selected">Selected</string>
+
+    <!-- Status banners -->
+    <string name="status_camera_permission">Camera permission is required</string>
+    <string name="status_all_reset">All settings reset</string>
+    <string name="status_highlight_on">Highlight guard enabled</string>
+    <string name="status_highlight_off">Highlight guard disabled</string>
+    <string name="status_tap_color">Tap any color on the preview</string>
+    <string name="status_tap_wb">Tap a white or neutral gray area</string>
+    <string name="status_enter_name">Please enter a name</string>
+    <string name="status_box_centered">Metering box centered</string>
+    <string name="status_channel_swap_on">R↔B Channel Swap enabled</string>
+    <string name="status_channel_swap_off">R↔B Channel Swap disabled</string>
+    <string name="status_color_picked">%1$s picked</string>
+    <string name="status_preset_applied">%1$s applied</string>
+    <string name="status_preset_saved">%1$s saved</string>
+    <string name="status_preset_deleted">%1$s deleted</string>
+    <string name="status_auto_cal_fmt">Auto WB: %1$dK · Tint %2$s</string>
+    <string name="status_auto_contrast_fmt">Auto Contrast: %1$sx</string>
+    <string name="status_res_fmt">Resolution: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">RAW failed (JPEG saved)</string>
+    <string name="status_raw_unsupported_res">RAW unsupported at this resolution; switched to JPEG</string>
+    <string name="status_res_unsupported">Resolution not supported</string>
+    <string name="status_capture_failed">Capture failed, please try again</string>
+    <string name="status_gallery_open_failed">Could not open Gallery</string>
+    <string name="status_pre_tiramisu_hsl">Live color grading preview requires Android 13+; applied on capture</string>
+
+    <!-- Extras -->
+    <string name="action_compare">Compare</string>
+    <string name="banner_compare_auto">Original preview (compare)</string>
     <string name="action_zebra">Zebra</string>
-    <string name="action_level">Terazi</string>
-    <string name="timer_off">Kapalı</string>
-    <string name="timer_3s">3 sn</string>
-    <string name="timer_10s">10 sn</string>
-    <string name="status_zebra_on">Parlak alan uyarısı (zebra) açıldı</string>
-    <string name="status_zebra_off">Parlak alan uyarısı kapatıldı</string>
-    <string name="status_level_on">Su terazisi açıldı</string>
-    <string name="status_level_off">Su terazisi kapatıldı</string>
-    <string name="status_timer_set">Zamanlayıcı: %1$s</string>
+    <string name="action_level">Level</string>
+    <string name="badge_zebra">ZEBRA</string>
+    <string name="badge_box">SPOT</string>
+    <string name="timer_off">Off</string>
+    <string name="timer_3s">3s</string>
+    <string name="timer_10s">10s</string>
+    <string name="status_zebra_on">Highlight clipping warning (zebra) on</string>
+    <string name="status_zebra_off">Highlight clipping warning off</string>
+    <string name="status_level_on">Horizon level enabled</string>
+    <string name="status_level_off">Horizon level disabled</string>
+    <string name="status_timer_set">Timer: %1$s</string>
 
-    <!-- İlk açılış rehberi (3 adım) -->
-    <string name="guide_step_1_title">1/3 · Noktasal Beyaz Dengesi</string>
-    <string name="guide_step_1_body">Pro modda “Beyaz D. → Noktasal BD” düğmesine dokunun, ardından önizlemede beyaz veya gri olması gereken bir alana dokunun. Renk sıcaklığı anında dengelenir.</string>
-    <string name="guide_step_2_title">2/3 · Oto Denge ve Ön Ayarlar</string>
-    <string name="guide_step_2_body">“Oto denge” ile sahneyi tek dokunuşla dengeleyin. Beğendiğiniz ayarları “Ön ayar” menüsünden örn. “Sarı ışıklı oda” veya “Gün ışığı” adıyla kaydedin.</string>
-    <string name="guide_step_3_title">3/3 · Ölçüm Kutusu ve Pozlama</string>
-    <string name="guide_step_3_body">Önizlemede herhangi bir noktaya dokunarak ölçüm kutusunu taşıyabilir, iki parmakla büyütüp küçültebilirsiniz. Değer etiketine dokunmak yalnızca o ayarı sıfırlar.</string>
-    <string name="guide_next">İleri</string>
-    <string name="guide_done">Başla</string>
-    <string name="guide_skip">Atla</string>
+    <!-- Onboarding (3 steps) -->
+    <string name="guide_step_1_title">1/3 · Live HSL &amp; Signature Looks</string>
+    <string name="guide_step_1_body">Switch to Pro or tap “Looks” for instant Aerochrome IR, 720nm B&amp;W, Teal &amp; Orange, or real-time R↔B Channel Swap while shooting.</string>
+    <string name="guide_step_2_title">2/3 · 8-Band Histogram &amp; Pipette</string>
+    <string name="guide_step_2_body">In Color → Bands or Pipette, shift any color up to 360° live. Panels automatically fade into Ghost Mode while you drag sliders.</string>
+    <string name="guide_step_3_title">3/3 · Edit Gallery &amp; Captured Photos</string>
+    <string name="guide_step_3_body">Tap “Edit” in the top bar or tap your last photo thumbnail to open SpectraS Studio and grade any gallery photo with the exact same Pro engine.</string>
+    <string name="guide_next">Next</string>
+    <string name="guide_done">Start</string>
+    <string name="guide_skip">Skip</string>
 
-    <!-- Galeri, mercek ve RAW -->
+    <!-- Gallery, lens, RAW -->
     <string name="action_raw">RAW</string>
-    <string name="status_raw_on">RAW + JPEG kayıt açıldı</string>
-    <string name="status_raw_off">Yalnızca JPEG kayıt</string>
-    <string name="status_raw_saved">RAW (DNG) kaydedildi</string>
-    <string name="cd_gallery">Son fotoğrafı galeride aç</string>
-    <string name="cd_level_toggle">Su terazisini aç veya kapat</string>
-    <string name="cd_timer_toggle">Zamanlayıcıyı değiştir</string>
-    <string name="cd_reset_all">Tüm ayarları sıfırla</string>
-    <string name="action_pipette_short">Pipet</string>
-    <string name="action_auto_short">Oto</string>
+    <string name="status_raw_on">RAW + JPEG capture enabled</string>
+    <string name="status_raw_off">JPEG only mode</string>
+    <string name="status_raw_saved">RAW (DNG) saved</string>
+    <string name="cd_gallery">Open photo in Studio (long-press for Gallery)</string>
+    <string name="cd_level_toggle">Toggle horizon level</string>
+    <string name="cd_timer_toggle">Cycle self-timer</string>
+    <string name="cd_reset_all">Reset all adjustments</string>
+    <string name="action_pipette_short">Pipette</string>
+    <string name="action_auto_short">Auto</string>
+
+    <!-- Photo Editor Studio -->
+    <string name="editor_pick_photo">Open</string>
+    <string name="editor_save">Save</string>
+    <string name="editor_saving">Saving…</string>
+    <string name="editor_share">Share</string>
+    <string name="editor_open_sys_gallery">Gallery</string>
+    <string name="editor_tab_looks">Looks</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">Grade any photo from your gallery or your latest shot with live 8-band HSL, 360° Color Pipette, R↔B Infrared Swap, and Signature Looks.</string>
+    <string name="editor_choose_gallery">Pick from Gallery</string>
+    <string name="editor_use_last_shot">Edit Last Shot</string>
+    <string name="editor_compare_banner">Original photo (compare)</string>
+    <string name="editor_saved_status">Edited photo saved to Gallery</string>
+    <string name="editor_save_failed">Could not save photo</string>
+    <string name="editor_load_failed">Could not load photo</string>
+    <string name="editor_auto_wb_done">Auto WB applied</string>
+    <string name="editor_spot_wb_done">Spot WB applied</string>
+    <string name="editor_reset_done">Edits reset</string>
+    <string name="editor_share_chooser">Share edited photo</string>
 </resources>

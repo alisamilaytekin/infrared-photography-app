@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "CameraS"
+rootProject.name = "SpectraS"
 include(":app")

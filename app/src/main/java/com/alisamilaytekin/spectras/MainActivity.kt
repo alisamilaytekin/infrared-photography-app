@@ -263,6 +263,19 @@ class MainActivity : ComponentActivity() {
 
 internal enum class AppMode { AUTO, PRO, STUDIO }
 
+internal enum class ExperienceMode(val prefKey: String) {
+    AESTHETIC("aesthetic"),
+    IR_LAB("ir_lab"),
+    PRO("pro");
+
+    companion object {
+        fun fromKey(key: String?): ExperienceMode =
+            entries.firstOrNull { it.prefKey == key } ?: PRO
+    }
+}
+
+internal enum class AestheticSubSlider { STRENGTH, BRIGHTNESS }
+
 internal enum class FlashMode { OFF, AUTO, ON, TORCH }
 
 // Ana kontrol çipleri: Beyaz Dengesi, Pozlama, Renk, Ölçüm
@@ -392,6 +405,7 @@ private class CameraHolder {
     @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
     @Volatile var currentColorBands: ColorBandsConfig = ColorBandsConfig()
     @Volatile var currentChannelSwap: Boolean = false
+    @Volatile var currentAeLock: Boolean = false
 
     // Mercek / yakınlaştırma ve RAW/DNG durumu
     @Volatile var zoomRange: Range<Float> = Range(1f, 1f)
@@ -514,6 +528,278 @@ internal fun buildBandPreset(vararg entries: Pair<ColorBand, BandHslAdjustment>)
     val list = MutableList(8) { BandHslAdjustment() }
     entries.forEach { (band, adj) -> list[band.index] = adj }
     return ColorBandsConfig(list)
+}
+
+internal fun scaleColorBands(bands: ColorBandsConfig, strength: Float): ColorBandsConfig {
+    val s = strength.coerceIn(0f, 1f)
+    if (s >= 0.995f) return bands
+    if (s <= 0.005f) return ColorBandsConfig()
+    return ColorBandsConfig(
+        bands.bands.map { adj ->
+            BandHslAdjustment(
+                deltaHue = adj.deltaHue * s,
+                deltaSat = adj.deltaSat * s,
+                deltaLum = adj.deltaLum * s
+            )
+        }
+    )
+}
+
+internal val AESTHETIC_PRESETS: List<CameraPreset> = listOf(
+    CameraPreset(
+        name = "Natural",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = ColorBandsConfig(),
+        accentHex = 0xFF94A3B8L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Soft Peach",
+        kelvin = 6050f,
+        tint = 10f,
+        contrast = 0.95f,
+        saturation = 1.04f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(deltaHue = 8f, deltaSat = 0.12f, deltaLum = 0.14f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.10f, deltaLum = 0.16f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -14f, deltaSat = -0.10f, deltaLum = 0.08f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 12f, deltaSat = -0.25f, deltaLum = 0.05f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -10f, deltaSat = -0.12f, deltaLum = 0.08f)
+        ),
+        accentHex = 0xFFFB923CL,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Paris Pastel",
+        kelvin = 5750f,
+        tint = 18f,
+        contrast = 0.93f,
+        saturation = 0.94f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(deltaHue = -12f, deltaSat = 0.10f, deltaLum = 0.12f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -6f, deltaSat = -0.05f, deltaLum = 0.14f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 22f, deltaSat = -0.35f, deltaLum = 0.10f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = -8f, deltaSat = -0.15f, deltaLum = 0.12f),
+            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = 6f, deltaSat = 0.18f, deltaLum = 0.12f)
+        ),
+        accentHex = 0xFFF472B6L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Golden Glow",
+        kelvin = 6700f,
+        tint = 6f,
+        contrast = 1.05f,
+        saturation = 1.12f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 4f, deltaSat = 0.22f, deltaLum = 0.12f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -14f, deltaSat = 0.20f, deltaLum = 0.08f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -28f, deltaSat = -0.18f, deltaLum = -0.04f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -12f, deltaSat = -0.14f, deltaLum = -0.05f)
+        ),
+        accentHex = 0xFFFBBF24L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Old Money 90's",
+        kelvin = 5900f,
+        tint = -6f,
+        contrast = 0.94f,
+        saturation = 0.86f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.06f, deltaLum = 0.05f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -18f, deltaSat = -0.22f, deltaLum = -0.04f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -18f, deltaSat = -0.45f, deltaLum = -0.14f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.35f, deltaLum = -0.08f)
+        ),
+        accentHex = 0xFFA3A380L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Clean Girl",
+        kelvin = 5350f,
+        tint = 4f,
+        contrast = 1.04f,
+        saturation = 1.06f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 2f, deltaSat = -0.06f, deltaLum = 0.14f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -6f, deltaSat = -0.15f, deltaLum = 0.10f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 0f, deltaSat = 0.15f, deltaLum = 0.06f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.12f, deltaLum = 0.05f)
+        ),
+        accentHex = 0xFF38BDF8L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Noir Chic",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.18f,
+        saturation = 0.50f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, -1.0f, 0.14f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0.22f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0.10f),
+            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, -0.05f),
+            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, -0.18f),
+            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.30f),
+            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, -0.10f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, 0.08f)
+        ),
+        accentHex = 0xFFE2E8F0L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Dreamy Teal",
+        kelvin = 5250f,
+        tint = -6f,
+        contrast = 1.04f,
+        saturation = 1.08f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = 0.15f, deltaLum = 0.10f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 38f, deltaSat = -0.15f, deltaLum = 0.04f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 4f, deltaSat = 0.30f, deltaLum = 0.04f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -22f, deltaSat = 0.22f, deltaLum = -0.04f)
+        ),
+        accentHex = 0xFF2DD4BFL,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Pink Aerochrome",
+        kelvin = 5400f,
+        tint = 16f,
+        contrast = 1.08f,
+        saturation = 1.15f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -75f, deltaSat = 0.35f, deltaLum = 0.12f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -155f, deltaSat = 0.50f, deltaLum = 0.18f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 14f, deltaSat = 0.20f, deltaLum = -0.06f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.28f, deltaLum = -0.12f)
+        ),
+        accentHex = 0xFFE84393L,
+        isBuiltIn = true
+    )
+)
+
+internal val IR_LAB_PRESETS: List<CameraPreset> = listOf(
+    CameraPreset(
+        name = "Aerochrome IR",
+        kelvin = 5200f,
+        tint = 8f,
+        contrast = 1.14f,
+        saturation = 1.20f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -55f, deltaSat = 0.35f, deltaLum = 0.05f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -130f, deltaSat = 0.55f, deltaLum = 0.10f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 20f, deltaSat = 0.25f, deltaLum = -0.12f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.35f, deltaLum = -0.20f)
+        ),
+        accentHex = 0xFFEF4444L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "590nm Gold (R↔B)",
+        kelvin = 2800f,
+        tint = 5f,
+        contrast = 1.12f,
+        saturation = 1.25f,
+        channelSwap = true,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 12f, deltaSat = 0.25f, deltaLum = 0.08f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -8f, deltaSat = 0.30f, deltaLum = -0.10f)
+        ),
+        accentHex = 0xFFF5A623L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "665nm False Color",
+        kelvin = 2400f,
+        tint = 0f,
+        contrast = 1.16f,
+        saturation = 1.10f,
+        channelSwap = true,
+        colorBands = buildBandPreset(
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = 8f, deltaSat = -0.35f, deltaLum = 0.32f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 14f, deltaSat = -0.25f, deltaLum = 0.25f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.40f, deltaLum = -0.18f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 10f, deltaSat = 0.30f, deltaLum = -0.10f)
+        ),
+        accentHex = 0xFF38BDF8L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "720nm B&W IR",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.26f,
+        saturation = 0.50f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, -1.0f, 0.05f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0.15f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0.45f),
+            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, 0.55f),
+            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, -0.40f),
+            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.55f),
+            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, -0.20f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, 0.0f)
+        ),
+        accentHex = 0xFFE2E8F0L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "850nm Deep B&W",
+        kelvin = 1800f,
+        tint = 0f,
+        contrast = 1.38f,
+        saturation = 0.50f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, -1.0f, 0.10f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0.20f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0.60f),
+            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, 0.70f),
+            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, -0.55f),
+            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.75f),
+            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, -0.35f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, -0.10f)
+        ),
+        accentHex = 0xFF94A3B8L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "IRChrome Natural",
+        kelvin = 3350f,
+        tint = 12f,
+        contrast = 1.06f,
+        saturation = 1.15f,
+        channelSwap = false,
+        colorBands = ColorBandsConfig(),
+        accentHex = 0xFFF97316L,
+        isBuiltIn = true
+    )
+)
+
+internal fun getAllBuiltInPresetsForMode(mode: ExperienceMode): List<CameraPreset> {
+    val ordered = when (mode) {
+        ExperienceMode.AESTHETIC -> AESTHETIC_PRESETS + BUILT_IN_SIGNATURE_PRESETS + IR_LAB_PRESETS
+        ExperienceMode.IR_LAB -> IR_LAB_PRESETS + BUILT_IN_SIGNATURE_PRESETS + AESTHETIC_PRESETS
+        ExperienceMode.PRO -> BUILT_IN_SIGNATURE_PRESETS + IR_LAB_PRESETS + AESTHETIC_PRESETS
+    }
+    return ordered.distinctBy { it.name }
 }
 
 internal val BUILT_IN_SIGNATURE_PRESETS: List<CameraPreset> = listOf(
@@ -2101,6 +2387,7 @@ fun CameraScreen(
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(FlashMode.OFF) }
     var channelSwapEnabled by remember { mutableStateOf(false) }
+    var aeLockEnabled by remember { mutableStateOf(false) }
     var kelvinValue by remember { mutableFloatStateOf(5500f) }
     var tintValue by remember { mutableFloatStateOf(0f) }
     var contrastValue by remember { mutableFloatStateOf(DEFAULT_CONTRAST) }
@@ -2166,8 +2453,19 @@ fun CameraScreen(
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
 
     val sharedPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
-    var showOnboardingGuide by remember { mutableStateOf(!sharedPrefs.getBoolean("onboarding_v1_done", false)) }
-    var onboardingStep by remember { mutableIntStateOf(0) }
+    var experienceMode by remember {
+        mutableStateOf(ExperienceMode.fromKey(sharedPrefs.getString("experience_mode", null)))
+    }
+    var showExperienceWelcome by remember {
+        mutableStateOf(!sharedPrefs.getBoolean("experience_mode_chosen_v1", false))
+    }
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var selectedAestheticPreset by remember { mutableStateOf(AESTHETIC_PRESETS.first()) }
+    var aestheticFilterStrength by remember { mutableFloatStateOf(1.0f) }
+    var aestheticSubSlider by remember { mutableStateOf(AestheticSubSlider.STRENGTH) }
+    var irProTuneExpanded by remember { mutableStateOf(false) }
+    var focusBoxVisible by remember { mutableStateOf(false) }
+    var focusBoxTriggerNonce by remember { mutableIntStateOf(0) }
 
     // Su terazisi açıkken cihazın eğimini ivmeölçerden düşük güçle okur
     DisposableEffect(showLevel) {
@@ -2342,6 +2640,7 @@ fun CameraScreen(
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
         holder.currentChannelSwap = channelSwapEnabled
+        holder.currentAeLock = aeLockEnabled
         holder.currentZoomRatio = zoomRatio
         holder.rawCaptureEnabled = rawEnabled
         holder.flashMode = flashMode
@@ -2408,6 +2707,10 @@ fun CameraScreen(
         if (holder.aeCompensationRange.upper > holder.aeCompensationRange.lower) {
             val clampedEv = exposureEv.coerceIn(holder.aeCompensationRange.lower, holder.aeCompensationRange.upper)
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedEv)
+        }
+        try {
+            builder.set(CaptureRequest.CONTROL_AE_LOCK, holder.currentAeLock)
+        } catch (_: Exception) {
         }
         if (holder.maxAeRegions > 0 && !compatibilityFallback) {
             try {
@@ -3412,7 +3715,7 @@ fun CameraScreen(
 
     // Her ayar kategorisinde varsayılan dışına çıkılıp çıkılmadığını gösteren durumlar
     val isWbModified = !isAutoMode && (abs(kelvinValue - liveAutoKelvin) > 120f || abs(tintValue - liveAutoTint) > 3f)
-    val isEvModified = exposureEvIndex != 0
+    val isEvModified = exposureEvIndex != 0 || aeLockEnabled
     val isColorModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f ||
         abs(contrastValue - DEFAULT_CONTRAST) > 0.02f ||
         channelSwapEnabled ||
@@ -3425,6 +3728,10 @@ fun CameraScreen(
     val strModeAuto = stringResource(R.string.mode_auto)
     val strModePro = stringResource(R.string.mode_pro)
     val strModeStudio = stringResource(R.string.mode_studio)
+    val strModeCameraShort = stringResource(R.string.mode_camera_short)
+    val strModeIrShort = stringResource(R.string.mode_ir_short)
+    val strSettingsCd = stringResource(R.string.cd_settings)
+    val strBadgeAeLock = stringResource(R.string.badge_ae_lock)
     val strWbShort = stringResource(R.string.label_wb_short)
     val strTintShort = stringResource(R.string.label_tint)
     val strEvShort = stringResource(R.string.label_ev_short)
@@ -3503,6 +3810,91 @@ fun CameraScreen(
         isDeckCollapsed = false
     }
 
+    fun applyAestheticPreset(preset: CameraPreset, strength: Float) {
+        selectedAestheticPreset = preset
+        val s = strength.coerceIn(0f, 1f)
+        aestheticFilterStrength = s
+        isPickerActive = false
+        isColorPipetteActive = false
+        isExposureBoxPicking = false
+        if (preset.name == "Natural" || s <= 0.01f) {
+            isAutoMode = true
+            channelSwapEnabled = false
+            colorBandsConfig = ColorBandsConfig()
+            targetedColorConfig = TargetedColorConfig()
+            contrastValue = DEFAULT_CONTRAST
+            saturationValue = DEFAULT_SATURATION
+            updatePreviewSettings()
+        } else {
+            val baseK = liveAutoKelvin.coerceIn(2600f, 8200f)
+            val baseT = liveAutoTint.coerceIn(-40f, 40f)
+            isAutoMode = false
+            kelvinValue = (baseK + (preset.kelvin - 5500f) * s).coerceIn(KELVIN_MIN, KELVIN_MAX)
+            tintValue = (baseT + preset.tint * s).coerceIn(-100f, 100f)
+            contrastValue = DEFAULT_CONTRAST + (preset.contrast - DEFAULT_CONTRAST) * s
+            saturationValue = DEFAULT_SATURATION + (preset.saturation - DEFAULT_SATURATION) * s
+            channelSwapEnabled = preset.channelSwap && s >= 0.5f
+            colorBandsConfig = scaleColorBands(preset.colorBands, s)
+            targetedColorConfig = TargetedColorConfig()
+            updatePreviewSettings()
+        }
+    }
+
+    fun applyPresetDirect(preset: CameraPreset, announce: Boolean = true) {
+        isPickerActive = false
+        isColorPipetteActive = false
+        isExposureBoxPicking = false
+        isAutoMode = false
+        kelvinValue = preset.kelvin
+        tintValue = preset.tint
+        contrastValue = preset.contrast
+        saturationValue = preset.saturation
+        channelSwapEnabled = preset.channelSwap
+        colorBandsConfig = preset.colorBands
+        targetedColorConfig = TargetedColorConfig()
+        updatePreviewSettings()
+        if (announce) {
+            showStatus(context.getString(R.string.status_preset_applied, preset.name))
+        }
+    }
+
+    fun switchExperienceMode(newMode: ExperienceMode, announce: Boolean = true) {
+        experienceMode = newMode
+        sharedPrefs.edit {
+            putString("experience_mode", newMode.prefKey)
+            putBoolean("experience_mode_chosen_v1", true)
+        }
+        isPickerActive = false
+        isColorPipetteActive = false
+        isExposureBoxPicking = false
+        isDeckCollapsed = false
+        when (newMode) {
+            ExperienceMode.AESTHETIC -> {
+                showZebra = false
+                aeLockEnabled = false
+                irProTuneExpanded = false
+                applyAestheticPreset(selectedAestheticPreset, aestheticFilterStrength)
+            }
+            ExperienceMode.IR_LAB -> {
+                irProTuneExpanded = false
+                if (isAutoMode && !colorBandsConfig.hasAnyModification && !channelSwapEnabled) {
+                    applyPresetDirect(IR_LAB_PRESETS.first(), announce = false)
+                }
+            }
+            ExperienceMode.PRO -> {
+                irProTuneExpanded = false
+            }
+        }
+        if (announce) {
+            val modeTitle = when (newMode) {
+                ExperienceMode.AESTHETIC -> context.getString(R.string.exp_aesthetic_title)
+                ExperienceMode.IR_LAB -> context.getString(R.string.exp_ir_title)
+                ExperienceMode.PRO -> context.getString(R.string.exp_pro_title)
+            }
+            showStatus(context.getString(R.string.status_exp_mode_changed, modeTitle))
+        }
+    }
+
     val deckBgAlpha by animateFloatAsState(
         targetValue = if (isAnySliderDragging) 0.14f else 0.78f,
         animationSpec = tween(150),
@@ -3519,6 +3911,7 @@ fun CameraScreen(
             initialUri = studioPhotoUri ?: lastCapturedUri,
             photoNonce = studioPhotoNonce,
             lastCapturedUri = lastCapturedUri,
+            experienceMode = experienceMode,
             savedPresets = savedPresets.toList(),
             onSaveCustomPreset = { preset ->
                 savedPresets.removeAll { it.name.equals(preset.name, ignoreCase = true) }
@@ -3530,7 +3923,9 @@ fun CameraScreen(
                 savePresetsToStorage()
             },
             onSwitchToCamera = { wantPro ->
-                isAutoMode = !wantPro
+                if (experienceMode != ExperienceMode.AESTHETIC) {
+                    isAutoMode = !wantPro
+                }
                 isStudioMode = false
             },
             onPhotoSaved = { savedUri ->
@@ -3540,7 +3935,8 @@ fun CameraScreen(
         return
     }
 
-    // Ana dikey yerleşim: İnce üst araç çubuğu → Tam genişlikli vizör + yarı saydam yüzen Pro panel → Kompakt deklanşör çubuğu
+    // Ana dikey yerleşim + ilk açılış deneyim seçici katmanı
+    Box(modifier = Modifier.fillMaxSize().background(IrPalette.VoidBlack)) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -3548,7 +3944,7 @@ fun CameraScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // 1) ÜST ARAÇ ÇUBUĞU: Kompakt mod anahtarı (Oto | Pro | Stüdyo) + hızlı kamera araçları
+        // 1) ÜST ARAÇ ÇUBUĞU: Deneyim moduna göre uyarlanmış sade üst şerit + Ayarlar (⚙)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3556,7 +3952,7 @@ fun CameraScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Sol: Zarif Oto / Pro / Stüdyo kapsül anahtarı
+            // Sol kapsül: Estetik modda [Kamera | Stüdyo], IR Lab'da [Oto | IR Lab | Stüdyo], Pro'da [Oto | Pro | Stüdyo]
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50))
@@ -3565,76 +3961,93 @@ fun CameraScreen(
                     .padding(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ModeSegmentItem(
-                    text = strModeAuto,
-                    selected = isAutoMode,
-                    activeColor = IrPalette.IrEmerald,
-                    enabled = true,
-                    onClick = {
-                        isPickerActive = false
-                        isColorPipetteActive = false
-                        isExposureBoxPicking = false
-                        isAutoMode = true
-                        updatePreviewSettings()
-                    }
-                )
-                ModeSegmentItem(
-                    text = strModePro,
-                    selected = !isAutoMode,
-                    activeColor = IrPalette.IrAmber,
-                    enabled = true,
-                    onClick = {
-                        isPickerActive = false
-                        isColorPipetteActive = false
-                        isExposureBoxPicking = false
-                        if (isAutoMode) {
-                            kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                            tintValue = liveAutoTint.coerceIn(-100f, 100f)
-                            isAutoMode = false
+                if (experienceMode == ExperienceMode.AESTHETIC) {
+                    ModeSegmentItem(
+                        text = strModeCameraShort,
+                        selected = true,
+                        activeColor = IrPalette.IrMagenta,
+                        enabled = true,
+                        onClick = {}
+                    )
+                    ModeSegmentItem(
+                        text = strModeStudio,
+                        selected = false,
+                        activeColor = IrPalette.IrCyan,
+                        enabled = true,
+                        onClick = { isStudioMode = true }
+                    )
+                } else {
+                    ModeSegmentItem(
+                        text = strModeAuto,
+                        selected = isAutoMode,
+                        activeColor = IrPalette.IrEmerald,
+                        enabled = true,
+                        onClick = {
+                            isPickerActive = false
+                            isColorPipetteActive = false
+                            isExposureBoxPicking = false
+                            isAutoMode = true
+                            updatePreviewSettings()
                         }
-                        updatePreviewSettings()
-                    }
-                )
-                ModeSegmentItem(
-                    text = strModeStudio,
-                    selected = false,
-                    activeColor = IrPalette.IrCyan,
-                    enabled = true,
-                    onClick = {
-                        isStudioMode = true
-                    }
-                )
+                    )
+                    ModeSegmentItem(
+                        text = if (experienceMode == ExperienceMode.IR_LAB) strModeIrShort else strModePro,
+                        selected = !isAutoMode,
+                        activeColor = if (experienceMode == ExperienceMode.IR_LAB) IrPalette.IrCoral else IrPalette.IrAmber,
+                        enabled = true,
+                        onClick = {
+                            isPickerActive = false
+                            isColorPipetteActive = false
+                            isExposureBoxPicking = false
+                            if (isAutoMode) {
+                                kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                                tintValue = liveAutoTint.coerceIn(-100f, 100f)
+                                isAutoMode = false
+                            }
+                            updatePreviewSettings()
+                        }
+                    )
+                    ModeSegmentItem(
+                        text = strModeStudio,
+                        selected = false,
+                        activeColor = IrPalette.IrCyan,
+                        enabled = true,
+                        onClick = { isStudioMode = true }
+                    )
+                }
             }
 
-            // Sağ: Çözünürlük · RAW · Flaş · Izgara · Terazi · Zamanlayıcı
+            // Sağ: Moda özel hızlı araçlar + her modda Ayarlar (⚙)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(0.dp)
             ) {
-                val activeRes = selectedResolution
-                val resLabel = if (activeRes != null) formatMegapixels(activeRes) else strResFallback
-                TopBadgeButton(
-                    text = resLabel,
-                    active = false,
-                    accentColor = IrPalette.IrCyan,
-                    enabled = availableResolutions.isNotEmpty(),
-                    onClick = { showResolutionDialog = true }
-                )
-
-                if (supportsRaw) {
+                if (experienceMode != ExperienceMode.AESTHETIC) {
+                    val activeRes = selectedResolution
+                    val resLabel = if (activeRes != null) formatMegapixels(activeRes) else strResFallback
                     TopBadgeButton(
-                        text = strRaw,
-                        active = rawEnabled,
-                        accentColor = IrPalette.IrAmber,
-                        enabled = cameraReady,
-                        onClick = {
-                            rawEnabled = !rawEnabled
-                            holder.rawCaptureEnabled = rawEnabled
-                            showStatus(if (rawEnabled) strRawOn else strRawOff)
-                            cameraHandler.post { closeCameraInternal(releaseReader = true) }
-                            surfaceGeneration += 1
-                        }
+                        text = resLabel,
+                        active = false,
+                        accentColor = IrPalette.IrCyan,
+                        enabled = availableResolutions.isNotEmpty(),
+                        onClick = { showResolutionDialog = true }
                     )
+
+                    if (supportsRaw) {
+                        TopBadgeButton(
+                            text = strRaw,
+                            active = rawEnabled,
+                            accentColor = IrPalette.IrAmber,
+                            enabled = cameraReady,
+                            onClick = {
+                                rawEnabled = !rawEnabled
+                                holder.rawCaptureEnabled = rawEnabled
+                                showStatus(if (rawEnabled) strRawOn else strRawOff)
+                                cameraHandler.post { closeCameraInternal(releaseReader = true) }
+                                surfaceGeneration += 1
+                            }
+                        )
+                    }
                 }
 
                 if (hasFlash) {
@@ -3663,25 +4076,15 @@ fun CameraScreen(
                     }
                 }
 
-                TopIconButton(
-                    active = showGrid,
-                    accentColor = IrPalette.IrAmber,
-                    contentDesc = strGridCd,
-                    onClick = { showGrid = !showGrid }
-                ) { tint ->
-                    GridIcon(tint = tint, modifier = Modifier.size(13.dp))
-                }
-
-                TopIconButton(
-                    active = showLevel,
-                    accentColor = IrPalette.IrEmerald,
-                    contentDesc = strLevelCd,
-                    onClick = {
-                        showLevel = !showLevel
-                        showStatus(if (showLevel) strLevelOn else strLevelOff)
+                if (experienceMode == ExperienceMode.AESTHETIC) {
+                    TopIconButton(
+                        active = showGrid,
+                        accentColor = IrPalette.IrMagenta,
+                        contentDesc = strGridCd,
+                        onClick = { showGrid = !showGrid }
+                    ) { tint ->
+                        GridIcon(tint = tint, modifier = Modifier.size(13.dp))
                     }
-                ) { tint ->
-                    LevelIcon(tint = tint, modifier = Modifier.size(14.dp))
                 }
 
                 TopIconButton(
@@ -3714,6 +4117,19 @@ fun CameraScreen(
                         TimerIcon(tint = tint, modifier = Modifier.size(13.dp))
                     }
                 }
+
+                TopIconButton(
+                    active = showSettingsDialog,
+                    accentColor = when (experienceMode) {
+                        ExperienceMode.AESTHETIC -> IrPalette.IrMagenta
+                        ExperienceMode.IR_LAB -> IrPalette.IrCoral
+                        ExperienceMode.PRO -> IrPalette.IrAmber
+                    },
+                    contentDesc = strSettingsCd,
+                    onClick = { showSettingsDialog = true }
+                ) { tint ->
+                    SettingsGearIcon(tint = tint, modifier = Modifier.size(14.dp))
+                }
             }
         }
 
@@ -3739,6 +4155,23 @@ fun CameraScreen(
                 contentAlignment = Alignment.Center
             ) {
                 var isDraggingExposureBox by remember { mutableStateOf(false) }
+                val keepFocusBoxPinned = experienceMode == ExperienceMode.PRO &&
+                    !isAutoMode &&
+                    activeTab == ControlTab.OLCUM &&
+                    !isDeckCollapsed
+                LaunchedEffect(focusBoxTriggerNonce, isDraggingExposureBox, keepFocusBoxPinned) {
+                    if (isDraggingExposureBox || keepFocusBoxPinned) {
+                        focusBoxVisible = true
+                    } else if (focusBoxVisible) {
+                        delay(500)
+                        focusBoxVisible = false
+                    }
+                }
+                val focusBoxAlpha by animateFloatAsState(
+                    targetValue = if (focusBoxVisible) 1f else 0f,
+                    animationSpec = tween(if (focusBoxVisible) 75 else 240),
+                    label = "focusBoxAlpha"
+                )
 
                 key(surfaceGeneration) {
                     AndroidView(
@@ -3818,6 +4251,8 @@ fun CameraScreen(
                                         exposureBoxNorm = Offset(nx, ny)
                                         meteringMode = ExposureMeteringMode.BOX_SPOT
                                         isExposureBoxPicking = false
+                                        focusBoxVisible = true
+                                        focusBoxTriggerNonce++
                                         updatePreviewSettings()
                                         measureAndApplyExposureMetering(applyEvAdjust = false)
                                     }
@@ -3849,6 +4284,8 @@ fun CameraScreen(
                                             if (isDraggingExposureBox) {
                                                 isDraggingExposureBox = false
                                                 isExposureBoxPicking = false
+                                                focusBoxVisible = true
+                                                focusBoxTriggerNonce++
                                                 updatePreviewSettings()
                                                 measureAndApplyExposureMetering(applyEvAdjust = false)
                                             }
@@ -3866,6 +4303,8 @@ fun CameraScreen(
                                         if (abs(zoom - 1f) > 0.015f) {
                                             meteringMode = ExposureMeteringMode.BOX_SPOT
                                             exposureBoxSizeNorm = (exposureBoxSizeNorm * zoom).coerceIn(0.14f, 0.62f)
+                                            focusBoxVisible = true
+                                            focusBoxTriggerNonce++
                                             updatePreviewSettings()
                                         }
                                     }
@@ -4004,7 +4443,8 @@ fun CameraScreen(
                         )
                     }
 
-                    if (meteringMode == ExposureMeteringMode.BOX_SPOT) {
+                    // Ekrana dokununca çıkan turuncu odak/ölçüm kutusu: 0,5 saniye sonra yumuşakça silinir
+                    if (meteringMode == ExposureMeteringMode.BOX_SPOT && focusBoxAlpha > 0.01f) {
                         val boxSide = minOf(size.width, size.height) * exposureBoxSizeNorm
                         val half = boxSide * 0.5f
                         val cx = (exposureBoxNorm.x * size.width).coerceIn(half, (size.width - half).coerceAtLeast(half))
@@ -4014,11 +4454,12 @@ fun CameraScreen(
                         val right = cx + half
                         val bottom = cy + half
                         val corner = boxSide * 0.24f
-                        val boxColor = if (isExposureBoxPicking) IrPalette.IrCoral else IrPalette.IrAmber
+                        val baseColor = if (isExposureBoxPicking) IrPalette.IrCoral else IrPalette.IrAmber
+                        val boxColor = baseColor.copy(alpha = focusBoxAlpha)
                         val strokeW = 2.2.dp.toPx()
 
                         drawRect(
-                            color = boxColor.copy(alpha = 0.07f),
+                            color = baseColor.copy(alpha = 0.07f * focusBoxAlpha),
                             topLeft = Offset(left, top),
                             size = androidx.compose.ui.geometry.Size(boxSide, boxSide)
                         )
@@ -4031,7 +4472,7 @@ fun CameraScreen(
                         drawLine(boxColor, Offset(right, bottom), Offset(right - corner, bottom), strokeW, cap = StrokeCap.Round)
                         drawLine(boxColor, Offset(right, bottom), Offset(right, bottom - corner), strokeW, cap = StrokeCap.Round)
                         drawCircle(
-                            color = boxColor.copy(alpha = 0.90f),
+                            color = baseColor.copy(alpha = 0.90f * focusBoxAlpha),
                             radius = 3.5.dp.toPx(),
                             center = Offset(cx, cy),
                             style = Stroke(width = 1.6.dp.toPx())
@@ -4055,7 +4496,7 @@ fun CameraScreen(
                     }
                 }
 
-                // Önizleme üst HUD satırı: Sol canlı telemetri + Sağ kompakt histogram (çakışma sıfır)
+                // Önizleme üst HUD satırı: Estetik modda tertemiz vizör; IR Lab ve Pro modda canlı telemetri + RGB histogram
                 Column(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
@@ -4064,6 +4505,7 @@ fun CameraScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    if (experienceMode != ExperienceMode.AESTHETIC) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -4084,6 +4526,7 @@ fun CameraScreen(
                                 enabled = cameraReady,
                                 onClick = {
                                     activeWbSubSlider = WbSubSlider.KELVIN
+                                    if (experienceMode == ExperienceMode.IR_LAB) irProTuneExpanded = true
                                     openProControl(ControlTab.BD)
                                 }
                             )
@@ -4099,6 +4542,7 @@ fun CameraScreen(
                                     enabled = cameraReady,
                                     onClick = {
                                         activeWbSubSlider = WbSubSlider.TINT
+                                        if (experienceMode == ExperienceMode.IR_LAB) irProTuneExpanded = true
                                         openProControl(ControlTab.BD)
                                     }
                                 )
@@ -4114,7 +4558,10 @@ fun CameraScreen(
                                     text = "$strEvShort $evFormatted",
                                     accentColor = if ((!isAutoMode && activeTab == ControlTab.POZ && !isDeckCollapsed) || isEvModified) IrPalette.IrAmber else IrPalette.TextPrimary,
                                     enabled = cameraReady,
-                                    onClick = { openProControl(ControlTab.POZ) }
+                                    onClick = {
+                                        if (experienceMode == ExperienceMode.IR_LAB) irProTuneExpanded = true
+                                        openProControl(ControlTab.POZ)
+                                    }
                                 )
                             }
                         }
@@ -4124,11 +4571,13 @@ fun CameraScreen(
                             LiveHistogramOverlay(
                                 data = liveHistogram,
                                 modifier = Modifier.clickable(enabled = cameraReady) {
+                                    if (experienceMode == ExperienceMode.IR_LAB) irProTuneExpanded = true
                                     openProControl(ControlTab.RENK)
                                     colorPanelMode = ColorPanelMode.BANTLAR
                                 }
                             )
                         }
+                    }
                     }
 
                     // Aktif seçici (Noktasal BD / Renk Pipeti) yönlendirme şeridi + tek dokunuşla İptal
@@ -4365,15 +4814,16 @@ fun CameraScreen(
                             }
                         }
 
-                        // Sağ slot: Kompakt aktif araç rozeti (R↔B / ZEBRA / KUTU)
+                        // Sağ slot: Yalnızca aktif özel teknik rozetler (R↔B / AE-L / ZEBRA — KUTU rozeti kaldırıldı!)
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterEnd
                         ) {
                             val badgeInfo: Pair<String, Color>? = when {
+                                experienceMode == ExperienceMode.AESTHETIC -> null
                                 !isAutoMode && channelSwapEnabled -> strBadgeSwap to IrPalette.IrCyan
+                                aeLockEnabled -> strBadgeAeLock to IrPalette.IrAmber
                                 showZebra -> strBadgeZebra to IrPalette.IrCoral
-                                meteringMode == ExposureMeteringMode.BOX_SPOT -> strBadgeBox to IrPalette.IrAmber
                                 else -> null
                             }
                             if (badgeInfo != null) {
@@ -4398,9 +4848,289 @@ fun CameraScreen(
                     }
                 }
 
-                // PRO Mod Yarı Saydam Yüzen Kontrol Paneli (Pipet / Noktasal BD açıkken otomatik gizlenir!)
+                // A) ESTETİK & FİLTRE MODU PANELİ: Sade canlı filtre şeridi + Filtre Yoğunluğu / Parlaklık
                 AnimatedVisibility(
-                    visible = !isAutoMode && !isPickerActive && !isColorPipetteActive,
+                    visible = experienceMode == ExperienceMode.AESTHETIC && !isPickerActive && !isColorPipetteActive,
+                    enter = fadeIn(tween(170)) + slideInVertically(tween(190)) { it / 3 },
+                    exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 3 }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(IrPalette.HudGlass.copy(alpha = deckBgAlpha))
+                            .border(
+                                0.8.dp,
+                                IrPalette.BorderSubtle.copy(alpha = if (isAnySliderDragging) 0.08f else 0.24f),
+                                RoundedCornerShape(16.dp)
+                            )
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val hasActiveFilter = selectedAestheticPreset.name != "Natural"
+                        AnimatedVisibility(visible = !isDeckCollapsed && (hasActiveFilter || aeRange.upper > aeRange.lower)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                if (hasActiveFilter && aeRange.upper > aeRange.lower) {
+                                    SegmentedChoiceRow(
+                                        options = listOf(
+                                            AestheticSubSlider.STRENGTH to "${stringResource(R.string.slider_filter_strength)} · ${(aestheticFilterStrength * 100f).roundToInt()}%",
+                                            AestheticSubSlider.BRIGHTNESS to "${stringResource(R.string.slider_soft_light)} · ${formatSignedDecimal(evDisplayVal, appLocale)}"
+                                        ),
+                                        selected = aestheticSubSlider,
+                                        enabled = cameraReady,
+                                        modifier = Modifier.alpha(ghostChromeAlpha),
+                                        onSelect = { aestheticSubSlider = it }
+                                    )
+                                }
+                                if (hasActiveFilter && (aestheticSubSlider == AestheticSubSlider.STRENGTH || aeRange.upper <= aeRange.lower)) {
+                                    ProGradientSliderRow(
+                                        label = "${selectedAestheticPreset.name} · ${stringResource(R.string.slider_filter_strength)}",
+                                        valueBadge = "${(aestheticFilterStrength * 100f).roundToInt()}%",
+                                        isModified = aestheticFilterStrength < 0.98f,
+                                        value = aestheticFilterStrength,
+                                        defaultValue = 1.0f,
+                                        snapTolerance = 0.04f,
+                                        valueRange = 0f..1f,
+                                        enabled = cameraReady,
+                                        gradient = Brush.horizontalGradient(
+                                            listOf(Color(0xFF475569), Color(selectedAestheticPreset.accentHex))
+                                        ),
+                                        onDraggingChange = { isAnySliderDragging = it },
+                                        onStepMinus = { applyAestheticPreset(selectedAestheticPreset, (aestheticFilterStrength - 0.1f).coerceIn(0f, 1f)) },
+                                        onStepPlus = { applyAestheticPreset(selectedAestheticPreset, (aestheticFilterStrength + 0.1f).coerceIn(0f, 1f)) },
+                                        onReset = { applyAestheticPreset(selectedAestheticPreset, 1.0f) },
+                                        onValueChange = { applyAestheticPreset(selectedAestheticPreset, it) }
+                                    )
+                                } else if (aeRange.upper > aeRange.lower) {
+                                    ProGradientSliderRow(
+                                        label = stringResource(R.string.slider_soft_light),
+                                        valueBadge = formatSignedDecimal(evDisplayVal, appLocale),
+                                        isModified = exposureEvIndex != 0,
+                                        value = exposureEvIndex.toFloat(),
+                                        defaultValue = 0f,
+                                        snapTolerance = 0.45f,
+                                        valueRange = aeRange.lower.toFloat()..aeRange.upper.toFloat(),
+                                        enabled = cameraReady,
+                                        gradient = Brush.horizontalGradient(
+                                            listOf(Color(0xFF1E293B), Color(0xFFCBD5E1), Color(0xFFFEF08A))
+                                        ),
+                                        onDraggingChange = { isAnySliderDragging = it },
+                                        onStepMinus = {
+                                            exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
+                                            updatePreviewSettings()
+                                        },
+                                        onStepPlus = {
+                                            exposureEvIndex = (exposureEvIndex + 1).coerceIn(aeRange.lower, aeRange.upper)
+                                            updatePreviewSettings()
+                                        },
+                                        onReset = {
+                                            exposureEvIndex = 0
+                                            updatePreviewSettings()
+                                        },
+                                        onValueChange = {
+                                            exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
+                                            updatePreviewSettings()
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(ghostChromeAlpha),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            LazyRow(
+                                modifier = Modifier.weight(1f),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                items(AESTHETIC_PRESETS, key = { "aes_${it.name}" }) { preset ->
+                                    val isSel = selectedAestheticPreset.name == preset.name
+                                    val accent = Color(preset.accentHex)
+                                    Row(
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(if (isSel) accent.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.06f))
+                                            .border(
+                                                0.9.dp,
+                                                if (isSel) accent else IrPalette.BorderSubtle,
+                                                RoundedCornerShape(50)
+                                            )
+                                            .clickable(enabled = cameraReady) {
+                                                val nextStr = if (isSel) aestheticFilterStrength else 1.0f
+                                                aestheticSubSlider = AestheticSubSlider.STRENGTH
+                                                applyAestheticPreset(preset, nextStr)
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                            .padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(9.dp)
+                                                .clip(CircleShape)
+                                                .background(accent)
+                                                .border(0.8.dp, Color.White.copy(alpha = 0.7f), CircleShape)
+                                        )
+                                        Text(
+                                            text = preset.name,
+                                            color = if (isSel) accent else IrPalette.TextPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1
+                                        )
+                                    }
+                                }
+                            }
+
+                            val aesChevRot by animateFloatAsState(
+                                targetValue = if (isDeckCollapsed) 180f else 0f,
+                                animationSpec = tween(200),
+                                label = "aesChevRot"
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(if (isDeckCollapsed) IrPalette.IrMagenta.copy(alpha = 0.20f) else Color.White.copy(alpha = 0.06f))
+                                    .border(0.8.dp, if (isDeckCollapsed) IrPalette.IrMagenta else IrPalette.BorderSubtle, RoundedCornerShape(9.dp))
+                                    .clickable { isDeckCollapsed = !isDeckCollapsed },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                ChevronIcon(
+                                    tint = if (isDeckCollapsed) IrPalette.IrMagenta else IrPalette.TextPrimary,
+                                    modifier = Modifier.size(13.dp).rotate(aesChevRot)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // B) KIZILÖTESİ (IR LAB) ÖZEL HIZLI PANELİ: Tek tuş R↔B Takas · Yaprak BD · Pipet · 590–850nm Dalga Boyu Şeridi
+                AnimatedVisibility(
+                    visible = experienceMode == ExperienceMode.IR_LAB && !isAutoMode && !irProTuneExpanded && !isPickerActive && !isColorPipetteActive,
+                    enter = fadeIn(tween(170)) + slideInVertically(tween(190)) { it / 3 },
+                    exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 3 }
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(IrPalette.HudGlass.copy(alpha = deckBgAlpha))
+                            .border(0.8.dp, IrPalette.IrCoral.copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ActionPillButton(
+                                label = strBadgeSwap,
+                                selected = channelSwapEnabled,
+                                accentColor = IrPalette.IrCyan,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(0.9f),
+                                leadingIcon = { tint -> SwapChannelIcon(tint = tint, modifier = Modifier.size(12.dp)) },
+                                onClick = {
+                                    channelSwapEnabled = !channelSwapEnabled
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showStatus(
+                                        context.getString(
+                                            if (channelSwapEnabled) R.string.status_channel_swap_on
+                                            else R.string.status_channel_swap_off
+                                        )
+                                    )
+                                }
+                            )
+                            ActionPillButton(
+                                label = stringResource(R.string.action_ir_leaf_wb),
+                                selected = isPickerActive,
+                                accentColor = IrPalette.IrAmber,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(1.05f),
+                                leadingIcon = { tint -> TargetCrosshairIcon(tint = tint, modifier = Modifier.size(12.dp)) },
+                                onClick = {
+                                    isPickerActive = true
+                                    isColorPipetteActive = false
+                                    showStatus(strTapWb)
+                                }
+                            )
+                            ActionPillButton(
+                                label = stringResource(R.string.action_pipette_short),
+                                selected = targetedColorConfig.isActive,
+                                accentColor = IrPalette.IrTeal,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(0.85f),
+                                leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(12.dp)) },
+                                onClick = {
+                                    irProTuneExpanded = true
+                                    activeTab = ControlTab.RENK
+                                    colorPanelMode = ColorPanelMode.PIPET
+                                    isColorPipetteActive = true
+                                    isPickerActive = false
+                                    showStatus(strTapColor)
+                                }
+                            )
+                            ActionPillButton(
+                                label = stringResource(R.string.action_ir_pro_tune),
+                                selected = false,
+                                accentColor = IrPalette.IrCoral,
+                                enabled = cameraReady,
+                                modifier = Modifier.weight(0.95f),
+                                onClick = { irProTuneExpanded = true }
+                            )
+                        }
+
+                        LazyRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            items(IR_LAB_PRESETS, key = { "ir_${it.name}" }) { preset ->
+                                val isSel = abs(kelvinValue - preset.kelvin) < 10f &&
+                                    channelSwapEnabled == preset.channelSwap &&
+                                    colorBandsConfig == preset.colorBands
+                                val accent = Color(preset.accentHex)
+                                Row(
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isSel) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f))
+                                        .border(0.9.dp, if (isSel) accent else IrPalette.BorderSubtle, RoundedCornerShape(10.dp))
+                                        .clickable(enabled = cameraReady) {
+                                            applyPresetDirect(preset)
+                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        }
+                                        .padding(horizontal = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(accent))
+                                    Text(
+                                        text = preset.name,
+                                        color = if (isSel) accent else IrPalette.TextPrimary,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // C) PRO MOD Yarı Saydam Yüzen Kontrol Paneli (Pro Modda veya IR Lab İnce Ayar açıkken — Pipet/BD'de otomatik gizlenir!)
+                AnimatedVisibility(
+                    visible = (experienceMode == ExperienceMode.PRO || (experienceMode == ExperienceMode.IR_LAB && irProTuneExpanded)) &&
+                        !isAutoMode && !isPickerActive && !isColorPipetteActive,
                     enter = fadeIn(tween(170)) + slideInVertically(tween(190)) { it / 3 },
                     exit = fadeOut(tween(140)) + slideOutVertically(tween(160)) { it / 3 }
                 ) {
@@ -4579,12 +5309,12 @@ fun CameraScreen(
                                         )
                                     }
 
-                                    // Dengeli 2'li araç satırı: Vurgu koruma + Zebra uyarısı
+                                    // Dengeli 3'lü pozlama araç satırı: Vurgu koruma + AE Kilit + Zebra uyarısı
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .alpha(ghostChromeAlpha),
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         ActionPillButton(
@@ -4592,8 +5322,8 @@ fun CameraScreen(
                                             selected = highlightProtectionEnabled,
                                             accentColor = IrPalette.IrTeal,
                                             enabled = cameraReady,
-                                            modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> ShieldIcon(tint = tint, modifier = Modifier.size(13.dp)) },
+                                            modifier = Modifier.weight(1.1f),
+                                            leadingIcon = { tint -> ShieldIcon(tint = tint, modifier = Modifier.size(12.dp)) },
                                             onClick = {
                                                 highlightProtectionEnabled = !highlightProtectionEnabled
                                                 measureAndApplyExposureMetering(applyEvAdjust = highlightProtectionEnabled)
@@ -4601,12 +5331,31 @@ fun CameraScreen(
                                             }
                                         )
                                         ActionPillButton(
+                                            label = stringResource(R.string.action_ae_lock),
+                                            selected = aeLockEnabled,
+                                            accentColor = IrPalette.IrAmber,
+                                            enabled = cameraReady,
+                                            modifier = Modifier.weight(0.95f),
+                                            leadingIcon = { tint -> LockIcon(locked = aeLockEnabled, tint = tint, modifier = Modifier.size(12.dp)) },
+                                            onClick = {
+                                                aeLockEnabled = !aeLockEnabled
+                                                updatePreviewSettings()
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                showStatus(
+                                                    context.getString(
+                                                        if (aeLockEnabled) R.string.status_ae_lock_on
+                                                        else R.string.status_ae_lock_off
+                                                    )
+                                                )
+                                            }
+                                        )
+                                        ActionPillButton(
                                             label = stringResource(R.string.action_zebra),
                                             selected = showZebra,
                                             accentColor = IrPalette.IrCoral,
                                             enabled = cameraReady,
-                                            modifier = Modifier.weight(1f),
-                                            leadingIcon = { tint -> ZebraIcon(tint = tint, modifier = Modifier.size(13.dp)) },
+                                            modifier = Modifier.weight(0.85f),
+                                            leadingIcon = { tint -> ZebraIcon(tint = tint, modifier = Modifier.size(12.dp)) },
                                             onClick = {
                                                 showZebra = !showZebra
                                                 showStatus(if (showZebra) strZebraOn else strZebraOff)
@@ -5403,6 +6152,28 @@ fun CameraScreen(
                             }
                         }
 
+                        // IR Lab İnce Ayar modundan tek tıkla sade IR Lab şeridine dönme düğmesi
+                        if (experienceMode == ExperienceMode.IR_LAB && irProTuneExpanded) {
+                            Box(
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .clip(RoundedCornerShape(9.dp))
+                                    .background(IrPalette.IrCoral.copy(alpha = 0.18f))
+                                    .border(0.8.dp, IrPalette.IrCoral.copy(alpha = 0.7f), RoundedCornerShape(9.dp))
+                                    .clickable { irProTuneExpanded = false }
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "IR",
+                                    color = IrPalette.IrCoral,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+
                         // Kompakt panel aç/kapa vektör düğmesi
                         val chevronRotation by animateFloatAsState(
                             targetValue = if (isDeckCollapsed) 180f else 0f,
@@ -5648,6 +6419,167 @@ fun CameraScreen(
         }
     }
 
+    // İLK AÇILIŞ 3 DENEYİM MODU SEÇİCİSİ (Estetik & Filtre · Kızılötesi IR Lab · Pro Kamera)
+    AnimatedVisibility(
+        visible = showExperienceWelcome,
+        enter = fadeIn(tween(220)),
+        exit = fadeOut(tween(220))
+    ) {
+        var pickedWelcomeMode by remember { mutableStateOf(experienceMode) }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(IrPalette.VoidBlack.copy(alpha = 0.96f))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "SpectraS",
+                    color = IrPalette.TextPrimary,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.4.sp
+                )
+                Text(
+                    text = stringResource(R.string.welcome_title),
+                    color = IrPalette.IrAmber,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = stringResource(R.string.welcome_subtitle),
+                    color = IrPalette.TextSecondary,
+                    fontSize = 12.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+
+                val modeCards = listOf(
+                    Triple(
+                        ExperienceMode.AESTHETIC,
+                        IrPalette.IrMagenta,
+                        Triple(R.string.exp_aesthetic_title, R.string.exp_aesthetic_desc, R.string.exp_aesthetic_tags)
+                    ),
+                    Triple(
+                        ExperienceMode.IR_LAB,
+                        IrPalette.IrCoral,
+                        Triple(R.string.exp_ir_title, R.string.exp_ir_desc, R.string.exp_ir_tags)
+                    ),
+                    Triple(
+                        ExperienceMode.PRO,
+                        IrPalette.IrAmber,
+                        Triple(R.string.exp_pro_title, R.string.exp_pro_desc, R.string.exp_pro_tags)
+                    )
+                )
+
+                modeCards.forEach { (mode, accent, resTriple) ->
+                    val (titleRes, descRes, tagsRes) = resTriple
+                    val selected = pickedWelcomeMode == mode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (selected) accent.copy(alpha = 0.16f) else IrPalette.HudCard)
+                            .border(
+                                width = if (selected) 1.5.dp else 1.dp,
+                                color = if (selected) accent else IrPalette.BorderSubtle,
+                                shape = RoundedCornerShape(16.dp)
+                            )
+                            .clickable {
+                                pickedWelcomeMode = mode
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(accent.copy(alpha = 0.18f))
+                                .border(1.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(12.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            when (mode) {
+                                ExperienceMode.AESTHETIC -> SparkleAutoIcon(tint = accent, modifier = Modifier.size(20.dp))
+                                ExperienceMode.IR_LAB -> SwapChannelIcon(tint = accent, modifier = Modifier.size(20.dp))
+                                ExperienceMode.PRO -> ColorWheelIcon(tint = accent, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(3.dp)
+                        ) {
+                            Text(
+                                text = stringResource(titleRes),
+                                color = if (selected) accent else IrPalette.TextPrimary,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = stringResource(descRes),
+                                color = IrPalette.TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 16.sp
+                            )
+                            Text(
+                                text = stringResource(tagsRes),
+                                color = accent.copy(alpha = 0.90f),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .background(if (selected) accent else Color.Transparent)
+                                .border(1.5.dp, if (selected) accent else IrPalette.BorderBright, CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (selected) {
+                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color.Black))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+                val ctaAccent = when (pickedWelcomeMode) {
+                    ExperienceMode.AESTHETIC -> IrPalette.IrMagenta
+                    ExperienceMode.IR_LAB -> IrPalette.IrCoral
+                    ExperienceMode.PRO -> IrPalette.IrAmber
+                }
+                Button(
+                    onClick = {
+                        showExperienceWelcome = false
+                        switchExperienceMode(pickedWelcomeMode, announce = true)
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = ctaAccent),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.welcome_start),
+                        color = if (pickedWelcomeMode == ExperienceMode.PRO) Color.Black else Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+    }
+    }
+
     // Tümünü Sıfırla Onay Diyalogu
     if (showResetAllDialog) {
         AlertDialog(
@@ -5678,6 +6610,9 @@ fun CameraScreen(
                         saturationValue = DEFAULT_SATURATION
                         contrastValue = DEFAULT_CONTRAST
                         channelSwapEnabled = false
+                        aeLockEnabled = false
+                        selectedAestheticPreset = AESTHETIC_PRESETS.first()
+                        aestheticFilterStrength = 1.0f
                         targetedColorConfig = TargetedColorConfig()
                         colorBandsConfig = ColorBandsConfig()
                         isPickerActive = false
@@ -5768,7 +6703,8 @@ fun CameraScreen(
                             modifier = Modifier.padding(top = 2.dp, bottom = 2.dp)
                         )
                     }
-                    items(BUILT_IN_SIGNATURE_PRESETS, key = { "bi_${it.name}" }) { preset ->
+                    val modeOrderedBuiltIns = getAllBuiltInPresetsForMode(experienceMode)
+                    items(modeOrderedBuiltIns, key = { "bi_${it.name}" }) { preset ->
                         val isMatching = !isAutoMode &&
                             abs(kelvinValue - preset.kelvin) < 5f &&
                             abs(tintValue - preset.tint) < 1f &&
@@ -6024,87 +6960,185 @@ fun CameraScreen(
         )
     }
 
-    // 3 Adımlı İlk Açılış Rehberi
-    if (showOnboardingGuide) {
-        val stepTitles = listOf(
-            stringResource(R.string.guide_step_1_title),
-            stringResource(R.string.guide_step_2_title),
-            stringResource(R.string.guide_step_3_title)
-        )
-        val stepBodies = listOf(
-            stringResource(R.string.guide_step_1_body),
-            stringResource(R.string.guide_step_2_body),
-            stringResource(R.string.guide_step_3_body)
-        )
-        val safeStep = onboardingStep.coerceIn(0, 2)
+    // Ayarlar & Deneyim Modu Değiştirme Diyalogu (üst çubuktaki ⚙ simgesinden her zaman erişilir)
+    if (showSettingsDialog) {
         AlertDialog(
-            onDismissRequest = {
-                sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
-                showOnboardingGuide = false
-            },
+            onDismissRequest = { showSettingsDialog = false },
             containerColor = IrPalette.SurfaceElevated,
             titleContentColor = IrPalette.TextPrimary,
             textContentColor = IrPalette.TextSecondary,
             title = {
                 Text(
-                    text = stepTitles[safeStep],
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = IrPalette.IrAmber
+                    text = stringResource(R.string.settings_title),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
                 )
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text(
-                        text = stepBodies[safeStep],
-                        fontSize = 14.sp,
-                        color = IrPalette.TextPrimary
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 430.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    item(key = "sec_exp") {
+                        Text(
+                            text = stringResource(R.string.settings_exp_section),
+                            color = IrPalette.IrAmber,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    val expItems = listOf(
+                        Triple(ExperienceMode.AESTHETIC, IrPalette.IrMagenta, R.string.exp_aesthetic_title to R.string.exp_aesthetic_tags),
+                        Triple(ExperienceMode.IR_LAB, IrPalette.IrCoral, R.string.exp_ir_title to R.string.exp_ir_tags),
+                        Triple(ExperienceMode.PRO, IrPalette.IrAmber, R.string.exp_pro_title to R.string.exp_pro_tags)
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        for (i in 0..2) {
-                            Box(
-                                modifier = Modifier
-                                    .height(6.dp)
-                                    .width(if (i == safeStep) 22.dp else 8.dp)
-                                    .clip(CircleShape)
-                                    .background(if (i == safeStep) IrPalette.IrAmber else Color.White.copy(alpha = 0.22f))
+                    items(expItems, key = { it.first.prefKey }) { (mode, accent, resPair) ->
+                        val isSel = experienceMode == mode
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSel) accent.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .border(
+                                    1.dp,
+                                    if (isSel) accent else Color.White.copy(alpha = 0.10f),
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    showSettingsDialog = false
+                                    switchExperienceMode(mode, announce = true)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(resPair.first),
+                                    color = if (isSel) accent else IrPalette.TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = stringResource(resPair.second),
+                                    color = IrPalette.TextSecondary,
+                                    fontSize = 10.5.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                            if (isSel) {
+                                Box(modifier = Modifier.size(9.dp).clip(CircleShape).background(accent))
+                            }
+                        }
+                    }
+
+                    item(key = "sec_tools") {
+                        Text(
+                            text = stringResource(R.string.settings_tools_section),
+                            color = IrPalette.TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    item(key = "tool_grid") {
+                        SettingsToggleRow(
+                            label = stringResource(R.string.settings_grid),
+                            checked = showGrid,
+                            accentColor = IrPalette.IrAmber,
+                            onToggle = { showGrid = !showGrid }
+                        )
+                    }
+                    item(key = "tool_level") {
+                        SettingsToggleRow(
+                            label = stringResource(R.string.settings_level),
+                            checked = showLevel,
+                            accentColor = IrPalette.IrEmerald,
+                            onToggle = {
+                                showLevel = !showLevel
+                                showStatus(if (showLevel) strLevelOn else strLevelOff)
+                            }
+                        )
+                    }
+                    if (supportsRaw) {
+                        item(key = "tool_raw") {
+                            SettingsToggleRow(
+                                label = stringResource(R.string.settings_raw),
+                                checked = rawEnabled,
+                                accentColor = IrPalette.IrAmber,
+                                onToggle = {
+                                    rawEnabled = !rawEnabled
+                                    holder.rawCaptureEnabled = rawEnabled
+                                    showStatus(if (rawEnabled) strRawOn else strRawOff)
+                                    cameraHandler.post { closeCameraInternal(releaseReader = true) }
+                                    surfaceGeneration += 1
+                                }
                             )
+                        }
+                    }
+                    item(key = "tool_res") {
+                        val activeRes = selectedResolution
+                        val resTxt = if (activeRes != null) "${formatMegapixels(activeRes)} (${formatAspectRatioTag(activeRes)})" else strResFallback
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable(enabled = availableResolutions.isNotEmpty()) {
+                                    showSettingsDialog = false
+                                    showResolutionDialog = true
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(stringResource(R.string.settings_resolution), color = IrPalette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                            Text(resTxt, color = IrPalette.IrCyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        if (safeStep < 2) {
-                            onboardingStep = safeStep + 1
-                        } else {
-                            sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
-                            showOnboardingGuide = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = IrPalette.IrAmber)
-                ) {
-                    Text(
-                        text = if (safeStep < 2) stringResource(R.string.guide_next) else stringResource(R.string.guide_done),
-                        color = Color.Black,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        sharedPrefs.edit { putBoolean("onboarding_v1_done", true) }
-                        showOnboardingGuide = false
-                    }
-                ) {
-                    Text(stringResource(R.string.guide_skip), color = IrPalette.TextSecondary)
+                TextButton(onClick = { showSettingsDialog = false }) {
+                    Text(stringResource(R.string.dialog_close), color = IrPalette.IrAmber, fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    label: String,
+    checked: Boolean,
+    accentColor: Color,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.05f))
+            .clickable(onClick = onToggle)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, color = IrPalette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Switch(
+            checked = checked,
+            onCheckedChange = { onToggle() },
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.Black,
+                checkedTrackColor = accentColor,
+                uncheckedThumbColor = IrPalette.TextSecondary,
+                uncheckedTrackColor = Color.White.copy(alpha = 0.14f)
+            )
         )
     }
 }
@@ -7622,6 +8656,60 @@ internal fun SaveIcon(tint: Color, modifier: Modifier = Modifier) {
         drawLine(tint, Offset(size.width * 0.28f, size.height * 0.46f), Offset(cx, size.height * 0.68f), stroke, cap = StrokeCap.Round)
         drawLine(tint, Offset(size.width * 0.72f, size.height * 0.46f), Offset(cx, size.height * 0.68f), stroke, cap = StrokeCap.Round)
         drawLine(tint, Offset(size.width * 0.16f, size.height * 0.86f), Offset(size.width * 0.84f, size.height * 0.86f), stroke, cap = StrokeCap.Round)
+    }
+}
+
+@Composable
+internal fun SettingsGearIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.45.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val innerR = size.minDimension * 0.19f
+        val outerR = size.minDimension * 0.36f
+        val toothOuter = size.minDimension * 0.47f
+        drawCircle(tint, radius = innerR, center = Offset(cx, cy), style = Stroke(width = stroke))
+        drawCircle(tint, radius = outerR, center = Offset(cx, cy), style = Stroke(width = stroke))
+        for (i in 0 until 8) {
+            val angle = Math.toRadians(i * 45.0)
+            val x0 = cx + (cos(angle) * outerR).toFloat()
+            val y0 = cy + (sin(angle) * outerR).toFloat()
+            val x1 = cx + (cos(angle) * toothOuter).toFloat()
+            val y1 = cy + (sin(angle) * toothOuter).toFloat()
+            drawLine(tint, Offset(x0, y0), Offset(x1, y1), strokeWidth = stroke * 1.15f, cap = StrokeCap.Round)
+        }
+    }
+}
+
+@Composable
+internal fun LockIcon(locked: Boolean, tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = 1.4.dp.toPx()
+        val bodyTop = size.height * 0.46f
+        val bodyH = size.height * 0.46f
+        val bodyW = size.width * 0.68f
+        val bodyLeft = (size.width - bodyW) * 0.5f
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(bodyLeft, bodyTop),
+            size = androidx.compose.ui.geometry.Size(bodyW, bodyH),
+            cornerRadius = CornerRadius(2.5.dp.toPx(), 2.5.dp.toPx()),
+            style = Stroke(width = stroke)
+        )
+        val archW = size.width * 0.40f
+        val archLeft = (size.width - archW) * 0.5f
+        drawArc(
+            color = tint,
+            startAngle = 180f,
+            sweepAngle = if (locked) 180f else 135f,
+            useCenter = false,
+            topLeft = Offset(archLeft, size.height * 0.14f),
+            size = androidx.compose.ui.geometry.Size(archW, size.height * 0.56f),
+            style = Stroke(width = stroke, cap = StrokeCap.Round)
+        )
+        if (locked) {
+            drawCircle(tint, radius = size.minDimension * 0.08f, center = Offset(size.width * 0.5f, bodyTop + bodyH * 0.5f))
+        }
     }
 }
 

@@ -624,6 +624,7 @@ internal fun PhotoEditorScreen(
     initialUri: Uri?,
     photoNonce: Int,
     lastCapturedUri: Uri?,
+    experienceMode: ExperienceMode = ExperienceMode.PRO,
     savedPresets: List<CameraPreset>,
     onSaveCustomPreset: (CameraPreset) -> Unit,
     onDeleteCustomPreset: (CameraPreset) -> Unit,
@@ -908,20 +909,30 @@ internal fun PhotoEditorScreen(
                     .padding(2.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ModeSegmentItem(
-                    text = strModeAuto,
-                    selected = false,
-                    activeColor = IrPalette.IrEmerald,
-                    enabled = true,
-                    onClick = { onSwitchToCamera(false) }
-                )
-                ModeSegmentItem(
-                    text = strModePro,
-                    selected = false,
-                    activeColor = IrPalette.IrAmber,
-                    enabled = true,
-                    onClick = { onSwitchToCamera(true) }
-                )
+                if (experienceMode == ExperienceMode.AESTHETIC) {
+                    ModeSegmentItem(
+                        text = stringResource(R.string.mode_camera_short),
+                        selected = false,
+                        activeColor = IrPalette.IrMagenta,
+                        enabled = true,
+                        onClick = { onSwitchToCamera(false) }
+                    )
+                } else {
+                    ModeSegmentItem(
+                        text = strModeAuto,
+                        selected = false,
+                        activeColor = IrPalette.IrEmerald,
+                        enabled = true,
+                        onClick = { onSwitchToCamera(false) }
+                    )
+                    ModeSegmentItem(
+                        text = if (experienceMode == ExperienceMode.IR_LAB) stringResource(R.string.mode_ir_short) else strModePro,
+                        selected = false,
+                        activeColor = if (experienceMode == ExperienceMode.IR_LAB) IrPalette.IrCoral else IrPalette.IrAmber,
+                        enabled = true,
+                        onClick = { onSwitchToCamera(true) }
+                    )
+                }
                 ModeSegmentItem(
                     text = strModeStudio,
                     selected = true,
@@ -2063,8 +2074,10 @@ internal fun PhotoEditorScreen(
                                             }
 
                                             EditorTab.LOOKS -> {
-                                                // Tek dokunuşluk yatay Kızılötesi & Sinema görünümleri şeridi + Özel Kaydet
-                                                val allLooks = remember(savedPresets) { BUILT_IN_SIGNATURE_PRESETS + savedPresets }
+                                                // Aktif deneyim modunun görünümleri en başta olacak şekilde tüm görünümler + Özel Kaydet
+                                                val allLooks = remember(savedPresets, experienceMode) {
+                                                    getAllBuiltInPresetsForMode(experienceMode) + savedPresets
+                                                }
                                                 LazyRow(
                                                     modifier = Modifier.fillMaxWidth(),
                                                     horizontalArrangement = Arrangement.spacedBy(6.dp),

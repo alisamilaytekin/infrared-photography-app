@@ -54,10 +54,17 @@
     <string name="metering_pinch_hint">Önizlemede dokunarak taşıyın, iki parmakla boyutlandırın</string>
     <string name="metering_full_hint">Işık tüm sahneden ölçülür · Noktasal ölçüm için önizlemeye dokunun</string>
 
-    <!-- Renk genişliği -->
+    <!-- Renk genişliği ve renk mikseri -->
     <string name="range_narrow">Dar</string>
     <string name="range_balanced">Dengeli</string>
     <string name="range_wide">Geniş</string>
+    <string name="color_mode_general">Genel</string>
+    <string name="color_mode_bands">Bantlar</string>
+    <string name="color_mode_pipette">Pipet</string>
+    <string name="action_reset_band">Bandı sıfırla</string>
+    <string name="action_reset_all_bands">Tümünü sıfırla</string>
+    <string name="action_pick_again">Yeniden seç</string>
+    <string name="pipette_empty_hint">Önizlemede düzenlemek istediğiniz renge dokunmak için pipeti açın</string>
 
     <!-- Alt çubuk -->
     <string name="action_presets">Ön ayar</string>

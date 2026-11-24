@@ -210,11 +210,67 @@ private enum class ControlTab { BD, POZ, RENK, OLCUM }
 // Beyaz dengesi alt tekil kaydırıcı seçimi (önizleme yüksekliğini korur)
 private enum class WbSubSlider { KELVIN, TINT }
 
+// Renk çipi üst modları: Genel (Doygunluk/Kontrast), Renk Bantları (Histogram Mikseri), Pipet
+private enum class ColorPanelMode { GENEL, BANTLAR, PIPET }
+
 // Renk çipi alt tekil kaydırıcı seçimi
 private enum class ColorSubSlider { DOYGUNLUK, KONTRAST }
 
-// Noktasal renk pipeti alt tekil kaydırıcı seçimi
+// Noktasal renk pipeti ve renk bantları alt tekil kaydırıcı seçimi
 private enum class PointColorSubSlider { TON, DOYGUNLUK, PARLAKLIK }
+
+// Lightroom / Darkroom tarzı 8 profesyonel renk bandı
+private enum class ColorBand(
+    val index: Int,
+    val label: String,
+    val centerHue: Float,
+    val swatchColor: Color
+) {
+    RED(0, "Kırmızı", 0f, Color(0xFFEF4444)),
+    ORANGE(1, "Turuncu", 30f, Color(0xFFF97316)),
+    YELLOW(2, "Sarı", 60f, Color(0xFFEAB308)),
+    GREEN(3, "Yeşil", 120f, Color(0xFF22C55E)),
+    CYAN(4, "Camgöbeği", 180f, Color(0xFF06B6D4)),
+    BLUE(5, "Mavi", 225f, Color(0xFF3B82F6)),
+    PURPLE(6, "Mor", 275f, Color(0xFF8B5CF6)),
+    MAGENTA(7, "Macenta", 320f, Color(0xFFEC4899))
+}
+
+private data class BandHslAdjustment(
+    val deltaHue: Float = 0f,
+    val deltaSat: Float = 0f,
+    val deltaLum: Float = 0f
+) {
+    val isModified: Boolean
+        get() = abs(deltaHue) > 0.5f || abs(deltaSat) > 0.01f || abs(deltaLum) > 0.01f
+}
+
+private data class ColorBandsConfig(
+    val bands: List<BandHslAdjustment> = List(8) { BandHslAdjustment() }
+) {
+    val hasAnyModification: Boolean
+        get() = bands.any { it.isModified }
+
+    fun get(band: ColorBand): BandHslAdjustment = bands.getOrElse(band.index) { BandHslAdjustment() }
+
+    fun update(band: ColorBand, transform: (BandHslAdjustment) -> BandHslAdjustment): ColorBandsConfig {
+        val next = bands.toMutableList()
+        if (band.index in next.indices) {
+            next[band.index] = transform(next[band.index])
+        }
+        return ColorBandsConfig(next)
+    }
+}
+
+private class ProHistogramData(
+    val r: FloatArray = FloatArray(48),
+    val g: FloatArray = FloatArray(48),
+    val b: FloatArray = FloatArray(48),
+    val luma: FloatArray = FloatArray(48),
+    val hueBins: FloatArray = FloatArray(48),
+    val shadowClip: Boolean = false,
+    val highlightClip: Boolean = false
+)
 
 // Ölçüm kutusu boyutu için tek seçimli (radio) değerler
 private enum class MeteringBoxSize(val norm: Float) {
@@ -267,6 +323,7 @@ private class CameraHolder {
     @Volatile var currentExposureBoxNorm: Offset = Offset(0.5f, 0.5f)
     @Volatile var currentExposureBoxSizeNorm: Float = 0.32f
     @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
+    @Volatile var currentColorBands: ColorBandsConfig = ColorBandsConfig()
 
     // Mercek / yakınlaştırma ve RAW/DNG durumu
     @Volatile var zoomRange: Range<Float> = Range(1f, 1f)
@@ -710,14 +767,17 @@ private fun getHueName(hue: Float): String {
 }
 
 /**
- * Lightroom-style Point Color Targeted HSL processing with Hermite-cubic smoothstep feathering.
- * Applies Hue Shift, Saturation, and Luminance changes exclusively to the target color envelope.
+ * Lightroom / Darkroom tarzı 8-Bantlı Renk Mikseri + Noktasal Renk Pipeti işlemcisi.
+ * Tam 360° ton dönüşümlerinde kenar halesi (rainbow halo) oluşturmamak için RGB uzayında yumuşak karıştırma uygular.
  */
 private fun applyTargetedHslToBitmap(
     bitmap: Bitmap,
-    config: TargetedColorConfig
+    config: TargetedColorConfig,
+    colorBands: ColorBandsConfig = ColorBandsConfig()
 ): Bitmap {
-    if (!config.isActive || (config.deltaHue == 0f && config.deltaSat == 0f && config.deltaLum == 0f)) {
+    val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
+    val hasBands = colorBands.hasAnyModification
+    if (!hasPoint && !hasBands) {
         return bitmap
     }
     val work = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
@@ -733,6 +793,12 @@ private fun applyTargetedHslToBitmap(
     val dS = config.deltaSat
     val dL = config.deltaLum
 
+    val bandCenters = floatArrayOf(0f, 30f, 60f, 120f, 180f, 225f, 275f, 320f)
+    val bandDH = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaHue ?: 0f }
+    val bandDS = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaSat ?: 0f }
+    val bandDL = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaLum ?: 0f }
+    val bandActive = BooleanArray(8) { colorBands.bands.getOrNull(it)?.isModified == true }
+
     val hsv = FloatArray(3)
     var y = 0
     while (y < h) {
@@ -742,48 +808,126 @@ private fun applyTargetedHslToBitmap(
         for (i in 0 until count) {
             val px = rowBuf[i]
             val a = px and -0x1000000
-            val r = (px ushr 16) and 0xFF
-            val g = (px ushr 8) and 0xFF
-            val b = px and 0xFF
+            var r = (px ushr 16) and 0xFF
+            var g = (px ushr 8) and 0xFF
+            var b = px and 0xFF
 
-            AndroidColor.RGBToHSV(r, g, b, hsv)
-            val hVal = hsv[0]
-            val sVal = hsv[1]
-            val vVal = hsv[2]
+            // 1) 8-Bantlı Renk Histogramı Mikseri (pürüzsüz komşu bant geçişi)
+            if (hasBands) {
+                AndroidColor.RGBToHSV(r, g, b, hsv)
+                val hVal = hsv[0]
+                val sVal = hsv[1]
+                val vVal = hsv[2]
 
-            var diffH = abs(hVal - targetHue)
-            if (diffH > 180f) diffH = 360f - diffH
-
-            val wH = when {
-                diffH <= hueWidth -> 1.0f
-                diffH <= hueWidth + hueFeather -> {
-                    val t = (diffH - hueWidth) / hueFeather
-                    1.0f - t * t * (3.0f - 2.0f * t)
-                }
-                else -> 0.0f
-            }
-
-            if (wH > 0.001f) {
-                val satWeight = ((sVal - 0.06f) / 0.14f).coerceIn(0f, 1f)
-                val wS = satWeight * satWeight * (3f - 2f * satWeight)
+                val satW = ((sVal - 0.05f) / 0.14f).coerceIn(0f, 1f)
+                val wS = satW * satW * (3f - 2f * satW)
                 val lumLow = ((vVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
-                val lumHigh = 1.0f - ((vVal - 0.92f) / 0.07f).coerceIn(0f, 1f)
-                val wL = lumLow * lumHigh
+                val lumHigh = 1.0f - ((vVal - 0.93f) / 0.06f).coerceIn(0f, 1f)
+                val mask = wS * lumLow * lumHigh
 
-                val weight = wH * wS * wL
-                if (weight > 0.001f) {
-                    var newH = (hVal + dH * weight) % 360f
-                    if (newH < 0f) newH += 360f
-                    val newS = (sVal * (1.0f + dS * weight)).coerceIn(0f, 1f)
-                    val newV = (vVal + dL * weight * 0.45f).coerceIn(0f, 1f)
-
-                    hsv[0] = newH
-                    hsv[1] = newS
-                    hsv[2] = newV
-                    val outRgb = AndroidColor.HSVToColor(a, hsv)
-                    rowBuf[i] = outRgb
+                if (mask > 0.001f) {
+                    var idxA = 7
+                    var idxB = 0
+                    var t = 0f
+                    if (hVal >= 320f) {
+                        idxA = 7
+                        idxB = 0
+                        t = ((hVal - 320f) / 40f).coerceIn(0f, 1f)
+                    } else {
+                        for (k in 0 until 7) {
+                            if (hVal >= bandCenters[k] && hVal < bandCenters[k + 1]) {
+                                idxA = k
+                                idxB = k + 1
+                                t = ((hVal - bandCenters[k]) / (bandCenters[k + 1] - bandCenters[k])).coerceIn(0f, 1f)
+                                break
+                            }
+                        }
+                    }
+                    val s = t * t * (3f - 2f * t)
+                    val wA = if (bandActive[idxA]) (1f - s) * mask else 0f
+                    val wB = if (bandActive[idxB]) s * mask else 0f
+                    val wTotal = (wA + wB).coerceIn(0f, 1f)
+                    if (wTotal > 0.001f) {
+                        var accR = r * (1f - wTotal)
+                        var accG = g * (1f - wTotal)
+                        var accB = b * (1f - wTotal)
+                        if (wA > 0.001f) {
+                            var nh = (hVal + bandDH[idxA]) % 360f
+                            if (nh < 0f) nh += 360f
+                            hsv[0] = nh
+                            hsv[1] = (sVal * (1f + bandDS[idxA])).coerceIn(0f, 1f)
+                            hsv[2] = (vVal + bandDL[idxA] * 0.45f).coerceIn(0f, 1f)
+                            val cA = AndroidColor.HSVToColor(a, hsv)
+                            accR += ((cA ushr 16) and 0xFF) * wA
+                            accG += ((cA ushr 8) and 0xFF) * wA
+                            accB += (cA and 0xFF) * wA
+                        }
+                        if (wB > 0.001f) {
+                            var nh = (hVal + bandDH[idxB]) % 360f
+                            if (nh < 0f) nh += 360f
+                            hsv[0] = nh
+                            hsv[1] = (sVal * (1f + bandDS[idxB])).coerceIn(0f, 1f)
+                            hsv[2] = (vVal + bandDL[idxB] * 0.45f).coerceIn(0f, 1f)
+                            val cB = AndroidColor.HSVToColor(a, hsv)
+                            accR += ((cB ushr 16) and 0xFF) * wB
+                            accG += ((cB ushr 8) and 0xFF) * wB
+                            accB += (cB and 0xFF) * wB
+                        }
+                        r = accR.roundToInt().coerceIn(0, 255)
+                        g = accG.roundToInt().coerceIn(0, 255)
+                        b = accB.roundToInt().coerceIn(0, 255)
+                    }
                 }
             }
+
+            // 2) Noktasal Renk Pipeti (isteğe bağlı ek katman)
+            if (hasPoint) {
+                AndroidColor.RGBToHSV(r, g, b, hsv)
+                val hVal = hsv[0]
+                val sVal = hsv[1]
+                val vVal = hsv[2]
+
+                var diffH = abs(hVal - targetHue)
+                if (diffH > 180f) diffH = 360f - diffH
+
+                val wH = when {
+                    diffH <= hueWidth -> 1.0f
+                    diffH <= hueWidth + hueFeather -> {
+                        val t = (diffH - hueWidth) / hueFeather
+                        1.0f - t * t * (3.0f - 2.0f * t)
+                    }
+                    else -> 0.0f
+                }
+
+                if (wH > 0.001f) {
+                    val satWeight = ((sVal - 0.06f) / 0.14f).coerceIn(0f, 1f)
+                    val wS = satWeight * satWeight * (3f - 2f * satWeight)
+                    val lumLow = ((vVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
+                    val lumHigh = 1.0f - ((vVal - 0.92f) / 0.07f).coerceIn(0f, 1f)
+                    val wL = lumLow * lumHigh
+
+                    val weight = wH * wS * wL
+                    if (weight > 0.001f) {
+                        var newH = (hVal + dH) % 360f
+                        if (newH < 0f) newH += 360f
+                        val newS = (sVal * (1.0f + dS)).coerceIn(0f, 1f)
+                        val newV = (vVal + dL * 0.45f).coerceIn(0f, 1f)
+
+                        hsv[0] = newH
+                        hsv[1] = newS
+                        hsv[2] = newV
+                        val shiftedRgb = AndroidColor.HSVToColor(a, hsv)
+                        val sr = (shiftedRgb ushr 16) and 0xFF
+                        val sg = (shiftedRgb ushr 8) and 0xFF
+                        val sb = shiftedRgb and 0xFF
+                        r = (r + (sr - r) * weight).roundToInt().coerceIn(0, 255)
+                        g = (g + (sg - g) * weight).roundToInt().coerceIn(0, 255)
+                        b = (b + (sb - b) * weight).roundToInt().coerceIn(0, 255)
+                    }
+                }
+            }
+
+            rowBuf[i] = a or (r shl 16) or (g shl 8) or b
         }
         work.setPixels(rowBuf, 0, w, 0, y, w, rows)
         y += rows
@@ -873,6 +1017,13 @@ private const val HSL_SKSL = """
     uniform float uDeltaSat;
     uniform float uDeltaLum;
     uniform float uActive;
+    uniform float uBandsActive;
+    uniform vec4 uBandHueA;
+    uniform vec4 uBandHueB;
+    uniform vec4 uBandSatA;
+    uniform vec4 uBandSatB;
+    uniform vec4 uBandLumA;
+    uniform vec4 uBandLumB;
 
     vec3 rgb2hsl(vec3 c) {
         float cMin = min(min(c.r, c.g), c.b);
@@ -918,34 +1069,110 @@ private const val HSL_SKSL = """
         );
     }
 
+    vec3 getBandDelta(int idx) {
+        if (idx == 0) return vec3(uBandHueA.x, uBandSatA.x, uBandLumA.x);
+        if (idx == 1) return vec3(uBandHueA.y, uBandSatA.y, uBandLumA.y);
+        if (idx == 2) return vec3(uBandHueA.z, uBandSatA.z, uBandLumA.z);
+        if (idx == 3) return vec3(uBandHueA.w, uBandSatA.w, uBandLumA.w);
+        if (idx == 4) return vec3(uBandHueB.x, uBandSatB.x, uBandLumB.x);
+        if (idx == 5) return vec3(uBandHueB.y, uBandSatB.y, uBandLumB.y);
+        if (idx == 6) return vec3(uBandHueB.z, uBandSatB.z, uBandLumB.z);
+        return vec3(uBandHueB.w, uBandSatB.w, uBandLumB.w);
+    }
+
     vec4 main(vec2 fragCoord) {
         vec4 color = uContent.eval(fragCoord);
-        if (uActive < 0.5) return color;
-        vec3 hsl = rgb2hsl(color.rgb);
-        
-        float dH = abs(hsl.x - uTargetHue);
-        dH = min(dH, 360.0 - dH);
-        
-        float wH = 0.0;
-        if (dH <= uHueWidth) {
-            wH = 1.0;
-        } else if (dH <= uHueWidth + uHueFeather) {
-            float t = (dH - uHueWidth) / uHueFeather;
-            wH = 1.0 - t * t * (3.0 - 2.0 * t);
+
+        // 1) 8-Bantlı Renk Histogramı Mikseri (Lightroom / Darkroom)
+        if (uBandsActive > 0.5) {
+            vec3 hsl = rgb2hsl(color.rgb);
+            float satClamp = clamp((hsl.y - 0.05) / 0.14, 0.0, 1.0);
+            float wS = satClamp * satClamp * (3.0 - 2.0 * satClamp);
+            float lumLow = clamp((hsl.z - 0.04) / 0.10, 0.0, 1.0);
+            float lumHigh = 1.0 - clamp((hsl.z - 0.93) / 0.06, 0.0, 1.0);
+            float mask = wS * lumLow * lumHigh;
+
+            if (mask > 0.001) {
+                float h = hsl.x;
+                int idxA = 7;
+                int idxB = 0;
+                float t = 0.0;
+                if (h < 30.0) {
+                    idxA = 0; idxB = 1; t = h / 30.0;
+                } else if (h < 60.0) {
+                    idxA = 1; idxB = 2; t = (h - 30.0) / 30.0;
+                } else if (h < 120.0) {
+                    idxA = 2; idxB = 3; t = (h - 60.0) / 60.0;
+                } else if (h < 180.0) {
+                    idxA = 3; idxB = 4; t = (h - 120.0) / 60.0;
+                } else if (h < 225.0) {
+                    idxA = 4; idxB = 5; t = (h - 180.0) / 45.0;
+                } else if (h < 275.0) {
+                    idxA = 5; idxB = 6; t = (h - 225.0) / 50.0;
+                } else if (h < 320.0) {
+                    idxA = 6; idxB = 7; t = (h - 275.0) / 45.0;
+                } else {
+                    idxA = 7; idxB = 0; t = (h - 320.0) / 40.0;
+                }
+                float s = t * t * (3.0 - 2.0 * t);
+                vec3 dA = getBandDelta(idxA);
+                vec3 dB = getBandDelta(idxB);
+                bool actA = (abs(dA.x) > 0.5 || abs(dA.y) > 0.01 || abs(dA.z) > 0.01);
+                bool actB = (abs(dB.x) > 0.5 || abs(dB.y) > 0.01 || abs(dB.z) > 0.01);
+                float wA = actA ? (1.0 - s) * mask : 0.0;
+                float wB = actB ? s * mask : 0.0;
+                float wTot = clamp(wA + wB, 0.0, 1.0);
+                if (wTot > 0.001) {
+                    vec3 acc = color.rgb * (1.0 - wTot);
+                    if (wA > 0.001) {
+                        vec3 shA = vec3(
+                            mod(hsl.x + dA.x + 360.0, 360.0),
+                            clamp(hsl.y * (1.0 + dA.y), 0.0, 1.0),
+                            clamp(hsl.z + dA.z * 0.45, 0.0, 1.0)
+                        );
+                        acc += hsl2rgb(shA) * wA;
+                    }
+                    if (wB > 0.001) {
+                        vec3 shB = vec3(
+                            mod(hsl.x + dB.x + 360.0, 360.0),
+                            clamp(hsl.y * (1.0 + dB.y), 0.0, 1.0),
+                            clamp(hsl.z + dB.z * 0.45, 0.0, 1.0)
+                        );
+                        acc += hsl2rgb(shB) * wB;
+                    }
+                    color.rgb = acc;
+                }
+            }
         }
-        
-        float satClamp = clamp((hsl.y - 0.06) / 0.14, 0.0, 1.0);
-        float wS = satClamp * satClamp * (3.0 - 2.0 * satClamp);
-        float lumLow = clamp((hsl.z - 0.04) / 0.10, 0.0, 1.0);
-        float lumHigh = 1.0 - clamp((hsl.z - 0.92) / 0.07, 0.0, 1.0);
-        float wL = lumLow * lumHigh;
-        
-        float weight = wH * wS * wL;
-        if (weight > 0.001) {
-            hsl.x = mod(hsl.x + uDeltaHue * weight + 360.0, 360.0);
-            hsl.y = clamp(hsl.y * (1.0 + uDeltaSat * weight), 0.0, 1.0);
-            hsl.z = clamp(hsl.z + uDeltaLum * weight * 0.45, 0.0, 1.0);
-            color.rgb = hsl2rgb(hsl);
+
+        // 2) Noktasal Renk Pipeti katmanı
+        if (uActive > 0.5) {
+            vec3 hsl = rgb2hsl(color.rgb);
+            float dH = abs(hsl.x - uTargetHue);
+            dH = min(dH, 360.0 - dH);
+
+            float wH = 0.0;
+            if (dH <= uHueWidth) {
+                wH = 1.0;
+            } else if (dH <= uHueWidth + uHueFeather) {
+                float t = (dH - uHueWidth) / uHueFeather;
+                wH = 1.0 - t * t * (3.0 - 2.0 * t);
+            }
+
+            float satClamp = clamp((hsl.y - 0.06) / 0.14, 0.0, 1.0);
+            float wS = satClamp * satClamp * (3.0 - 2.0 * satClamp);
+            float lumLow = clamp((hsl.z - 0.04) / 0.10, 0.0, 1.0);
+            float lumHigh = 1.0 - clamp((hsl.z - 0.92) / 0.07, 0.0, 1.0);
+            float wL = lumLow * lumHigh;
+
+            float weight = wH * wS * wL;
+            if (weight > 0.001) {
+                vec3 shifted = hsl;
+                shifted.x = mod(hsl.x + uDeltaHue + 360.0, 360.0);
+                shifted.y = clamp(hsl.y * (1.0 + uDeltaSat), 0.0, 1.0);
+                shifted.z = clamp(hsl.z + uDeltaLum * 0.45, 0.0, 1.0);
+                color.rgb = mix(color.rgb, hsl2rgb(shifted), weight);
+            }
         }
         return color;
     }
@@ -953,12 +1180,16 @@ private const val HSL_SKSL = """
 
 private fun updateTextureViewShader(
     view: TextureView?,
-    config: TargetedColorConfig
+    config: TargetedColorConfig,
+    colorBands: ColorBandsConfig,
+    bypass: Boolean = false
 ) {
     if (view == null) return
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         try {
-            if (!config.isActive || (config.deltaHue == 0f && config.deltaSat == 0f && config.deltaLum == 0f)) {
+            val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
+            val hasBands = colorBands.hasAnyModification
+            if (bypass || (!hasPoint && !hasBands)) {
                 view.setRenderEffect(null)
                 return
             }
@@ -969,7 +1200,15 @@ private fun updateTextureViewShader(
             shader.setFloatUniform("uDeltaHue", config.deltaHue)
             shader.setFloatUniform("uDeltaSat", config.deltaSat)
             shader.setFloatUniform("uDeltaLum", config.deltaLum)
-            shader.setFloatUniform("uActive", 1.0f)
+            shader.setFloatUniform("uActive", if (hasPoint) 1.0f else 0.0f)
+            shader.setFloatUniform("uBandsActive", if (hasBands) 1.0f else 0.0f)
+            val b = colorBands.bands
+            shader.setFloatUniform("uBandHueA", b[0].deltaHue, b[1].deltaHue, b[2].deltaHue, b[3].deltaHue)
+            shader.setFloatUniform("uBandHueB", b[4].deltaHue, b[5].deltaHue, b[6].deltaHue, b[7].deltaHue)
+            shader.setFloatUniform("uBandSatA", b[0].deltaSat, b[1].deltaSat, b[2].deltaSat, b[3].deltaSat)
+            shader.setFloatUniform("uBandSatB", b[4].deltaSat, b[5].deltaSat, b[6].deltaSat, b[7].deltaSat)
+            shader.setFloatUniform("uBandLumA", b[0].deltaLum, b[1].deltaLum, b[2].deltaLum, b[3].deltaLum)
+            shader.setFloatUniform("uBandLumB", b[4].deltaLum, b[5].deltaLum, b[6].deltaLum, b[7].deltaLum)
             val effect = RenderEffect.createRuntimeShaderEffect(shader, "uContent")
             view.setRenderEffect(effect)
         } catch (e: Throwable) {
@@ -1041,36 +1280,118 @@ private fun measureRegionLuminance(
     return MeteringStats(avg, maxLuma.toFloat(), ratio)
 }
 
-// Önizleme görüntüsünden normalize edilmiş 32 sütunlu parlaklık histogramı üretir
-private fun computeLuminanceHistogram(bitmap: Bitmap, bins: Int = 32): FloatArray {
-    val result = FloatArray(bins)
+// 8 renk bandı sınırları (Kırmızı 340°..15°, Turuncu 15°..45°, Sarı 45°..90°, Yeşil 90°..150°,
+// Camgöbeği 150°..202.5°, Mavi 202.5°..250°, Mor 250°..297.5°, Macenta 297.5°..340°)
+private val HUE_BAND_EDGES = floatArrayOf(0f, 35f, 65f, 110f, 170f, 222.5f, 270f, 317.5f, 360f)
+
+private fun hueToPerceptualBandPos(hueDeg: Float): Float {
+    // 340° başlangıç olacak şekilde döndür (böylece Kırmızı 0° tam 0. bandın ortasına düşer)
+    val shifted = ((hueDeg - 340f) % 360f + 360f) % 360f
+    for (k in 0 until 8) {
+        if (shifted < HUE_BAND_EDGES[k + 1] || k == 7) {
+            val span = (HUE_BAND_EDGES[k + 1] - HUE_BAND_EDGES[k]).coerceAtLeast(1f)
+            val frac = ((shifted - HUE_BAND_EDGES[k]) / span).coerceIn(0f, 1f)
+            return (k + frac).coerceIn(0f, 7.9999f)
+        }
+    }
+    return 0f
+}
+
+private fun perceptualBandPosToHue(pos: Float): Float {
+    val clamped = pos.coerceIn(0f, 7.9999f)
+    val k = clamped.toInt().coerceIn(0, 7)
+    val frac = clamped - k
+    val shifted = HUE_BAND_EDGES[k] + frac * (HUE_BAND_EDGES[k + 1] - HUE_BAND_EDGES[k])
+    return ((shifted + 340f) % 360f + 360f) % 360f
+}
+
+// Önizleme görüntüsünden 48 sütunlu profesyonel RGB + Parlaklık + Algısal Bant Hizalı Renk Tonu (Hue) histogramı üretir
+private fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogramData {
     val w = bitmap.width
     val h = bitmap.height
-    if (w <= 0 || h <= 0) return result
+    if (w <= 0 || h <= 0) return ProHistogramData()
 
-    val stepX = maxOf(1, w / 40)
-    val stepY = maxOf(1, h / 40)
-    val counts = IntArray(bins)
-    var maxCount = 1
+    val stepX = maxOf(1, w / 48)
+    val stepY = maxOf(1, h / 48)
+    val rCounts = FloatArray(bins)
+    val gCounts = FloatArray(bins)
+    val bCounts = FloatArray(bins)
+    val lCounts = FloatArray(bins)
+    val hueWeights = FloatArray(bins)
+    val hsv = FloatArray(3)
+    var totalPixels = 0
+    var shadowClipped = 0
+    var highlightClipped = 0
 
     var py = 0
     while (py < h) {
         var px = 0
         while (px < w) {
             val c = bitmap[px, py]
-            val luma = (0.299f * AndroidColor.red(c) + 0.587f * AndroidColor.green(c) + 0.114f * AndroidColor.blue(c))
-            val bin = ((luma / 256f) * bins).toInt().coerceIn(0, bins - 1)
-            counts[bin]++
-            if (counts[bin] > maxCount) maxCount = counts[bin]
+            val r = AndroidColor.red(c)
+            val g = AndroidColor.green(c)
+            val b = AndroidColor.blue(c)
+            val luma = 0.299f * r + 0.587f * g + 0.114f * b
+
+            rCounts[((r / 256f) * bins).toInt().coerceIn(0, bins - 1)] += 1f
+            gCounts[((g / 256f) * bins).toInt().coerceIn(0, bins - 1)] += 1f
+            bCounts[((b / 256f) * bins).toInt().coerceIn(0, bins - 1)] += 1f
+            lCounts[((luma / 256f) * bins).toInt().coerceIn(0, bins - 1)] += 1f
+
+            if (luma <= 5f) shadowClipped++
+            if (luma >= 250f) highlightClipped++
+            totalPixels++
+
+            // Doygunluk ağırlıklı renk tonu (Hue) dağılımı — 8 bant sütunuyla 1:1 hizalı
+            AndroidColor.RGBToHSV(r, g, b, hsv)
+            val sat = hsv[1]
+            val lum = hsv[2]
+            if (sat > 0.10f && lum > 0.06f && lum < 0.96f) {
+                val bandPos = hueToPerceptualBandPos(hsv[0])
+                val hueBin = ((bandPos / 8f) * bins).toInt().coerceIn(0, bins - 1)
+                hueWeights[hueBin] += sat * sat
+            }
             px += stepX
         }
         py += stepY
     }
 
-    for (i in 0 until bins) {
-        result[i] = (counts[i].toFloat() / maxCount.toFloat()).coerceIn(0f, 1f)
+    fun smoothAndNormalize(arr: FloatArray, globalMax: Float, circular: Boolean = false): FloatArray {
+        val out = FloatArray(bins)
+        val denom = globalMax.coerceAtLeast(1f)
+        for (i in 0 until bins) {
+            val prev = if (i > 0) arr[i - 1] else if (circular) arr[bins - 1] else arr[0]
+            val next = if (i < bins - 1) arr[i + 1] else if (circular) arr[0] else arr[bins - 1]
+            val smoothed = (prev * 0.25f + arr[i] * 0.50f + next * 0.25f)
+            // Hafif logaritmik sıkıştırma: tek bir tepe diğer tonları ezmez (Lightroom tarzı okunabilirlik)
+            val ratio = (smoothed / denom).coerceIn(0f, 1f)
+            out[i] = ratio.toDouble().pow(0.75).toFloat().coerceIn(0f, 1f)
+        }
+        return out
     }
-    return result
+
+    var rgbPeak = 1f
+    for (i in 0 until bins) {
+        if (rCounts[i] > rgbPeak) rgbPeak = rCounts[i]
+        if (gCounts[i] > rgbPeak) rgbPeak = gCounts[i]
+        if (bCounts[i] > rgbPeak) rgbPeak = bCounts[i]
+        if (lCounts[i] > rgbPeak) rgbPeak = lCounts[i]
+    }
+    var huePeak = 0.01f
+    for (i in 0 until bins) {
+        if (hueWeights[i] > huePeak) huePeak = hueWeights[i]
+    }
+
+    val denomTotal = totalPixels.coerceAtLeast(1).toFloat()
+    return ProHistogramData(
+        r = smoothAndNormalize(rCounts, rgbPeak),
+        g = smoothAndNormalize(gCounts, rgbPeak),
+        b = smoothAndNormalize(bCounts, rgbPeak),
+        luma = smoothAndNormalize(lCounts, rgbPeak),
+        hueBins = smoothAndNormalize(hueWeights, huePeak, circular = true),
+        shadowClip = (shadowClipped / denomTotal) > 0.015f,
+        highlightClip = (highlightClipped / denomTotal) > 0.015f
+    )
 }
 
 // Önizleme görüntüsünde aşırı parlak (yanık) bölgeleri 32x32 ızgara olarak işaretler (zebra uyarısı)
@@ -1385,8 +1706,12 @@ fun CameraScreen(hasCameraPermission: Boolean) {
 
     var activeTab by remember { mutableStateOf(ControlTab.BD) }
     var activeWbSubSlider by remember { mutableStateOf(WbSubSlider.KELVIN) }
+    var colorPanelMode by remember { mutableStateOf(ColorPanelMode.GENEL) }
     var activeColorSubSlider by remember { mutableStateOf(ColorSubSlider.DOYGUNLUK) }
     var activePointColorSubSlider by remember { mutableStateOf(PointColorSubSlider.TON) }
+    var selectedColorBand by remember { mutableStateOf(ColorBand.RED) }
+    var activeBandSubSlider by remember { mutableStateOf(PointColorSubSlider.TON) }
+    var colorBandsConfig by remember { mutableStateOf(ColorBandsConfig()) }
     var isDeckCollapsed by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -1401,7 +1726,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     var exposureBoxNorm by remember { mutableStateOf(Offset(0.5f, 0.5f)) }
     var exposureBoxSizeNorm by remember { mutableFloatStateOf(MeteringBoxSize.ORTA.norm) }
     var measuredRegionBrightness by remember { mutableIntStateOf(128) }
-    var liveHistogram by remember { mutableStateOf(FloatArray(32)) }
+    var liveHistogram by remember { mutableStateOf(ProHistogramData()) }
 
     // Ek özellik durumları: OTO karşılaştırma, zebra, su terazisi, zamanlayıcı ve ilk açılış rehberi
     var isComparingAuto by remember { mutableStateOf(false) }
@@ -1499,9 +1824,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         }
     }
 
-    LaunchedEffect(targetedColorConfig, textureViewInstance) {
+    LaunchedEffect(targetedColorConfig, colorBandsConfig, isAutoMode, isComparingAuto, textureViewInstance) {
         holder.currentTargetedColor = targetedColorConfig
-        updateTextureViewShader(textureViewInstance, targetedColorConfig)
+        holder.currentColorBands = colorBandsConfig
+        updateTextureViewShader(
+            view = textureViewInstance,
+            config = targetedColorConfig,
+            colorBands = colorBandsConfig,
+            bypass = isAutoMode || isComparingAuto
+        )
     }
 
     fun savePresetsToStorage() {
@@ -1567,6 +1898,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         holder.currentExposureBoxNorm = exposureBoxNorm
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
         holder.currentTargetedColor = targetedColorConfig
+        holder.currentColorBands = colorBandsConfig
         holder.currentZoomRatio = zoomRatio
         holder.rawCaptureEnabled = rawEnabled
     }
@@ -1784,7 +2116,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
         coroutineScope.launch(Dispatchers.Default) {
             try {
                 val stats = measureRegionLuminance(bmp, meteringMode, exposureBoxNorm, exposureBoxSizeNorm)
-                val hist = computeLuminanceHistogram(bmp, 32)
+                val hist = computeProHistogramData(bmp, 48)
                 val zGrid = if (captureZebra) computeZebraGrid(bmp, 32, 32) else null
                 withContext(Dispatchers.Main) {
                     measuredRegionBrightness = stats.avgLuma.roundToInt()
@@ -2221,9 +2553,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             }
 
             val snapTargetedColor = holder.currentTargetedColor
+            val snapColorBands = holder.currentColorBands
+            val snapApplyColorGrading = !snapAuto
             coroutineScope.launch(Dispatchers.Default) {
-                val hasSelectiveHsl = snapTargetedColor.isActive &&
-                    (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)
+                val hasSelectiveHsl = snapApplyColorGrading && (
+                    (snapTargetedColor.isActive &&
+                        (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)) ||
+                        snapColorBands.hasAnyModification
+                    )
 
                 val onSaved: (Uri) -> Unit = { savedUri ->
                     mainHandler.post { lastCapturedUri = savedUri }
@@ -2246,7 +2583,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
-                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor)
+                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands)
                                 saveOutputToGallery(context, null, graded, orientation, onSaved)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
@@ -2391,7 +2728,8 @@ fun CameraScreen(hasCameraPermission: Boolean) {
     val isEvModified = exposureEvIndex != 0
     val isColorModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f ||
         abs(contrastValue - DEFAULT_CONTRAST) > 0.02f ||
-        targetedColorConfig.isActive
+        targetedColorConfig.isActive ||
+        colorBandsConfig.hasAnyModification
     val isMeteringModified = meteringMode == ExposureMeteringMode.BOX_SPOT
     val hasAnyManualChange = isWbModified || isEvModified || isColorModified || isMeteringModified
 
@@ -2688,9 +3026,15 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                                     previewColorInt = pixel
                                                 )
                                                 isColorPipetteActive = false
+                                                colorPanelMode = ColorPanelMode.PIPET
                                                 pickedMarkerPos = offset
                                                 syncHolderSettings()
-                                                updateTextureViewShader(view, targetedColorConfig)
+                                                updateTextureViewShader(
+                                                    view = view,
+                                                    config = targetedColorConfig,
+                                                    colorBands = colorBandsConfig,
+                                                    bypass = isAutoMode || isComparingAuto
+                                                )
                                                 showStatus("${getHueName(hsv[0])} seçildi")
                                             } finally {
                                                 bitmap.recycle()
@@ -2979,11 +3323,14 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Sağ üst: Kompakt, yüksek kontrastlı canlı histogram (alt mercek çubuğuyla asla çakışmaz)
+                        // Sağ üst: Profesyonel 5-bölge RGB + Parlaklık canlı histogramı
                         if (cameraReady) {
                             LiveHistogramOverlay(
-                                bins = liveHistogram,
-                                accentColor = if (isAutoMode || isComparingAuto) IrPalette.IrEmerald else IrPalette.IrAmber
+                                data = liveHistogram,
+                                modifier = Modifier.clickable(enabled = cameraReady) {
+                                    openProControl(ControlTab.RENK)
+                                    colorPanelMode = ColorPanelMode.BANTLAR
+                                }
                             )
                         }
                     }
@@ -3204,14 +3551,13 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                             }
                         }
 
-                        // Sağ slot: Simetriyi koruyan kompakt aktif mod rozeti (ZEBRA / KUTU / PİPET)
+                        // Sağ slot: Simetriyi koruyan kompakt aktif araç rozeti (ZEBRA / KUTU)
                         Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterEnd
                         ) {
                             val badgeInfo: Pair<String, Color>? = when {
                                 showZebra -> "ZEBRA" to IrPalette.IrCoral
-                                targetedColorConfig.isActive -> "HSL" to IrPalette.IrTeal
                                 meteringMode == ExposureMeteringMode.BOX_SPOT -> "KUTU" to IrPalette.IrAmber
                                 else -> null
                             }
@@ -3248,7 +3594,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
             }
         }
 
-        // 3) ALT KONTROL ALANI: Önizlemenin altında ayrı bölüm (görüntüyü asla kapatmaz)
+        // 3) ALT KONTROL ALANI: Önizlemenin altında ayrı bölüm (OTO modda tam ferah vizör, PRO modda tek kaydırıcı paneli)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -3256,50 +3602,6 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                 .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            // OTO Modda kompakt, önizlemeyi kapatmayan Pozlama (EV) kaydırıcısı
-            AnimatedVisibility(visible = isAutoMode && aeRange.upper > aeRange.lower) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(IrPalette.HudGlass)
-                        .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(16.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    val evBadge = "${formatSignedDecimal(evDisplayVal, turkishLocale)} $strEvShort"
-                    ProGradientSliderRow(
-                        label = stringResource(R.string.slider_exposure),
-                        valueBadge = evBadge,
-                        isModified = isEvModified,
-                        value = exposureEvIndex.toFloat(),
-                        defaultValue = 0f,
-                        snapTolerance = 0.45f,
-                        valueRange = aeRange.lower.toFloat()..aeRange.upper.toFloat(),
-                        enabled = cameraReady,
-                        gradient = Brush.horizontalGradient(
-                            colors = listOf(Color(0xFF1E293B), Color(0xFF94A3B8), Color(0xFFFEF08A))
-                        ),
-                        onStepMinus = {
-                            exposureEvIndex = (exposureEvIndex - 1).coerceIn(aeRange.lower, aeRange.upper)
-                            updatePreviewSettings()
-                        },
-                        onStepPlus = {
-                            exposureEvIndex = (exposureEvIndex + 1).coerceIn(aeRange.lower, aeRange.upper)
-                            updatePreviewSettings()
-                        },
-                        onReset = {
-                            exposureEvIndex = 0
-                            updatePreviewSettings()
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        },
-                        onValueChange = {
-                            exposureEvIndex = it.roundToInt().coerceIn(aeRange.lower, aeRange.upper)
-                            updatePreviewSettings()
-                        }
-                    )
-                }
-            }
-
             // PRO Mod Çip Tabanlı Tek Kaydırıcı Paneli
             AnimatedVisibility(visible = !isAutoMode) {
                 Column(
@@ -3502,298 +3804,609 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                                 }
 
                                 ControlTab.RENK -> {
-                                    if (targetedColorConfig.isActive) {
-                                        // Noktasal renk başlığı + genişlik + kaldır
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(16.dp)
-                                                        .clip(CircleShape)
-                                                        .background(Color(targetedColorConfig.previewColorInt))
-                                                        .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
-                                                )
-                                                Text(
-                                                    text = "${getHueName(targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)",
-                                                    color = IrPalette.IrTeal,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                listOf(
-                                                    stringResource(R.string.range_narrow) to 14f,
-                                                    stringResource(R.string.range_balanced) to 22f,
-                                                    stringResource(R.string.range_wide) to 36f
-                                                ).forEach { (lbl, w) ->
-                                                    val isSel = targetedColorConfig.hueWidth == w
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(if (isSel) IrPalette.IrAmber else IrPalette.SurfaceSubtle)
-                                                            .clickable {
-                                                                targetedColorConfig = targetedColorConfig.copy(
-                                                                    hueWidth = w,
-                                                                    hueFeather = if (w == 14f) 12f else if (w == 22f) 18f else 26f
-                                                                )
-                                                            }
-                                                            .padding(horizontal = 8.dp, vertical = 5.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = lbl,
-                                                            color = if (isSel) Color.Black else IrPalette.TextSecondary,
-                                                            fontSize = 11.sp,
-                                                            fontWeight = FontWeight.SemiBold
-                                                        )
-                                                    }
-                                                }
-                                                Text(
-                                                    text = stringResource(R.string.action_remove),
-                                                    color = IrPalette.IrCoral,
-                                                    fontSize = 12.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(8.dp))
-                                                        .clickable {
-                                                            targetedColorConfig = targetedColorConfig.copy(isActive = false)
-                                                        }
-                                                        .padding(horizontal = 8.dp, vertical = 5.dp)
-                                                )
-                                            }
-                                        }
-
-                                        // Tekil noktasal renk seçici
-                                        SegmentedChoiceRow(
-                                            options = listOf(
-                                                PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(targetedColorConfig.deltaHue)}°",
-                                                PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
-                                                PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.slider_point_lum)} · ${formatSigned(targetedColorConfig.deltaLum * 100f)}%"
-                                            ),
-                                            selected = activePointColorSubSlider,
-                                            enabled = cameraReady,
-                                            onSelect = { activePointColorSubSlider = it }
-                                        )
-
-                                        when (activePointColorSubSlider) {
-                                            PointColorSubSlider.TON -> ProGradientSliderRow(
-                                                label = stringResource(R.string.slider_point_hue),
-                                                valueBadge = "${formatSigned(targetedColorConfig.deltaHue)}°",
-                                                isModified = abs(targetedColorConfig.deltaHue) > 0.5f,
-                                                value = targetedColorConfig.deltaHue,
-                                                defaultValue = 0f,
-                                                snapTolerance = 3f,
-                                                valueRange = -60f..60f,
-                                                enabled = cameraReady,
-                                                gradient = Brush.horizontalGradient(
-                                                    listOf(IrPalette.IrCyan, IrPalette.IrAmber, IrPalette.IrMagenta)
-                                                ),
-                                                onStepMinus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaHue = (targetedColorConfig.deltaHue - 5f).coerceIn(-60f, 60f)
-                                                    )
-                                                },
-                                                onStepPlus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaHue = (targetedColorConfig.deltaHue + 5f).coerceIn(-60f, 60f)
-                                                    )
-                                                },
-                                                onReset = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaHue = 0f)
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                },
-                                                onValueChange = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaHue = it)
-                                                }
-                                            )
-
-                                            PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
-                                                label = stringResource(R.string.slider_point_sat),
-                                                valueBadge = "${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
-                                                isModified = abs(targetedColorConfig.deltaSat) > 0.02f,
-                                                value = targetedColorConfig.deltaSat,
-                                                defaultValue = 0f,
-                                                snapTolerance = 0.05f,
-                                                valueRange = -1.0f..1.0f,
-                                                enabled = cameraReady,
-                                                gradient = Brush.horizontalGradient(
-                                                    listOf(Color(0xFF64748B), Color(0xFF22C55E), Color(0xFFF59E0B), Color(0xFFEF4444))
-                                                ),
-                                                onStepMinus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaSat = (targetedColorConfig.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f)
-                                                    )
-                                                },
-                                                onStepPlus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaSat = (targetedColorConfig.deltaSat + 0.05f).coerceIn(-1.0f, 1.0f)
-                                                    )
-                                                },
-                                                onReset = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaSat = 0f)
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                },
-                                                onValueChange = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaSat = it)
-                                                }
-                                            )
-
-                                            PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
-                                                label = stringResource(R.string.slider_point_lum),
-                                                valueBadge = "${formatSigned(targetedColorConfig.deltaLum * 100f)}%",
-                                                isModified = abs(targetedColorConfig.deltaLum) > 0.02f,
-                                                value = targetedColorConfig.deltaLum,
-                                                defaultValue = 0f,
-                                                snapTolerance = 0.05f,
-                                                valueRange = -1.0f..1.0f,
-                                                enabled = cameraReady,
-                                                gradient = Brush.horizontalGradient(
-                                                    listOf(Color(0xFF334155), Color.White)
-                                                ),
-                                                onStepMinus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaLum = (targetedColorConfig.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f)
-                                                    )
-                                                },
-                                                onStepPlus = {
-                                                    targetedColorConfig = targetedColorConfig.copy(
-                                                        deltaLum = (targetedColorConfig.deltaLum + 0.05f).coerceIn(-1.0f, 1.0f)
-                                                    )
-                                                },
-                                                onReset = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaLum = 0f)
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                },
-                                                onValueChange = {
-                                                    targetedColorConfig = targetedColorConfig.copy(deltaLum = it)
-                                                }
-                                            )
-                                        }
+                                    // 3'lü profesyonel renk stüdyosu seçicisi: [Genel | Bantlar (Histogram) | Pipet]
+                                    val bandsLabel = if (colorBandsConfig.hasAnyModification) {
+                                        "${stringResource(R.string.color_mode_bands)} •"
                                     } else {
-                                        // Canlı değer gösteren 2'li alt seçici: [Doygunluk · 1,00x | Kontrast · 1,00x]
-                                        val satStr = String.format(turkishLocale, "%.2f", saturationValue)
-                                        val conStr = String.format(turkishLocale, "%.2f", contrastValue)
-                                        SegmentedChoiceRow(
-                                            options = listOf(
-                                                ColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${satStr}x",
-                                                ColorSubSlider.KONTRAST to "${stringResource(R.string.slider_contrast)} · ${conStr}x"
-                                            ),
-                                            selected = activeColorSubSlider,
-                                            enabled = cameraReady,
-                                            onSelect = { activeColorSubSlider = it }
-                                        )
-
-                                        // Tek kaydırıcı: Doygunluk veya Kontrast
-                                        if (activeColorSubSlider == ColorSubSlider.DOYGUNLUK) {
-                                            ProGradientSliderRow(
-                                                label = stringResource(R.string.slider_saturation),
-                                                valueBadge = "${satStr}x",
-                                                isModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f,
-                                                value = saturationValue,
-                                                defaultValue = DEFAULT_SATURATION,
-                                                snapTolerance = 0.04f,
-                                                valueRange = 0.50f..2.00f,
-                                                enabled = cameraReady,
-                                                gradient = Brush.horizontalGradient(
-                                                    colors = listOf(
-                                                        Color(0xFF64748B),
-                                                        Color(0xFF94A3B8),
-                                                        Color(0xFF22C55E),
-                                                        Color(0xFFF59E0B),
-                                                        Color(0xFFEF4444)
-                                                    )
-                                                ),
-                                                onStepMinus = {
-                                                    saturationValue = (saturationValue - 0.05f).coerceIn(0.50f, 2.00f)
-                                                    updatePreviewSettings()
-                                                },
-                                                onStepPlus = {
-                                                    saturationValue = (saturationValue + 0.05f).coerceIn(0.50f, 2.00f)
-                                                    updatePreviewSettings()
-                                                },
-                                                onReset = {
-                                                    saturationValue = DEFAULT_SATURATION
-                                                    updatePreviewSettings()
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                },
-                                                onValueChange = {
-                                                    saturationValue = it
-                                                    updatePreviewSettings()
-                                                }
-                                            )
-                                        } else {
-                                            ProGradientSliderRow(
-                                                label = stringResource(R.string.slider_contrast),
-                                                valueBadge = "${conStr}x",
-                                                isModified = abs(contrastValue - DEFAULT_CONTRAST) > 0.02f,
-                                                value = contrastValue,
-                                                defaultValue = DEFAULT_CONTRAST,
-                                                snapTolerance = 0.04f,
-                                                valueRange = 0.60f..1.80f,
-                                                enabled = cameraReady,
-                                                gradient = Brush.horizontalGradient(
-                                                    colors = listOf(Color(0xFF475569), Color(0xFFCBD5E1), Color.White)
-                                                ),
-                                                onStepMinus = {
-                                                    contrastValue = (contrastValue - 0.05f).coerceIn(0.60f, 1.80f)
-                                                    updatePreviewSettings()
-                                                },
-                                                onStepPlus = {
-                                                    contrastValue = (contrastValue + 0.05f).coerceIn(0.60f, 1.80f)
-                                                    updatePreviewSettings()
-                                                },
-                                                onReset = {
-                                                    contrastValue = DEFAULT_CONTRAST
-                                                    updatePreviewSettings()
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                },
-                                                onValueChange = {
-                                                    contrastValue = it
-                                                    updatePreviewSettings()
-                                                }
-                                            )
+                                        stringResource(R.string.color_mode_bands)
+                                    }
+                                    val pipetteLabel = if (targetedColorConfig.isActive) {
+                                        "${stringResource(R.string.color_mode_pipette)} •"
+                                    } else {
+                                        stringResource(R.string.color_mode_pipette)
+                                    }
+                                    SegmentedChoiceRow(
+                                        options = listOf(
+                                            ColorPanelMode.GENEL to stringResource(R.string.color_mode_general),
+                                            ColorPanelMode.BANTLAR to bandsLabel,
+                                            ColorPanelMode.PIPET to pipetteLabel
+                                        ),
+                                        selected = colorPanelMode,
+                                        enabled = cameraReady,
+                                        onSelect = { mode ->
+                                            colorPanelMode = mode
+                                            if (mode != ColorPanelMode.PIPET) {
+                                                isColorPipetteActive = false
+                                            }
                                         }
+                                    )
 
-                                        // Açık, anlaşılır 2'li araç satırı: [Renk pipeti] + [Oto kontrast]
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            ActionPillButton(
-                                                label = if (isColorPipetteActive) stringResource(R.string.action_color_pipette_active) else stringResource(R.string.action_color_pipette),
-                                                selected = isColorPipetteActive,
-                                                accentColor = IrPalette.IrTeal,
+                                    when (colorPanelMode) {
+                                        ColorPanelMode.GENEL -> {
+                                            val satStr = String.format(turkishLocale, "%.2f", saturationValue)
+                                            val conStr = String.format(turkishLocale, "%.2f", contrastValue)
+                                            SegmentedChoiceRow(
+                                                options = listOf(
+                                                    ColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${satStr}x",
+                                                    ColorSubSlider.KONTRAST to "${stringResource(R.string.slider_contrast)} · ${conStr}x"
+                                                ),
+                                                selected = activeColorSubSlider,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(15.dp)) },
-                                                onClick = {
-                                                    isColorPipetteActive = !isColorPipetteActive
-                                                    if (isColorPipetteActive) {
+                                                onSelect = { activeColorSubSlider = it }
+                                            )
+
+                                            if (activeColorSubSlider == ColorSubSlider.DOYGUNLUK) {
+                                                ProGradientSliderRow(
+                                                    label = stringResource(R.string.slider_saturation),
+                                                    valueBadge = "${satStr}x",
+                                                    isModified = abs(saturationValue - DEFAULT_SATURATION) > 0.02f,
+                                                    value = saturationValue,
+                                                    defaultValue = DEFAULT_SATURATION,
+                                                    snapTolerance = 0.04f,
+                                                    valueRange = 0.50f..2.00f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        colors = listOf(
+                                                            Color(0xFF64748B),
+                                                            Color(0xFF94A3B8),
+                                                            Color(0xFF22C55E),
+                                                            Color(0xFFF59E0B),
+                                                            Color(0xFFEF4444)
+                                                        )
+                                                    ),
+                                                    onStepMinus = {
+                                                        saturationValue = (saturationValue - 0.05f).coerceIn(0.50f, 2.00f)
+                                                        updatePreviewSettings()
+                                                    },
+                                                    onStepPlus = {
+                                                        saturationValue = (saturationValue + 0.05f).coerceIn(0.50f, 2.00f)
+                                                        updatePreviewSettings()
+                                                    },
+                                                    onReset = {
+                                                        saturationValue = DEFAULT_SATURATION
+                                                        updatePreviewSettings()
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    },
+                                                    onValueChange = {
+                                                        saturationValue = it
+                                                        updatePreviewSettings()
+                                                    }
+                                                )
+                                            } else {
+                                                ProGradientSliderRow(
+                                                    label = stringResource(R.string.slider_contrast),
+                                                    valueBadge = "${conStr}x",
+                                                    isModified = abs(contrastValue - DEFAULT_CONTRAST) > 0.02f,
+                                                    value = contrastValue,
+                                                    defaultValue = DEFAULT_CONTRAST,
+                                                    snapTolerance = 0.04f,
+                                                    valueRange = 0.60f..1.80f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        colors = listOf(Color(0xFF475569), Color(0xFFCBD5E1), Color.White)
+                                                    ),
+                                                    onStepMinus = {
+                                                        contrastValue = (contrastValue - 0.05f).coerceIn(0.60f, 1.80f)
+                                                        updatePreviewSettings()
+                                                    },
+                                                    onStepPlus = {
+                                                        contrastValue = (contrastValue + 0.05f).coerceIn(0.60f, 1.80f)
+                                                        updatePreviewSettings()
+                                                    },
+                                                    onReset = {
+                                                        contrastValue = DEFAULT_CONTRAST
+                                                        updatePreviewSettings()
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    },
+                                                    onValueChange = {
+                                                        contrastValue = it
+                                                        updatePreviewSettings()
+                                                    }
+                                                )
+                                            }
+
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                ActionPillButton(
+                                                    label = stringResource(R.string.action_auto_contrast),
+                                                    selected = false,
+                                                    accentColor = IrPalette.IrAmber,
+                                                    enabled = cameraReady,
+                                                    modifier = Modifier.weight(1f),
+                                                    leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    onClick = { runAutoContrast() }
+                                                )
+                                                ActionPillButton(
+                                                    label = stringResource(R.string.action_color_pipette),
+                                                    selected = isColorPipetteActive,
+                                                    accentColor = IrPalette.IrTeal,
+                                                    enabled = cameraReady,
+                                                    modifier = Modifier.weight(1f),
+                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    onClick = {
+                                                        colorPanelMode = ColorPanelMode.PIPET
+                                                        isColorPipetteActive = true
                                                         isPickerActive = false
                                                         isExposureBoxPicking = false
                                                         showStatus(strTapColor)
                                                     }
+                                                )
+                                            }
+                                        }
+
+                                        ColorPanelMode.BANTLAR -> {
+                                            // Lightroom / Darkroom tarzı etkileşimli Renk Histogramı Bant Mikseri
+                                            val bandAdj = colorBandsConfig.get(selectedColorBand)
+                                            val bandShiftedHue = (((selectedColorBand.centerHue + bandAdj.deltaHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
+                                            val bandHasHueShift = abs(bandAdj.deltaHue) > 1f
+
+                                            // Seçili bant başlığı + kaynak -> hedef renk önizlemesi + sıfırla
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                    modifier = Modifier.weight(1f, fill = false)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(14.dp)
+                                                            .clip(CircleShape)
+                                                            .background(selectedColorBand.swatchColor)
+                                                            .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape)
+                                                    )
+                                                    if (bandHasHueShift) {
+                                                        val shiftedBandColor = Color.hsv(
+                                                            hue = bandShiftedHue,
+                                                            saturation = (0.85f * (1f + bandAdj.deltaSat * 0.5f)).coerceIn(0.25f, 1f),
+                                                            value = (0.94f + bandAdj.deltaLum * 0.35f).coerceIn(0.30f, 1f)
+                                                        )
+                                                        Text(
+                                                            text = "→",
+                                                            color = IrPalette.TextSecondary,
+                                                            fontSize = 11.sp
+                                                        )
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(14.dp)
+                                                                .clip(CircleShape)
+                                                                .background(shiftedBandColor)
+                                                                .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = if (bandHasHueShift) {
+                                                            "${selectedColorBand.label} → ${getHueName(bandShiftedHue)}"
+                                                        } else {
+                                                            selectedColorBand.label
+                                                        },
+                                                        color = IrPalette.TextPrimary,
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    if (bandAdj.isModified) {
+                                                        Text(
+                                                            text = stringResource(R.string.action_reset_band),
+                                                            color = IrPalette.IrAmber,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(7.dp))
+                                                                .background(IrPalette.IrAmber.copy(alpha = 0.14f))
+                                                                .clickable {
+                                                                    colorBandsConfig = colorBandsConfig.update(selectedColorBand) { BandHslAdjustment() }
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                }
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        )
+                                                    } else if (colorBandsConfig.hasAnyModification) {
+                                                        Text(
+                                                            text = stringResource(R.string.action_reset_all_bands),
+                                                            color = IrPalette.IrCoral,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(7.dp))
+                                                                .background(IrPalette.IrCoral.copy(alpha = 0.14f))
+                                                                .clickable {
+                                                                    colorBandsConfig = ColorBandsConfig()
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                }
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // Canlı Renk Tonu Histogramı üzerinden dokunarak/sürükleyerek 8 bant seçimi
+                                            ColorHistogramBandPicker(
+                                                hueBins = liveHistogram.hueBins,
+                                                selectedBand = selectedColorBand,
+                                                config = colorBandsConfig,
+                                                enabled = cameraReady,
+                                                onSelectBand = { band ->
+                                                    if (selectedColorBand != band) {
+                                                        selectedColorBand = band
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
                                                 }
                                             )
-                                            ActionPillButton(
-                                                label = stringResource(R.string.action_auto_contrast),
-                                                selected = false,
-                                                accentColor = IrPalette.IrAmber,
+
+                                            // Seçili bant için Ton / Doygunluk / Parlaklık seçicisi
+                                            SegmentedChoiceRow(
+                                                options = listOf(
+                                                    PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(bandAdj.deltaHue)}°",
+                                                    PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${formatSigned(bandAdj.deltaSat * 100f)}%",
+                                                    PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.slider_point_lum)} · ${formatSigned(bandAdj.deltaLum * 100f)}%"
+                                                ),
+                                                selected = activeBandSubSlider,
                                                 enabled = cameraReady,
-                                                modifier = Modifier.weight(1f),
-                                                leadingIcon = { tint -> SparkleAutoIcon(tint = tint, modifier = Modifier.size(15.dp)) },
-                                                onClick = { runAutoContrast() }
+                                                onSelect = { activeBandSubSlider = it }
                                             )
+
+                                            when (activeBandSubSlider) {
+                                                PointColorSubSlider.TON -> {
+                                                    val bandSpectrum = remember(selectedColorBand) {
+                                                        val base = selectedColorBand.centerHue
+                                                        List(9) { idx ->
+                                                            val offset = -180f + idx * 45f
+                                                            val h = (((base + offset) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
+                                                            Color.hsv(h, 0.88f, 0.96f)
+                                                        }
+                                                    }
+                                                    ProGradientSliderRow(
+                                                        label = "${selectedColorBand.label} · ${stringResource(R.string.slider_point_hue)}",
+                                                        valueBadge = "${formatSigned(bandAdj.deltaHue)}°",
+                                                        isModified = abs(bandAdj.deltaHue) > 0.5f,
+                                                        value = bandAdj.deltaHue,
+                                                        defaultValue = 0f,
+                                                        snapTolerance = 5f,
+                                                        valueRange = -180f..180f,
+                                                        enabled = cameraReady,
+                                                        gradient = Brush.horizontalGradient(bandSpectrum),
+                                                        onStepMinus = {
+                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                                it.copy(deltaHue = (it.deltaHue - 10f).coerceIn(-180f, 180f))
+                                                            }
+                                                        },
+                                                        onStepPlus = {
+                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                                it.copy(deltaHue = (it.deltaHue + 10f).coerceIn(-180f, 180f))
+                                                            }
+                                                        },
+                                                        onReset = {
+                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaHue = 0f) }
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        },
+                                                        onValueChange = { newVal ->
+                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaHue = newVal) }
+                                                        }
+                                                    )
+                                                }
+
+                                                PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
+                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.slider_saturation)}",
+                                                    valueBadge = "${formatSigned(bandAdj.deltaSat * 100f)}%",
+                                                    isModified = abs(bandAdj.deltaSat) > 0.02f,
+                                                    value = bandAdj.deltaSat,
+                                                    defaultValue = 0f,
+                                                    snapTolerance = 0.05f,
+                                                    valueRange = -1.0f..1.0f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        listOf(Color(0xFF475569), selectedColorBand.swatchColor)
+                                                    ),
+                                                    onStepMinus = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            it.copy(deltaSat = (it.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f))
+                                                        }
+                                                    },
+                                                    onStepPlus = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            it.copy(deltaSat = (it.deltaSat + 0.05f).coerceIn(-1.0f, 1.0f))
+                                                        }
+                                                    },
+                                                    onReset = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaSat = 0f) }
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    },
+                                                    onValueChange = { newVal ->
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaSat = newVal) }
+                                                    }
+                                                )
+
+                                                PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
+                                                    label = "${selectedColorBand.label} · ${stringResource(R.string.slider_point_lum)}",
+                                                    valueBadge = "${formatSigned(bandAdj.deltaLum * 100f)}%",
+                                                    isModified = abs(bandAdj.deltaLum) > 0.02f,
+                                                    value = bandAdj.deltaLum,
+                                                    defaultValue = 0f,
+                                                    snapTolerance = 0.05f,
+                                                    valueRange = -1.0f..1.0f,
+                                                    enabled = cameraReady,
+                                                    gradient = Brush.horizontalGradient(
+                                                        listOf(Color(0xFF1E293B), selectedColorBand.swatchColor, Color.White)
+                                                    ),
+                                                    onStepMinus = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            it.copy(deltaLum = (it.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f))
+                                                        }
+                                                    },
+                                                    onStepPlus = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            it.copy(deltaLum = (it.deltaLum + 0.05f).coerceIn(-1.0f, 1.0f))
+                                                        }
+                                                    },
+                                                    onReset = {
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaLum = 0f) }
+                                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    },
+                                                    onValueChange = { newVal ->
+                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaLum = newVal) }
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        ColorPanelMode.PIPET -> {
+                                            if (targetedColorConfig.isActive) {
+                                                // Noktasal renk başlığı + genişlik + kaldır
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    val shiftedHue = (((targetedColorConfig.targetHue + targetedColorConfig.deltaHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
+                                                    val hasHueShift = abs(targetedColorConfig.deltaHue) > 1f
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                        modifier = Modifier.weight(1f, fill = false)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(15.dp)
+                                                                .clip(CircleShape)
+                                                                .background(Color(targetedColorConfig.previewColorInt))
+                                                                .border(1.dp, Color.White.copy(alpha = 0.7f), CircleShape)
+                                                        )
+                                                        if (hasHueShift) {
+                                                            val shiftedColor = Color.hsv(
+                                                                hue = shiftedHue,
+                                                                saturation = (targetedColorConfig.targetSat * (1f + targetedColorConfig.deltaSat)).coerceIn(0.35f, 1f),
+                                                                value = (targetedColorConfig.targetLum + targetedColorConfig.deltaLum * 0.45f).coerceIn(0.35f, 1f)
+                                                            )
+                                                            Text(
+                                                                text = "→",
+                                                                color = IrPalette.TextSecondary,
+                                                                fontSize = 11.sp
+                                                            )
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(15.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(shiftedColor)
+                                                                    .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                                                            )
+                                                        }
+                                                        Text(
+                                                            text = if (hasHueShift) {
+                                                                getHueName(shiftedHue)
+                                                            } else {
+                                                                "${getHueName(targetedColorConfig.targetHue)} (${targetedColorConfig.targetHue.toInt()}°)"
+                                                            },
+                                                            color = IrPalette.IrTeal,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        listOf(
+                                                            stringResource(R.string.range_narrow) to 14f,
+                                                            stringResource(R.string.range_balanced) to 22f,
+                                                            stringResource(R.string.range_wide) to 36f
+                                                        ).forEach { (lbl, w) ->
+                                                            val isSel = targetedColorConfig.hueWidth == w
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .clip(RoundedCornerShape(8.dp))
+                                                                    .background(if (isSel) IrPalette.IrAmber else IrPalette.SurfaceSubtle)
+                                                                    .clickable {
+                                                                        targetedColorConfig = targetedColorConfig.copy(
+                                                                            hueWidth = w,
+                                                                            hueFeather = if (w == 14f) 12f else if (w == 22f) 18f else 26f
+                                                                        )
+                                                                    }
+                                                                    .padding(horizontal = 7.dp, vertical = 4.dp)
+                                                            ) {
+                                                                Text(
+                                                                    text = lbl,
+                                                                    color = if (isSel) Color.Black else IrPalette.TextSecondary,
+                                                                    fontSize = 11.sp,
+                                                                    fontWeight = FontWeight.SemiBold
+                                                                )
+                                                            }
+                                                        }
+                                                        Text(
+                                                            text = stringResource(R.string.action_remove),
+                                                            color = IrPalette.IrCoral,
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .clickable {
+                                                                    targetedColorConfig = TargetedColorConfig()
+                                                                }
+                                                                .padding(horizontal = 6.dp, vertical = 4.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                SegmentedChoiceRow(
+                                                    options = listOf(
+                                                        PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(targetedColorConfig.deltaHue)}°",
+                                                        PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.slider_saturation)} · ${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
+                                                        PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.slider_point_lum)} · ${formatSigned(targetedColorConfig.deltaLum * 100f)}%"
+                                                    ),
+                                                    selected = activePointColorSubSlider,
+                                                    enabled = cameraReady,
+                                                    onSelect = { activePointColorSubSlider = it }
+                                                )
+
+                                                when (activePointColorSubSlider) {
+                                                    PointColorSubSlider.TON -> {
+                                                        val hueSpectrumColors = remember(targetedColorConfig.targetHue) {
+                                                            val base = targetedColorConfig.targetHue
+                                                            List(9) { idx ->
+                                                                val offset = -180f + idx * 45f
+                                                                val h = (((base + offset) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
+                                                                Color.hsv(h, 0.88f, 0.96f)
+                                                            }
+                                                        }
+                                                        ProGradientSliderRow(
+                                                            label = stringResource(R.string.slider_point_hue),
+                                                            valueBadge = "${formatSigned(targetedColorConfig.deltaHue)}°",
+                                                            isModified = abs(targetedColorConfig.deltaHue) > 0.5f,
+                                                            value = targetedColorConfig.deltaHue,
+                                                            defaultValue = 0f,
+                                                            snapTolerance = 5f,
+                                                            valueRange = -180f..180f,
+                                                            enabled = cameraReady,
+                                                            gradient = Brush.horizontalGradient(hueSpectrumColors),
+                                                            onStepMinus = {
+                                                                targetedColorConfig = targetedColorConfig.copy(
+                                                                    deltaHue = (targetedColorConfig.deltaHue - 10f).coerceIn(-180f, 180f)
+                                                                )
+                                                            },
+                                                            onStepPlus = {
+                                                                targetedColorConfig = targetedColorConfig.copy(
+                                                                    deltaHue = (targetedColorConfig.deltaHue + 10f).coerceIn(-180f, 180f)
+                                                                )
+                                                            },
+                                                            onReset = {
+                                                                targetedColorConfig = targetedColorConfig.copy(deltaHue = 0f)
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            },
+                                                            onValueChange = {
+                                                                targetedColorConfig = targetedColorConfig.copy(deltaHue = it)
+                                                            }
+                                                        )
+                                                    }
+
+                                                    PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
+                                                        label = stringResource(R.string.slider_point_sat),
+                                                        valueBadge = "${formatSigned(targetedColorConfig.deltaSat * 100f)}%",
+                                                        isModified = abs(targetedColorConfig.deltaSat) > 0.02f,
+                                                        value = targetedColorConfig.deltaSat,
+                                                        defaultValue = 0f,
+                                                        snapTolerance = 0.05f,
+                                                        valueRange = -1.0f..1.0f,
+                                                        enabled = cameraReady,
+                                                        gradient = Brush.horizontalGradient(
+                                                            listOf(Color(0xFF64748B), Color(0xFF22C55E), Color(0xFFF59E0B), Color(0xFFEF4444))
+                                                        ),
+                                                        onStepMinus = {
+                                                            targetedColorConfig = targetedColorConfig.copy(
+                                                                deltaSat = (targetedColorConfig.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f)
+                                                            )
+                                                        },
+                                                        onStepPlus = {
+                                                            targetedColorConfig = targetedColorConfig.copy(
+                                                                deltaSat = (targetedColorConfig.deltaSat + 0.05f).coerceIn(-1.0f, 1.0f)
+                                                            )
+                                                        },
+                                                        onReset = {
+                                                            targetedColorConfig = targetedColorConfig.copy(deltaSat = 0f)
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        },
+                                                        onValueChange = {
+                                                            targetedColorConfig = targetedColorConfig.copy(deltaSat = it)
+                                                        }
+                                                    )
+
+                                                    PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
+                                                        label = stringResource(R.string.slider_point_lum),
+                                                        valueBadge = "${formatSigned(targetedColorConfig.deltaLum * 100f)}%",
+                                                        isModified = abs(targetedColorConfig.deltaLum) > 0.02f,
+                                                        value = targetedColorConfig.deltaLum,
+                                                        defaultValue = 0f,
+                                                        snapTolerance = 0.05f,
+                                                        valueRange = -1.0f..1.0f,
+                                                        enabled = cameraReady,
+                                                        gradient = Brush.horizontalGradient(
+                                                            listOf(Color(0xFF334155), Color.White)
+                                                        ),
+                                                        onStepMinus = {
+                                                            targetedColorConfig = targetedColorConfig.copy(
+                                                                deltaLum = (targetedColorConfig.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f)
+                                                            )
+                                                        },
+                                                        onStepPlus = {
+                                                            targetedColorConfig = targetedColorConfig.copy(
+                                                                deltaLum = (targetedColorConfig.deltaLum + 0.05f).coerceIn(-1.0f, 1.0f)
+                                                            )
+                                                        },
+                                                        onReset = {
+                                                            targetedColorConfig = targetedColorConfig.copy(deltaLum = 0f)
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        },
+                                                        onValueChange = {
+                                                            targetedColorConfig = targetedColorConfig.copy(deltaLum = it)
+                                                        }
+                                                    )
+                                                }
+                                            } else {
+                                                Text(
+                                                    text = stringResource(R.string.pipette_empty_hint),
+                                                    color = IrPalette.TextSecondary,
+                                                    fontSize = 12.sp
+                                                )
+                                                ActionPillButton(
+                                                    label = if (isColorPipetteActive) stringResource(R.string.action_color_pipette_active) else stringResource(R.string.action_color_pipette),
+                                                    selected = isColorPipetteActive,
+                                                    accentColor = IrPalette.IrTeal,
+                                                    enabled = cameraReady,
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    leadingIcon = { tint -> PipetteIcon(tint = tint, modifier = Modifier.size(15.dp)) },
+                                                    onClick = {
+                                                        isColorPipetteActive = !isColorPipetteActive
+                                                        if (isColorPipetteActive) {
+                                                            isPickerActive = false
+                                                            isExposureBoxPicking = false
+                                                            showStatus(strTapColor)
+                                                        }
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -4144,6 +4757,7 @@ fun CameraScreen(hasCameraPermission: Boolean) {
                         saturationValue = DEFAULT_SATURATION
                         contrastValue = DEFAULT_CONTRAST
                         targetedColorConfig = TargetedColorConfig()
+                        colorBandsConfig = ColorBandsConfig()
                         isPickerActive = false
                         isColorPipetteActive = false
                         exposureBoxNorm = Offset(0.5f, 0.5f)
@@ -4600,74 +5214,300 @@ private fun StatusTelemetryChip(
     }
 }
 
+/**
+ * Profesyonel 5-bölge RGB + Parlaklık (Luma) canlı kamera histogramı.
+ * Lightroom / Sony Alpha / Halide tarzı yumuşatılmış RGB kanalları + parlaklık zarfı + gölge/vurgu taşma uyarıları.
+ */
 @Composable
 private fun LiveHistogramOverlay(
-    bins: FloatArray,
-    accentColor: Color,
+    data: ProHistogramData,
     modifier: Modifier = Modifier
 ) {
-    val hasHighlightClip = bins.isNotEmpty() && bins.last() > 0.85f
+    val borderColor = when {
+        data.highlightClip -> IrPalette.IrCoral.copy(alpha = 0.72f)
+        data.shadowClip -> IrPalette.IrCyan.copy(alpha = 0.65f)
+        else -> Color.White.copy(alpha = 0.16f)
+    }
     Box(
         modifier = modifier
-            .width(78.dp)
-            .height(30.dp)
-            .clip(RoundedCornerShape(9.dp))
-            .background(IrPalette.HudScrim)
-            .border(
-                1.dp,
-                if (hasHighlightClip) IrPalette.IrCoral.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.14f),
-                RoundedCornerShape(9.dp)
-            )
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .width(114.dp)
+            .height(44.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xD907090D))
+            .border(0.9.dp, borderColor, RoundedCornerShape(10.dp))
+            .padding(horizontal = 5.dp, vertical = 4.dp)
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            if (bins.isEmpty()) return@Canvas
+            val luma = data.luma
+            if (luma.isEmpty()) return@Canvas
             val w = size.width
             val h = size.height
-            // İnce dikey referans çizgileri (gölgeler / orta tonlar / vurgular)
-            val guideColor = Color.White.copy(alpha = 0.12f)
-            drawLine(guideColor, Offset(w * 0.25f, 0f), Offset(w * 0.25f, h), strokeWidth = 0.7.dp.toPx())
-            drawLine(guideColor, Offset(w * 0.50f, 0f), Offset(w * 0.50f, h), strokeWidth = 0.7.dp.toPx())
-            drawLine(guideColor, Offset(w * 0.75f, 0f), Offset(w * 0.75f, h), strokeWidth = 0.7.dp.toPx())
+            val topPad = 3.dp.toPx()
+            val graphH = (h - topPad).coerceAtLeast(1f)
 
-            val step = w / (bins.size - 1).coerceAtLeast(1)
-            val fillPath = Path().apply {
-                moveTo(0f, h)
-                bins.forEachIndexed { idx, v ->
-                    val x = idx * step
-                    val y = h - (v.coerceIn(0f, 1f) * h)
-                    lineTo(x, y)
-                }
-                lineTo(w, h)
-                close()
+            // 5 pozlama bölgesi dikey referans ızgarası (Siyahlar · Gölgeler · Orta · Vurgular · Beyazlar)
+            val zoneGuide = Color.White.copy(alpha = 0.10f)
+            val midGuide = Color.White.copy(alpha = 0.17f)
+            for (z in 1..4) {
+                val x = w * (z / 5f)
+                drawLine(zoneGuide, Offset(x, 0f), Offset(x, h), strokeWidth = 0.7.dp.toPx())
             }
+            drawLine(midGuide, Offset(0f, topPad + graphH * 0.5f), Offset(w, topPad + graphH * 0.5f), strokeWidth = 0.6.dp.toPx())
+
+            fun buildSmoothCurvePaths(bins: FloatArray): Pair<Path, Path> {
+                val step = w / (bins.size - 1).coerceAtLeast(1)
+                val fillPath = Path()
+                val strokePath = Path()
+                fillPath.moveTo(0f, h)
+                var prevX = 0f
+                var prevY = h - (bins[0].coerceIn(0f, 1f) * graphH)
+                fillPath.lineTo(prevX, prevY)
+                strokePath.moveTo(prevX, prevY)
+                for (i in 1 until bins.size) {
+                    val cx = i * step
+                    val cy = h - (bins[i].coerceIn(0f, 1f) * graphH)
+                    val midX = (prevX + cx) * 0.5f
+                    val midY = (prevY + cy) * 0.5f
+                    fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
+                    strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
+                    prevX = cx
+                    prevY = cy
+                }
+                fillPath.lineTo(prevX, prevY)
+                fillPath.lineTo(w, h)
+                fillPath.close()
+                strokePath.lineTo(prevX, prevY)
+                return fillPath to strokePath
+            }
+
+            // Üst üste katmanlı RGB kanalları (renk dengesi tek bakışta okunur)
+            val channels = listOf(
+                Triple(data.r, Color(0xFFFF453A), 0.34f),
+                Triple(data.g, Color(0xFF30D158), 0.32f),
+                Triple(data.b, Color(0xFF0A84FF), 0.36f)
+            )
+            channels.forEach { (bins, color, fillAlpha) ->
+                if (bins.isNotEmpty()) {
+                    val (fillP, strokeP) = buildSmoothCurvePaths(bins)
+                    drawPath(
+                        path = fillP,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(color.copy(alpha = fillAlpha), color.copy(alpha = 0.04f))
+                        ),
+                        style = Fill
+                    )
+                    drawPath(
+                        path = strokeP,
+                        color = color.copy(alpha = 0.72f),
+                        style = Stroke(width = 0.9.dp.toPx(), join = StrokeJoin.Round)
+                    )
+                }
+            }
+
+            // Üstte parlak beyaz Luma (genel parlaklık) zarf çizgisi
+            val (lumaFill, lumaStroke) = buildSmoothCurvePaths(luma)
             drawPath(
-                path = fillPath,
+                path = lumaFill,
                 brush = Brush.verticalGradient(
-                    colors = listOf(accentColor.copy(alpha = 0.50f), accentColor.copy(alpha = 0.08f))
+                    colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))
                 ),
                 style = Fill
             )
-
-            val strokePath = Path().apply {
-                bins.forEachIndexed { idx, v ->
-                    val x = idx * step
-                    val y = h - (v.coerceIn(0f, 1f) * h)
-                    if (idx == 0) moveTo(x, y) else lineTo(x, y)
-                }
-            }
             drawPath(
-                path = strokePath,
-                color = Color.White.copy(alpha = 0.90f),
-                style = Stroke(width = 1.1.dp.toPx(), join = StrokeJoin.Round)
+                path = lumaStroke,
+                color = Color.White.copy(alpha = 0.94f),
+                style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
             )
 
-            if (hasHighlightClip) {
-                drawCircle(
-                    color = IrPalette.IrCoral,
-                    radius = 2.dp.toPx(),
-                    center = Offset(w - 2.dp.toPx(), 2.dp.toPx())
+            // Alt taban çizgisi
+            drawLine(
+                color = Color.White.copy(alpha = 0.22f),
+                start = Offset(0f, h),
+                end = Offset(w, h),
+                strokeWidth = 0.8.dp.toPx()
+            )
+
+            // Sol üst gölge taşma (crushed blacks) + sağ üst vurgu yanma (blown highlights) üçgen göstergeleri
+            val tri = 4.2.dp.toPx()
+            val shadowTri = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(tri, 0f)
+                lineTo(0f, tri)
+                close()
+            }
+            drawPath(
+                path = shadowTri,
+                color = if (data.shadowClip) IrPalette.IrCyan else Color.White.copy(alpha = 0.18f),
+                style = Fill
+            )
+
+            val highlightTri = Path().apply {
+                moveTo(w, 0f)
+                lineTo(w - tri, 0f)
+                lineTo(w, tri)
+                close()
+            }
+            drawPath(
+                path = highlightTri,
+                color = if (data.highlightClip) IrPalette.IrCoral else Color.White.copy(alpha = 0.18f),
+                style = Fill
+            )
+        }
+    }
+}
+
+/**
+ * Lightroom / Darkroom tarzı etkileşimli Canlı Renk Tonu (Hue) Histogramı ve 8-Bant Seçici.
+ * Sahnede hangi renklerin yoğun olduğunu canlı renkli histogram olarak gösterir;
+ * histograma dokunarak veya sürükleyerek (ya da alt renk noktalarından) 8 banttan birini anında seçersiniz.
+ */
+@Composable
+private fun ColorHistogramBandPicker(
+    hueBins: FloatArray,
+    selectedBand: ColorBand,
+    config: ColorBandsConfig,
+    enabled: Boolean,
+    onSelectBand: (ColorBand) -> Unit
+) {
+    val currentOnSelect by rememberUpdatedState(onSelectBand)
+    val allBands = ColorBand.entries
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF090C11))
+            .border(1.dp, IrPalette.BorderSubtle, RoundedCornerShape(12.dp))
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        // Üst: Canlı 48 sütunlu gökkuşağı Hue histogramı + seçili bant çerçevesi (dokun & sürükle)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF05070A))
+                .pointerInput(enabled) {
+                    if (!enabled) return@pointerInput
+                    fun xToBand(x: Float): ColorBand {
+                        val frac = (x / size.width.coerceAtLeast(1).toFloat()).coerceIn(0f, 0.9999f)
+                        val idx = (frac * allBands.size).toInt().coerceIn(0, allBands.lastIndex)
+                        return allBands[idx]
+                    }
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        currentOnSelect(xToBand(down.position.x))
+                        down.consume()
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) break
+                            currentOnSelect(xToBand(change.position.x))
+                            change.consume()
+                        }
+                    }
+                }
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val bandW = w / allBands.size.toFloat()
+
+                // 1) Seçili bandın arka plan vurgusu
+                val selLeft = selectedBand.index * bandW
+                drawRect(
+                    color = selectedBand.swatchColor.copy(alpha = 0.16f),
+                    topLeft = Offset(selLeft, 0f),
+                    size = androidx.compose.ui.geometry.Size(bandW, h)
                 )
+
+                // 2) 8 bant dikey ayırıcı çizgileri
+                for (i in 1 until allBands.size) {
+                    val x = i * bandW
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.08f),
+                        start = Offset(x, 0f),
+                        end = Offset(x, h),
+                        strokeWidth = 0.7.dp.toPx()
+                    )
+                }
+
+                // 3) 48 sütunlu canlı gökkuşağı Hue dağılım histogramı
+                if (hueBins.isNotEmpty()) {
+                    val barW = w / hueBins.size.toFloat()
+                    val maxBarH = h - 6.dp.toPx()
+                    for (i in hueBins.indices) {
+                        val v = hueBins[i].coerceIn(0f, 1f)
+                        val bandPos = ((i + 0.5f) / hueBins.size.toFloat()) * 8f
+                        val hueDeg = perceptualBandPosToHue(bandPos).coerceIn(0f, 359.99f)
+                        val barColor = Color.hsv(hueDeg, 0.86f, 0.96f)
+                        val barH = (v * maxBarH).coerceAtLeast(1.5.dp.toPx())
+                        val bx = i * barW
+                        drawRect(
+                            color = barColor.copy(alpha = 0.58f),
+                            topLeft = Offset(bx + 0.4f, h - barH),
+                            size = androidx.compose.ui.geometry.Size((barW - 0.8f).coerceAtLeast(1f), barH)
+                        )
+                        // Üst kenar parlak taç çizgisi
+                        drawLine(
+                            color = barColor.copy(alpha = 0.95f),
+                            start = Offset(bx, h - barH),
+                            end = Offset(bx + barW, h - barH),
+                            strokeWidth = 1.4.dp.toPx()
+                        )
+                    }
+                }
+
+                // 4) Seçili bandın keskin optik çerçevesi
+                drawRoundRect(
+                    color = selectedBand.swatchColor,
+                    topLeft = Offset(selLeft + 0.8.dp.toPx(), 0.8.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(bandW - 1.6.dp.toPx(), h - 1.6.dp.toPx()),
+                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+                    style = Stroke(width = 1.4.dp.toPx())
+                )
+            }
+        }
+
+        // Alt: Histogram bantlarıyla 1:1 hizalı 8 renk noktası (düzenlenen bantlarda üstte nokta göstergesi)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            allBands.forEach { band ->
+                val isSelected = band == selectedBand
+                val isBandModified = config.get(band).isModified
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(26.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(enabled = enabled) { onSelectBand(band) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (isSelected) 18.dp else 13.dp)
+                            .clip(CircleShape)
+                            .background(band.swatchColor)
+                            .border(
+                                width = if (isSelected) 2.dp else 1.dp,
+                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.28f),
+                                shape = CircleShape
+                            )
+                    )
+                    if (isBandModified) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 1.dp, end = 4.dp)
+                                .size(5.dp)
+                                .clip(CircleShape)
+                                .background(IrPalette.IrAmber)
+                        )
+                    }
+                }
             }
         }
     }

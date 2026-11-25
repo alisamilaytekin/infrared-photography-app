@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">रोशनी लॉक हुई (AE-L)</string>
     <string name="status_ae_lock_off">रोशनी अनलॉक हुई</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- कैमरा अनुमति और जानकारी -->
+    <string name="permission_camera_title">कैमरा अनुमति आवश्यक है</string>
+    <string name="permission_camera_body">लाइव व्यूफ़ाइंडर और RAW/JPEG कैप्चर के लिए SpectraS को कैमरा एक्सेस चाहिए। आप कैमरा एक्सेस के बिना भी स्टूडियो में गैलरी फ़ोटो संपादित कर सकते हैं।</string>
+    <string name="permission_camera_grant">कैमरा अनुमति दें</string>
+    <string name="permission_open_settings">सेटिंग्स खोलें</string>
+    <string name="permission_use_studio">फ़ोटो स्टूडियो में जाएं</string>
+    <string name="settings_about_section">जानकारी और गोपनीयता</string>
+    <string name="settings_privacy_policy">गोपनीयता नीति</string>
+    <string name="settings_version">ऐप संस्करण</string>
 </resources>

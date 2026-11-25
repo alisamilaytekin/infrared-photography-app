@@ -89,7 +89,7 @@ jobs:
             app/build/outputs/bundle/release/SpectraS-playstore.aab \
             --latest \
             --title "SpectraS v5.0 (Live HSL & Infrared RAW Camera + Photo Editor Studio)" \
-            --notes "Play Store Edition (targetSdk 35, AAB + APK): Full-width floating HUD, Ghost Mode, Live 8-Band HSL Color Histogram Mixer, 360° Point Color Pipette, Real-Time R↔B Channel Swap, 8 Built-in Infrared & Cinema Presets, Flash & Front Camera, Bilingual EN/TR, and Full Live Gallery Photo Editor Studio." || true
+            --notes "Play Store Edition (targetSdk 36 / Android 16, AAB + APK): 3 Shooting Modes (Aesthetic & Filters, IR Lab, Pro Camera), 26 Built-in Film & Infrared Presets, 12-Band Color Mixer, 360° Pick Color, Real-Time R↔B Channel Swap, RAW (DNG) + JPEG, 13 Global Languages, and Built-in Photo Editor Studio." || true
 
       - name: Keep Only Latest 3 Releases and Workflow Runs
         env:

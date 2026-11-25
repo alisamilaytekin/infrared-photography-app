@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Cahaya dikunci (AE-L)</string>
     <string name="status_ae_lock_off">Cahaya dibuka</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Izin kamera & Tentang -->
+    <string name="permission_camera_title">Izin kamera diperlukan</string>
+    <string name="permission_camera_body">SpectraS memerlukan akses kamera untuk pratinjau langsung dan pengambilan RAW/JPEG. Anda juga dapat mengedit foto galeri di Studio tanpa akses kamera.</string>
+    <string name="permission_camera_grant">Izinkan Kamera</string>
+    <string name="permission_open_settings">Buka Pengaturan</string>
+    <string name="permission_use_studio">Lanjut ke Studio Foto</string>
+    <string name="settings_about_section">Tentang &amp; Privasi</string>
+    <string name="settings_privacy_policy">Kebijakan Privasi</string>
+    <string name="settings_version">Versi Aplikasi</string>
 </resources>

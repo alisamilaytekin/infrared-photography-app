@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Luz travada (AE-L)</string>
     <string name="status_ae_lock_off">Luz destravada</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Permissão de câmera e Sobre -->
+    <string name="permission_camera_title">Permissão de câmera necessária</string>
+    <string name="permission_camera_body">O SpectraS precisa de acesso à câmera para visualização ao vivo e captura RAW/JPEG. Você também pode editar fotos da galeria no Estúdio sem acesso à câmera.</string>
+    <string name="permission_camera_grant">Permitir Câmera</string>
+    <string name="permission_open_settings">Abrir Configurações</string>
+    <string name="permission_use_studio">Ir para o Estúdio de Fotos</string>
+    <string name="settings_about_section">Sobre e Privacidade</string>
+    <string name="settings_privacy_policy">Política de Privacidade</string>
+    <string name="settings_version">Versão do App</string>
 </resources>

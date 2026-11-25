@@ -40,6 +40,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.provider.MediaStore
+import android.provider.Settings
 import android.util.Log
 import android.util.Range
 import android.util.Rational
@@ -278,6 +279,40 @@ class MainActivity : ComponentActivity() {
         return super.onKeyDown(keyCode, event)
     }
 
+    private fun requestCameraPermissions() {
+        val missingPermissions = mutableListOf<String>()
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            missingPermissions.add(Manifest.permission.CAMERA)
+        }
+        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                missingPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        if (missingPermissions.isNotEmpty()) {
+            permissionLauncher.launch(missingPermissions.toTypedArray())
+        } else {
+            hasCameraPermission = true
+        }
+    }
+
+    private fun openAppSettings() {
+        try {
+            val intent = Intent(
+                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", packageName, null)
+            )
+            startActivity(intent)
+        } catch (_: Exception) {
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        hasCameraPermission =
+            ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -292,17 +327,10 @@ class MainActivity : ComponentActivity() {
         hasCameraPermission =
             ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
-        val missingPermissions = mutableListOf<String>()
-        if (!hasCameraPermission) {
-            missingPermissions.add(Manifest.permission.CAMERA)
-        }
-        if (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                missingPermissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
-        }
-        if (missingPermissions.isNotEmpty()) {
-            permissionLauncher.launch(missingPermissions.toTypedArray())
+        if (!hasCameraPermission || (Build.VERSION.SDK_INT in Build.VERSION_CODES.M..Build.VERSION_CODES.P &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
+        ) {
+            requestCameraPermissions()
         }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
@@ -310,7 +338,9 @@ class MainActivity : ComponentActivity() {
                     hasCameraPermission = hasCameraPermission,
                     incomingEditUri = incomingEditUri,
                     incomingEditNonce = incomingEditNonce,
-                    onRegisterVolumeShutter = { cb -> volumeShutterAction = cb }
+                    onRegisterVolumeShutter = { cb -> volumeShutterAction = cb },
+                    onRequestCameraPermission = { requestCameraPermissions() },
+                    onOpenAppSettings = { openAppSettings() }
                 )
             }
         }
@@ -3124,7 +3154,9 @@ fun CameraScreen(
     hasCameraPermission: Boolean,
     incomingEditUri: Uri? = null,
     incomingEditNonce: Int = 0,
-    onRegisterVolumeShutter: ((() -> Unit)?) -> Unit = {}
+    onRegisterVolumeShutter: ((() -> Unit)?) -> Unit = {},
+    onRequestCameraPermission: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -5854,6 +5886,80 @@ fun CameraScreen(
                             .background(Color.White.copy(alpha = shutterFlashAlpha.value))
                     )
                 }
+
+                // Kamera izni reddedildiğinde siyah ekran yerine açıklayıcı kart göster
+                if (!hasCameraPermission && !showExperienceWelcome) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(IrPalette.VoidBlack.copy(alpha = 0.88f))
+                            .padding(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .widthIn(max = 360.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(IrPalette.HudCard)
+                                .border(1.dp, IrPalette.BorderBright, RoundedCornerShape(18.dp))
+                                .padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = stringResource(R.string.permission_camera_title),
+                                color = IrPalette.TextPrimary,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = stringResource(R.string.permission_camera_body),
+                                color = IrPalette.TextSecondary,
+                                fontSize = 13.sp,
+                                lineHeight = 19.sp,
+                                textAlign = TextAlign.Center
+                            )
+                            Button(
+                                onClick = onRequestCameraPermission,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = IrPalette.IrAmber,
+                                    contentColor = Color.Black
+                                )
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.permission_camera_grant),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onOpenAppSettings,
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, IrPalette.BorderBright),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = IrPalette.TextPrimary)
+                            ) {
+                                Text(
+                                    text = stringResource(R.string.permission_open_settings),
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 13.sp
+                                )
+                            }
+                            TextButton(onClick = { isStudioMode = true }) {
+                                Text(
+                                    text = stringResource(R.string.permission_use_studio),
+                                    color = IrPalette.IrCyan,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 12.5.sp
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // YÜZEN ALT KATMAN: Tam genişlikte HUD satırı + Yarı saydam Pro kontrol paneli
@@ -7337,34 +7443,27 @@ fun CameraScreen(
                         )
                         Box(
                             modifier = Modifier
-                                .size(40.dp)
+                                .size(38.dp)
                                 .semantics { contentDescription = strPanelCd }
-                                .clip(CircleShape)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.20f)
+                                    else Color.White.copy(alpha = 0.06f)
+                                )
+                                .border(
+                                    0.8.dp,
+                                    if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
+                                    RoundedCornerShape(10.dp)
+                                )
                                 .clickable { isDeckCollapsed = !isDeckCollapsed },
                             contentAlignment = Alignment.Center
                         ) {
-                            Box(
+                            ChevronIcon(
+                                tint = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(
-                                        if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.20f)
-                                        else Color.White.copy(alpha = 0.06f)
-                                    )
-                                    .border(
-                                        0.8.dp,
-                                        if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.BorderSubtle,
-                                        RoundedCornerShape(9.dp)
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                ChevronIcon(
-                                    tint = if (isDeckCollapsed) IrPalette.IrAmber else IrPalette.TextPrimary,
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .rotate(chevronRotation)
-                                )
-                            }
+                                    .size(15.dp)
+                                    .rotate(chevronRotation)
+                            )
                         }
                     }
                 }
@@ -7425,7 +7524,7 @@ fun CameraScreen(
                     if (hasFrontCamera) {
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(40.dp)
                                 .semantics { contentDescription = strFlipCameraCd }
                                 .clip(CircleShape)
                                 .clickable(enabled = cameraReady) {
@@ -7452,7 +7551,7 @@ fun CameraScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(34.dp)
+                                    .size(36.dp)
                                     .clip(CircleShape)
                                     .background(if (useFrontCamera) IrPalette.IrCyan.copy(alpha = 0.16f) else IrPalette.HudCard)
                                     .border(
@@ -7464,7 +7563,7 @@ fun CameraScreen(
                             ) {
                                 FlipCameraIcon(
                                     tint = if (useFrontCamera) IrPalette.IrCyan else IrPalette.TextPrimary,
-                                    modifier = Modifier.size(15.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -8425,6 +8524,91 @@ fun CameraScreen(
                         ) {
                             Text(stringResource(R.string.settings_resolution), color = IrPalette.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                             Text(resTxt, color = IrPalette.IrCyan, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
+                    item(key = "sec_about") {
+                        Text(
+                            text = stringResource(R.string.settings_about_section),
+                            color = IrPalette.TextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    item(key = "tool_privacy") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable {
+                                    try {
+                                        val intent = Intent(
+                                            Intent.ACTION_VIEW,
+                                            Uri.parse("https://alisamilaytekin.github.io/infrared-photography-app/privacy-policy.html")
+                                        )
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_privacy_policy),
+                                color = IrPalette.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "↗",
+                                color = IrPalette.IrCyan,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    item(key = "tool_version") {
+                        val appVersionName = remember {
+                            try {
+                                val pkgInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    context.packageManager.getPackageInfo(
+                                        context.packageName,
+                                        PackageManager.PackageInfoFlags.of(0)
+                                    )
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    context.packageManager.getPackageInfo(context.packageName, 0)
+                                }
+                                pkgInfo.versionName ?: "5.0"
+                            } catch (_: Exception) {
+                                "5.0"
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_version),
+                                color = IrPalette.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "v$appVersionName",
+                                color = IrPalette.TextSecondary,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
@@ -10099,25 +10283,54 @@ internal fun FlashIcon(mode: FlashMode, tint: Color, modifier: Modifier = Modifi
 @Composable
 internal fun FlipCameraIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
-        val stroke = 1.5.dp.toPx()
+        val stroke = 1.65.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val r = size.minDimension * 0.34f
+        val arcTopLeft = Offset(cx - r, cy - r)
+        val arcSize = androidx.compose.ui.geometry.Size(r * 2f, r * 2f)
+
         drawArc(
             color = tint,
-            startAngle = 200f,
-            sweepAngle = 140f,
+            startAngle = 205f,
+            sweepAngle = 130f,
             useCenter = false,
+            topLeft = arcTopLeft,
+            size = arcSize,
             style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
         drawArc(
             color = tint,
-            startAngle = 20f,
-            sweepAngle = 140f,
+            startAngle = 25f,
+            sweepAngle = 130f,
             useCenter = false,
+            topLeft = arcTopLeft,
+            size = arcSize,
             style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
-        drawLine(tint, Offset(size.width * 0.80f, size.height * 0.18f), Offset(size.width * 0.90f, size.height * 0.38f), stroke, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.68f, size.height * 0.32f), Offset(size.width * 0.90f, size.height * 0.38f), stroke, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.20f, size.height * 0.82f), Offset(size.width * 0.10f, size.height * 0.62f), stroke, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.32f, size.height * 0.68f), Offset(size.width * 0.10f, size.height * 0.62f), stroke, cap = StrokeCap.Round)
+
+        fun drawArrowHead(endAngleDeg: Double) {
+            val endRad = Math.toRadians(endAngleDeg)
+            val tx = cx + r * cos(endRad).toFloat()
+            val ty = cy + r * sin(endRad).toFloat()
+            val wingLen = r * 0.48f
+            val backDeg = endAngleDeg - 90.0
+            val w1Rad = Math.toRadians(backDeg - 38.0)
+            val w2Rad = Math.toRadians(backDeg + 38.0)
+            val arrowPath = Path().apply {
+                moveTo(tx + wingLen * cos(w1Rad).toFloat(), ty + wingLen * sin(w1Rad).toFloat())
+                lineTo(tx, ty)
+                lineTo(tx + wingLen * cos(w2Rad).toFloat(), ty + wingLen * sin(w2Rad).toFloat())
+            }
+            drawPath(
+                path = arrowPath,
+                color = tint,
+                style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
+
+        drawArrowHead(335.0)
+        drawArrowHead(155.0)
     }
 }
 

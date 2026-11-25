@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Lumière verrouillée (AE-L)</string>
     <string name="status_ae_lock_off">Lumière déverrouillée</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Autorisation caméra & À propos -->
+    <string name="permission_camera_title">Autorisation caméra requise</string>
+    <string name="permission_camera_body">SpectraS a besoin d’accéder à la caméra pour l’aperçu en direct et la capture RAW/JPEG. Vous pouvez aussi retoucher des photos de votre galerie dans le Studio sans accès caméra.</string>
+    <string name="permission_camera_grant">Autoriser la caméra</string>
+    <string name="permission_open_settings">Ouvrir les paramètres</string>
+    <string name="permission_use_studio">Continuer vers le Studio Photo</string>
+    <string name="settings_about_section">À propos &amp; Confidentialité</string>
+    <string name="settings_privacy_policy">Politique de confidentialité</string>
+    <string name="settings_version">Version de l’application</string>
 </resources>

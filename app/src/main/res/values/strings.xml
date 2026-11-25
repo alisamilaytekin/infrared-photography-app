@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Light locked (AE-L)</string>
     <string name="status_ae_lock_off">Light unlocked</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Camera permission & About -->
+    <string name="permission_camera_title">Camera permission required</string>
+    <string name="permission_camera_body">SpectraS needs camera access for live viewfinder preview and RAW/JPEG capture. You can also edit gallery photos in Studio without camera access.</string>
+    <string name="permission_camera_grant">Allow Camera</string>
+    <string name="permission_open_settings">Open Settings</string>
+    <string name="permission_use_studio">Continue to Photo Studio</string>
+    <string name="settings_about_section">About &amp; Privacy</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_version">App Version</string>
 </resources>

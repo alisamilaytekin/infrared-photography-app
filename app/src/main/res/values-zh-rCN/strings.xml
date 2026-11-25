@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">已锁定曝光 (AE-L)</string>
     <string name="status_ae_lock_off">已解除曝光锁定</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- 相机权限与关于 -->
+    <string name="permission_camera_title">需要相机权限</string>
+    <string name="permission_camera_body">SpectraS 需要相机权限以进行实时取景和 RAW/JPEG 拍摄。即使没有相机权限，您也可以在工作室中编辑相册照片。</string>
+    <string name="permission_camera_grant">允许相机</string>
+    <string name="permission_open_settings">打开设置</string>
+    <string name="permission_use_studio">前往照片工作室</string>
+    <string name="settings_about_section">关于与隐私</string>
+    <string name="settings_privacy_policy">隐私政策</string>
+    <string name="settings_version">应用版本</string>
 </resources>

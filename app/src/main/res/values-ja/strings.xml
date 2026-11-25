@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">露出をロックしました (AE-L)</string>
     <string name="status_ae_lock_off">露出ロックを解除しました</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- カメラ権限とアプリ情報 -->
+    <string name="permission_camera_title">カメラの権限が必要です</string>
+    <string name="permission_camera_body">ライブビューとRAW/JPEG撮影にはカメラへのアクセスが必要です。カメラ権限がなくてもスタジオでギャラリー写真を編集できます。</string>
+    <string name="permission_camera_grant">カメラを許可</string>
+    <string name="permission_open_settings">設定を開く</string>
+    <string name="permission_use_studio">フォトスタジオへ進む</string>
+    <string name="settings_about_section">アプリ情報とプライバシー</string>
+    <string name="settings_privacy_policy">プライバシーポリシー</string>
+    <string name="settings_version">アプリバージョン</string>
 </resources>

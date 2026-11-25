@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">빛이 잠겼습니다 (AE-L)</string>
     <string name="status_ae_lock_off">빛 잠금이 해제되었습니다</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- 카메라 권한 및 정보 -->
+    <string name="permission_camera_title">카메라 권한이 필요합니다</string>
+    <string name="permission_camera_body">라이브 뷰파인더와 RAW/JPEG 촬영을 위해 카메라 권한이 필요합니다. 카메라 권한 없이도 스튜디오에서 갤러리 사진을 편집할 수 있습니다.</string>
+    <string name="permission_camera_grant">카메라 허용</string>
+    <string name="permission_open_settings">설정 열기</string>
+    <string name="permission_use_studio">포토 스튜디오로 이동</string>
+    <string name="settings_about_section">정보 및 개인정보</string>
+    <string name="settings_privacy_policy">개인정보처리방침</string>
+    <string name="settings_version">앱 버전</string>
 </resources>

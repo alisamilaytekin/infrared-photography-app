@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Свет заблокирован (AE-L)</string>
     <string name="status_ae_lock_off">Свет разблокирован</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Разрешение камеры и О приложении -->
+    <string name="permission_camera_title">Требуется доступ к камере</string>
+    <string name="permission_camera_body">SpectraS нужен доступ к камере для живого видоискателя и съёмки RAW/JPEG. Вы также можете редактировать фото из галереи в Студии без доступа к камере.</string>
+    <string name="permission_camera_grant">Разрешить камеру</string>
+    <string name="permission_open_settings">Открыть настройки</string>
+    <string name="permission_use_studio">Перейти в Фотостудию</string>
+    <string name="settings_about_section">О приложении и конфиденциальность</string>
+    <string name="settings_privacy_policy">Политика конфиденциальности</string>
+    <string name="settings_version">Версия приложения</string>
 </resources>

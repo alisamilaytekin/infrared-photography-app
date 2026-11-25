@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">تم قفل الإضاءة (AE-L)</string>
     <string name="status_ae_lock_off">تم فتح قفل الإضاءة</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- إذن الكاميرا وحول التطبيق -->
+    <string name="permission_camera_title">مطلوب إذن الكاميرا</string>
+    <string name="permission_camera_body">يحتاج SpectraS إلى إذن الكاميرا للمعاينة الحية والتقاط RAW/JPEG. يمكنك أيضًا تعديل صور المعرض في الاستوديو بدون إذن الكاميرا.</string>
+    <string name="permission_camera_grant">السماح بالكاميرا</string>
+    <string name="permission_open_settings">فتح الإعدادات</string>
+    <string name="permission_use_studio">المتابعة إلى استوديو الصور</string>
+    <string name="settings_about_section">حول التطبيق والخصوصية</string>
+    <string name="settings_privacy_policy">سياسة الخصوصية</string>
+    <string name="settings_version">إصدار التطبيق</string>
 </resources>

@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Işık kilitlendi (AE-L)</string>
     <string name="status_ae_lock_off">Işık kilidi açıldı</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Kamera izni & Hakkında -->
+    <string name="permission_camera_title">Kamera izni gerekiyor</string>
+    <string name="permission_camera_body">Canlı vizör ve RAW/JPEG fotoğraf çekimi için kamera izni gereklidir. İsterseniz Stüdyo modunda galeri fotoğraflarınızı düzenleyebilirsiniz.</string>
+    <string name="permission_camera_grant">Kamera İzni Ver</string>
+    <string name="permission_open_settings">Ayarları Aç</string>
+    <string name="permission_use_studio">Fotoğraf Stüdyosuna Geç</string>
+    <string name="settings_about_section">Hakkında &amp; Gizlilik</string>
+    <string name="settings_privacy_policy">Gizlilik Politikası</string>
+    <string name="settings_version">Uygulama Sürümü</string>
 </resources>

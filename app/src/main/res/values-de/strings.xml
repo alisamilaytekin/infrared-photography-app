@@ -264,4 +264,14 @@
     <string name="status_ae_lock_on">Licht gesperrt (AE-L)</string>
     <string name="status_ae_lock_off">Licht entsperrt</string>
     <string name="badge_ae_lock">AE-L</string>
+
+    <!-- Kameraberechtigung & Info -->
+    <string name="permission_camera_title">Kameraberechtigung erforderlich</string>
+    <string name="permission_camera_body">SpectraS benötigt Kamerazugriff für die Live-Vorschau und RAW/JPEG-Aufnahmen. Du kannst im Studio auch ohne Kamerazugriff Galeriefotos bearbeiten.</string>
+    <string name="permission_camera_grant">Kamera erlauben</string>
+    <string name="permission_open_settings">Einstellungen öffnen</string>
+    <string name="permission_use_studio">Weiter zum Fotostudio</string>
+    <string name="settings_about_section">Info &amp; Datenschutz</string>
+    <string name="settings_privacy_policy">Datenschutzerklärung</string>
+    <string name="settings_version">App-Version</string>
 </resources>

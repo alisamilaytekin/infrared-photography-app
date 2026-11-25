@@ -6,15 +6,16 @@ plugins {
 
 android {
     namespace = "com.alisamilaytekin.spectras"
-    compileSdk = 35
+    compileSdk = 36
 
     val ciRunNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+    val explicitVersionCode = System.getenv("PLAY_VERSION_CODE")?.toIntOrNull()
 
     defaultConfig {
         applicationId = "com.alisamilaytekin.spectras"
         minSdk = 21
-        targetSdk = 35
-        versionCode = 200 + ciRunNumber
+        targetSdk = 36
+        versionCode = explicitVersionCode ?: (200 + ciRunNumber)
         versionName = "5.0.$ciRunNumber"
     }
 
@@ -22,11 +23,18 @@ android {
         create("spectrasRelease") {
             val envStorePath = System.getenv("PLAY_KEYSTORE_PATH")
             val envStoreFile = envStorePath?.takeIf { it.isNotBlank() }?.let { file(it) }
+            val envStorePassword = System.getenv("PLAY_KEYSTORE_PASSWORD")
+            val localUploadKeystore = file("../.secrets-local/spectras-upload.jks")
             if (envStoreFile != null && envStoreFile.exists()) {
                 storeFile = envStoreFile
-                storePassword = System.getenv("PLAY_KEYSTORE_PASSWORD") ?: ""
+                storePassword = envStorePassword ?: ""
                 keyAlias = System.getenv("PLAY_KEY_ALIAS") ?: "spectras"
                 keyPassword = System.getenv("PLAY_KEY_PASSWORD") ?: ""
+            } else if (!envStorePassword.isNullOrBlank() && localUploadKeystore.exists()) {
+                storeFile = localUploadKeystore
+                storePassword = envStorePassword
+                keyAlias = System.getenv("PLAY_KEY_ALIAS") ?: "spectras"
+                keyPassword = System.getenv("PLAY_KEY_PASSWORD") ?: envStorePassword
             } else {
                 storeFile = file("kameras-release.jks")
                 storePassword = "kameras123"
@@ -82,6 +90,19 @@ android {
     bundle {
         language {
             enableSplit = false
+        }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val bundlingPlayStore = allTasks.any { it.name.contains("bundleRelease", ignoreCase = true) }
+    if (bundlingPlayStore) {
+        val releaseStore = signingConfigs.getByName("spectrasRelease").storeFile
+        if (releaseStore == null || !releaseStore.exists() || releaseStore.name == "kameras-release.jks") {
+            throw GradleException(
+                "bundleRelease requires a private upload keystore (set PLAY_KEYSTORE_PATH / PLAY_KEYSTORE_PASSWORD). " +
+                    "Refusing to sign Play Store AAB with public kameras-release.jks."
+            )
         }
     }
 }

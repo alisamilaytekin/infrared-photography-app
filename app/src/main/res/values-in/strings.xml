@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Pilih Warna</string>
     <string name="action_reset_band">Reset warna</string>
     <string name="action_reset_all_bands">Reset semua</string>
+    <string name="action_multi_select">Multi</string>
+    <string name="action_select_all_bands">Semua</string>
+    <string name="bands_selected_count">%1$d warna</string>
     <string name="action_pick_again">Pilih lagi</string>
     <string name="pipette_empty_hint">Ketuk “Pilih Warna”, lalu sentuh warna apa saja di layar untuk geser 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Merah</string>
     <string name="band_orange">Oranye</string>
     <string name="band_yellow">Kuning</string>
+    <string name="band_lime">Limau</string>
     <string name="band_green">Hijau</string>
+    <string name="band_emerald">Zamrud</string>
     <string name="band_cyan">Sian</string>
+    <string name="band_azure">Biru Langit</string>
     <string name="band_blue">Biru</string>
     <string name="band_purple">Ungu</string>
     <string name="band_magenta">Magenta</string>
+    <string name="band_rose">Mawar</string>
 
     <string name="hue_red">Merah</string>
     <string name="hue_orange">Oranye / Amber</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Galeri</string>
     <string name="editor_tab_looks">Filter</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Edit foto galeri dengan filter film tajam, Mixer Warna 8 pita, Pilih Warna 360°, dan tukar Merah↔Biru.</string>
+    <string name="editor_empty_subtitle">Edit foto galeri dengan filter film tajam, Mixer Warna 12 pita, Pilih Warna 360°, dan tukar Merah↔Biru.</string>
     <string name="editor_choose_gallery">Pilih dari Galeri</string>
     <string name="editor_use_last_shot">Edit Foto Terakhir</string>
     <string name="editor_compare_banner">Foto asli (bandingkan)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Kamera Pro</string>
-    <string name="exp_pro_desc">Kontrol manual penuh, Mixer Warna 8 pita, Pilih Warna 360°, Kunci Cahaya &amp; RAW DNG</string>
+    <string name="exp_pro_desc">Kontrol manual penuh, Mixer Warna 12 pita, Pilih Warna 360°, Kunci Cahaya &amp; RAW DNG</string>
     <string name="exp_pro_tags">RAW · Manual · Mixer Warna</string>
 
     <string name="settings_title">Pengaturan</string>

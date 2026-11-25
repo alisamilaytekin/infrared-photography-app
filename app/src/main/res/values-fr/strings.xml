@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Choisir Couleur</string>
     <string name="action_reset_band">Réinit. couleur</string>
     <string name="action_reset_all_bands">Tout réinitialiser</string>
+    <string name="action_multi_select">Multi</string>
+    <string name="action_select_all_bands">Tous</string>
+    <string name="bands_selected_count">%1$d couleurs</string>
     <string name="action_pick_again">Rechoisir</string>
     <string name="pipette_empty_hint">Appuyez sur « Choisir Couleur », puis touchez une couleur à l’écran pour la décaler sur 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Rouge</string>
     <string name="band_orange">Orange</string>
     <string name="band_yellow">Jaune</string>
+    <string name="band_lime">Citron vert</string>
     <string name="band_green">Vert</string>
+    <string name="band_emerald">Émeraude</string>
     <string name="band_cyan">Cyan</string>
+    <string name="band_azure">Bleu ciel</string>
     <string name="band_blue">Bleu</string>
     <string name="band_purple">Violet</string>
     <string name="band_magenta">Magenta</string>
+    <string name="band_rose">Rose</string>
 
     <string name="hue_red">Rouge</string>
     <string name="hue_orange">Orange / Ambre</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Galerie</string>
     <string name="editor_tab_looks">Filtres</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Retouchez toute photo avec nos filtres argentiques nets, Mixeur 8 bandes, Sélecteur 360° et échange Rouge↔Bleu.</string>
+    <string name="editor_empty_subtitle">Retouchez toute photo avec nos filtres argentiques nets, Mixeur 12 bandes, Sélecteur 360° et échange Rouge↔Bleu.</string>
     <string name="editor_choose_gallery">Choisir dans la Galerie</string>
     <string name="editor_use_last_shot">Retoucher la Dernière Photo</string>
     <string name="editor_compare_banner">Photo originale (comparer)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Caméra Pro</string>
-    <string name="exp_pro_desc">Contrôles manuels complets, Mixeur 8 bandes, Sélecteur 360°, Verrou Lumière et RAW DNG</string>
+    <string name="exp_pro_desc">Contrôles manuels complets, Mixeur 12 bandes, Sélecteur 360°, Verrou Lumière et RAW DNG</string>
     <string name="exp_pro_tags">RAW · Manuel · Mixeur</string>
 
     <string name="settings_title">Paramètres</string>

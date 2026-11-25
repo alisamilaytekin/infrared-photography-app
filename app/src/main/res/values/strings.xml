@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Pick Color</string>
     <string name="action_reset_band">Reset color</string>
     <string name="action_reset_all_bands">Reset all</string>
+    <string name="action_multi_select">Multi</string>
+    <string name="action_select_all_bands">All</string>
+    <string name="bands_selected_count">%1$d colors</string>
     <string name="action_pick_again">Pick again</string>
     <string name="pipette_empty_hint">Tap “Pick Color”, then touch any color on screen to shift it 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Red</string>
     <string name="band_orange">Orange</string>
     <string name="band_yellow">Yellow</string>
+    <string name="band_lime">Lime</string>
     <string name="band_green">Green</string>
+    <string name="band_emerald">Emerald</string>
     <string name="band_cyan">Cyan</string>
+    <string name="band_azure">Sky Blue</string>
     <string name="band_blue">Blue</string>
     <string name="band_purple">Purple</string>
     <string name="band_magenta">Magenta</string>
+    <string name="band_rose">Rose</string>
 
     <string name="hue_red">Red</string>
     <string name="hue_orange">Orange / Amber</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Gallery</string>
     <string name="editor_tab_looks">Filters</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Edit any gallery photo or your latest shot with crisp film looks, 8-band Color Mixer, 360° Pick Color, and Red↔Blue Infrared Swap.</string>
+    <string name="editor_empty_subtitle">Edit any gallery photo or your latest shot with crisp film looks, 12-band Color Mixer, 360° Pick Color, and Red↔Blue Infrared Swap.</string>
     <string name="editor_choose_gallery">Pick from Gallery</string>
     <string name="editor_use_last_shot">Edit Last Shot</string>
     <string name="editor_compare_banner">Original photo (compare)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · Red↔Blue</string>
 
     <string name="exp_pro_title">Pro Camera</string>
-    <string name="exp_pro_desc">Full manual controls, 8-band Color Mixer, 360° Pick Color, Light Lock &amp; RAW DNG capture</string>
+    <string name="exp_pro_desc">Full manual controls, 12-band Color Mixer, 360° Pick Color, Light Lock &amp; RAW DNG capture</string>
     <string name="exp_pro_tags">RAW · Manual · Color Mixer</string>
 
     <string name="settings_title">Settings</string>

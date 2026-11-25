@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">色を選ぶ</string>
     <string name="action_reset_band">色をリセット</string>
     <string name="action_reset_all_bands">すべてリセット</string>
+    <string name="action_multi_select">複数</string>
+    <string name="action_select_all_bands">すべて</string>
+    <string name="bands_selected_count">%1$d色</string>
     <string name="action_pick_again">選び直す</string>
     <string name="pipette_empty_hint">「色を選ぶ」を押し、画面上の好きな色をタップすると360°変換できます</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">赤</string>
     <string name="band_orange">オレンジ</string>
     <string name="band_yellow">黄</string>
+    <string name="band_lime">ライム</string>
     <string name="band_green">緑</string>
+    <string name="band_emerald">エメラルド</string>
     <string name="band_cyan">シアン</string>
+    <string name="band_azure">スカイブルー</string>
     <string name="band_blue">青</string>
     <string name="band_purple">紫</string>
     <string name="band_magenta">マゼンタ</string>
+    <string name="band_rose">ローズ</string>
 
     <string name="hue_red">赤</string>
     <string name="hue_orange">オレンジ / アンバー</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">ギャラリー</string>
     <string name="editor_tab_looks">フィルター</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">鮮明なフィルムフィルター、8バンドカラーミキサー、360°色選択、赤↔青入替で写真を仕上げましょう。</string>
+    <string name="editor_empty_subtitle">鮮明なフィルムフィルター、12バンドカラーミキサー、360°色選択、赤↔青入替で写真を仕上げましょう。</string>
     <string name="editor_choose_gallery">ギャラリーから選ぶ</string>
     <string name="editor_use_last_shot">直前の写真を編集</string>
     <string name="editor_compare_banner">元の写真（比較）</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">プロカメラ</string>
-    <string name="exp_pro_desc">フルマニュアル操作、8バンドミキサー、360°色選択、露出ロック＆RAW DNG撮影</string>
+    <string name="exp_pro_desc">フルマニュアル操作、12バンドミキサー、360°色選択、露出ロック＆RAW DNG撮影</string>
     <string name="exp_pro_tags">RAW · マニュアル · ミキサー</string>
 
     <string name="settings_title">設定</string>

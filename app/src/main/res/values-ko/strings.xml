@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">색상 선택</string>
     <string name="action_reset_band">색상 초기화</string>
     <string name="action_reset_all_bands">모두 초기화</string>
+    <string name="action_multi_select">다중</string>
+    <string name="action_select_all_bands">전체</string>
+    <string name="bands_selected_count">%1$d개 색상</string>
     <string name="action_pick_again">다시 선택</string>
     <string name="pipette_empty_hint">“색상 선택”을 누른 뒤 화면의 원하는 색을 터치해 360° 변환하세요</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">빨강</string>
     <string name="band_orange">주황</string>
     <string name="band_yellow">노랑</string>
+    <string name="band_lime">라임</string>
     <string name="band_green">초록</string>
+    <string name="band_emerald">에메랄드</string>
     <string name="band_cyan">청록</string>
+    <string name="band_azure">하늘색</string>
     <string name="band_blue">파랑</string>
     <string name="band_purple">보라</string>
     <string name="band_magenta">마젠타</string>
+    <string name="band_rose">로즈</string>
 
     <string name="hue_red">빨강</string>
     <string name="hue_orange">주황 / 앰버</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">갤러리</string>
     <string name="editor_tab_looks">필터</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">선명한 필름 필터, 8밴드 색상 믹서, 360° 색상 선택 및 빨강↔파랑 적외선 전환으로 사진을 보정하세요.</string>
+    <string name="editor_empty_subtitle">선명한 필름 필터, 12밴드 색상 믹서, 360° 색상 선택 및 빨강↔파랑 적외선 전환으로 사진을 보정하세요.</string>
     <string name="editor_choose_gallery">갤러리에서 선택</string>
     <string name="editor_use_last_shot">최근 사진 보정</string>
     <string name="editor_compare_banner">원본 사진 (비교)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">프로 카메라</string>
-    <string name="exp_pro_desc">완전 수동 제어, 8밴드 색상 믹서, 360° 색상 선택, 빛 잠금 및 RAW DNG 촬영</string>
+    <string name="exp_pro_desc">완전 수동 제어, 12밴드 색상 믹서, 360° 색상 선택, 빛 잠금 및 RAW DNG 촬영</string>
     <string name="exp_pro_tags">RAW · 수동 · 색상 믹서</string>
 
     <string name="settings_title">설정</string>

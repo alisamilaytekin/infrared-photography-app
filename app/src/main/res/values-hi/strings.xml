@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">रंग चुनें</string>
     <string name="action_reset_band">रंग रीसेट</string>
     <string name="action_reset_all_bands">सब रीसेट</string>
+    <string name="action_multi_select">मल्टी</string>
+    <string name="action_select_all_bands">सभी</string>
+    <string name="bands_selected_count">%1$d रंग</string>
     <string name="action_pick_again">फिर चुनें</string>
     <string name="pipette_empty_hint">“रंग चुनें” दबाएं और स्क्रीन पर किसी भी रंग को छूकर 360° बदलें</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">लाल</string>
     <string name="band_orange">नारंगी</string>
     <string name="band_yellow">पीला</string>
+    <string name="band_lime">लाइम</string>
     <string name="band_green">हरा</string>
+    <string name="band_emerald">पन्ना</string>
     <string name="band_cyan">सियान</string>
+    <string name="band_azure">आसमानी</string>
     <string name="band_blue">नीला</string>
     <string name="band_purple">बैंगनी</string>
     <string name="band_magenta">मैजेंटा</string>
+    <string name="band_rose">गुलाबी</string>
 
     <string name="hue_red">लाल</string>
     <string name="hue_orange">नारंगी / एम्बर</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">गैलरी</string>
     <string name="editor_tab_looks">फ़िल्टर</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">स्पष्ट फ़िल्म फ़िल्टर, 8-बैंड रंग मिक्सर, 360° रंग चयन और लाल↔नीला IR स्वैप से कोई भी फ़ोटो एडिट करें।</string>
+    <string name="editor_empty_subtitle">स्पष्ट फ़िल्म फ़िल्टर, 12-बैंड रंग मिक्सर, 360° रंग चयन और लाल↔नीला IR स्वैप से कोई भी फ़ोटो एडिट करें।</string>
     <string name="editor_choose_gallery">गैलरी से चुनें</string>
     <string name="editor_use_last_shot">पिछली फ़ोटो एडिट करें</string>
     <string name="editor_compare_banner">मूल फ़ोटो (तुलना)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">प्रो कैमरा</string>
-    <string name="exp_pro_desc">पूरा मैनुअल नियंत्रण, 8-बैंड रंग मिक्सर, 360° रंग चयन, लाइट लॉक और RAW DNG कैप्चर</string>
+    <string name="exp_pro_desc">पूरा मैनुअल नियंत्रण, 12-बैंड रंग मिक्सर, 360° रंग चयन, लाइट लॉक और RAW DNG कैप्चर</string>
     <string name="exp_pro_tags">RAW · मैनुअल · रंग मिक्सर</string>
 
     <string name="settings_title">सेटिंग्स</string>

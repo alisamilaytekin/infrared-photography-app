@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Farbe wählen</string>
     <string name="action_reset_band">Farbe zurücksetzen</string>
     <string name="action_reset_all_bands">Alles zurücksetzen</string>
+    <string name="action_multi_select">Mehrfach</string>
+    <string name="action_select_all_bands">Alle</string>
+    <string name="bands_selected_count">%1$d Farben</string>
     <string name="action_pick_again">Neu wählen</string>
     <string name="pipette_empty_hint">Tippe auf „Farbe wählen“ und dann auf eine Farbe im Bild, um sie 360° zu drehen</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Rot</string>
     <string name="band_orange">Orange</string>
     <string name="band_yellow">Gelb</string>
+    <string name="band_lime">Limette</string>
     <string name="band_green">Grün</string>
+    <string name="band_emerald">Smaragd</string>
     <string name="band_cyan">Cyan</string>
+    <string name="band_azure">Himmelblau</string>
     <string name="band_blue">Blau</string>
     <string name="band_purple">Lila</string>
     <string name="band_magenta">Magenta</string>
+    <string name="band_rose">Rosé</string>
 
     <string name="hue_red">Rot</string>
     <string name="hue_orange">Orange / Bernstein</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Galerie</string>
     <string name="editor_tab_looks">Filter</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Bearbeite jedes Foto mit scharfen Filmfiltern, 8-Band-Farbmixer, 360°-Farbwahl und Rot↔Blau-Tausch.</string>
+    <string name="editor_empty_subtitle">Bearbeite jedes Foto mit scharfen Filmfiltern, 12-Band-Farbmixer, 360°-Farbwahl und Rot↔Blau-Tausch.</string>
     <string name="editor_choose_gallery">Aus Galerie wählen</string>
     <string name="editor_use_last_shot">Letztes Foto bearbeiten</string>
     <string name="editor_compare_banner">Originalfoto (Vergleich)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Pro-Kamera</string>
-    <string name="exp_pro_desc">Volle manuelle Kontrolle, 8-Band-Farbmixer, 360°-Farbwahl, Lichtsperre &amp; RAW DNG</string>
+    <string name="exp_pro_desc">Volle manuelle Kontrolle, 12-Band-Farbmixer, 360°-Farbwahl, Lichtsperre &amp; RAW DNG</string>
     <string name="exp_pro_tags">RAW · Manuell · Farbmixer</string>
 
     <string name="settings_title">Einstellungen</string>

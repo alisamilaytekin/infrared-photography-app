@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Elegir Color</string>
     <string name="action_reset_band">Restablecer color</string>
     <string name="action_reset_all_bands">Restablecer todo</string>
+    <string name="action_multi_select">Múltiple</string>
+    <string name="action_select_all_bands">Todos</string>
+    <string name="bands_selected_count">%1$d colores</string>
     <string name="action_pick_again">Elegir otro</string>
     <string name="pipette_empty_hint">Toca “Elegir Color” y luego toca cualquier color en pantalla para girarlo 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Rojo</string>
     <string name="band_orange">Naranja</string>
     <string name="band_yellow">Amarillo</string>
+    <string name="band_lime">Lima</string>
     <string name="band_green">Verde</string>
+    <string name="band_emerald">Esmeralda</string>
     <string name="band_cyan">Cian</string>
+    <string name="band_azure">Celeste</string>
     <string name="band_blue">Azul</string>
     <string name="band_purple">Púrpura</string>
     <string name="band_magenta">Magenta</string>
+    <string name="band_rose">Rosa</string>
 
     <string name="hue_red">Rojo</string>
     <string name="hue_orange">Naranja / Ámbar</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Galería</string>
     <string name="editor_tab_looks">Filtros</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Edita cualquier foto con filtros de película nítidos, Mezclador de 8 bandas, Selector 360° e intercambio Rojo↔Azul.</string>
+    <string name="editor_empty_subtitle">Edita cualquier foto con filtros de película nítidos, Mezclador de 12 bandas, Selector 360° e intercambio Rojo↔Azul.</string>
     <string name="editor_choose_gallery">Elegir de la Galería</string>
     <string name="editor_use_last_shot">Editar Última Foto</string>
     <string name="editor_compare_banner">Foto original (comparar)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Cámara Pro</string>
-    <string name="exp_pro_desc">Control manual completo, Mezclador 8 bandas, Selector 360°, Bloqueo de Luz y RAW DNG</string>
+    <string name="exp_pro_desc">Control manual completo, Mezclador 12 bandas, Selector 360°, Bloqueo de Luz y RAW DNG</string>
     <string name="exp_pro_tags">RAW · Manual · Mezclador</string>
 
     <string name="settings_title">Ajustes</string>

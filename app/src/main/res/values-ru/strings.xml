@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Выбрать Цвет</string>
     <string name="action_reset_band">Сброс цвета</string>
     <string name="action_reset_all_bands">Сбросить всё</string>
+    <string name="action_multi_select">Мульти</string>
+    <string name="action_select_all_bands">Все</string>
+    <string name="bands_selected_count">%1$d цв.</string>
     <string name="action_pick_again">Выбрать снова</string>
     <string name="pipette_empty_hint">Нажмите «Выбрать Цвет», затем коснитесь любого цвета на экране для сдвига на 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Красный</string>
     <string name="band_orange">Оранжевый</string>
     <string name="band_yellow">Жёлтый</string>
+    <string name="band_lime">Лайм</string>
     <string name="band_green">Зелёный</string>
+    <string name="band_emerald">Изумруд</string>
     <string name="band_cyan">Голубой</string>
+    <string name="band_azure">Голубой</string>
     <string name="band_blue">Синий</string>
     <string name="band_purple">Фиолетовый</string>
     <string name="band_magenta">Пурпурный</string>
+    <string name="band_rose">Розовый</string>
 
     <string name="hue_red">Красный</string>
     <string name="hue_orange">Оранжевый / Янтарь</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Галерея</string>
     <string name="editor_tab_looks">Фильтры</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Обрабатывайте любые фото чёткими плёночными фильтрами, 8-полосным Микшером, Выбором цвета 360° и обменом Красный↔Синий.</string>
+    <string name="editor_empty_subtitle">Обрабатывайте любые фото чёткими плёночными фильтрами, 12-полосным Микшером, Выбором цвета 360° и обменом Красный↔Синий.</string>
     <string name="editor_choose_gallery">Выбрать из Галереи</string>
     <string name="editor_use_last_shot">Изменить Последнее Фото</string>
     <string name="editor_compare_banner">Исходное фото (сравнение)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Про Камера</string>
-    <string name="exp_pro_desc">Полный ручной контроль, 8-полосный Микшер, Выбор цвета 360°, Блок Света и RAW DNG</string>
+    <string name="exp_pro_desc">Полный ручной контроль, 12-полосный Микшер, Выбор цвета 360°, Блок Света и RAW DNG</string>
     <string name="exp_pro_tags">RAW · Ручной · Микшер</string>
 
     <string name="settings_title">Настройки</string>

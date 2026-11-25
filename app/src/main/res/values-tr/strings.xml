@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">Renk Seç</string>
     <string name="action_reset_band">Rengi sıfırla</string>
     <string name="action_reset_all_bands">Tümünü sıfırla</string>
+    <string name="action_multi_select">Çoklu</string>
+    <string name="action_select_all_bands">Tümü</string>
+    <string name="bands_selected_count">%1$d renk</string>
     <string name="action_pick_again">Tekrar seç</string>
     <string name="pipette_empty_hint">“Renk Seç” düğmesine dokunup görüntüdeki herhangi bir rengi 360° dönüştürün</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">Kırmızı</string>
     <string name="band_orange">Turuncu</string>
     <string name="band_yellow">Sarı</string>
+    <string name="band_lime">Açık Yeşil</string>
     <string name="band_green">Yeşil</string>
+    <string name="band_emerald">Zümrüt</string>
     <string name="band_cyan">Camgöbeği</string>
+    <string name="band_azure">Gök Mavisi</string>
     <string name="band_blue">Mavi</string>
     <string name="band_purple">Mor</string>
     <string name="band_magenta">Macenta</string>
+    <string name="band_rose">Gül Pembe</string>
 
     <string name="hue_red">Kırmızı</string>
     <string name="hue_orange">Turuncu / Amber</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">Galeri</string>
     <string name="editor_tab_looks">Filtreler</string>
     <string name="editor_empty_title">SpectraS Fotoğraf Stüdyosu</string>
-    <string name="editor_empty_subtitle">Galerinizdeki veya yeni çektiğiniz fotoğrafları net film filtreleri, 8 bantlı Renk Mikseri, 360° Renk Seçici ve Kırmızı↔Mavi takasla düzenleyin.</string>
+    <string name="editor_empty_subtitle">Galerinizdeki veya yeni çektiğiniz fotoğrafları net film filtreleri, 12 bantlı Renk Mikseri, 360° Renk Seçici ve Kırmızı↔Mavi takasla düzenleyin.</string>
     <string name="editor_choose_gallery">Galeriden Fotoğraf Seç</string>
     <string name="editor_use_last_shot">Son Fotoğrafı Düzenle</string>
     <string name="editor_compare_banner">Orijinal fotoğraf (karşılaştırma)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Pro Kamera</string>
-    <string name="exp_pro_desc">Tam manuel kontroller, 8 bantlı Renk Mikseri, 360° Renk Seçici, Işık Kilidi ve RAW DNG çekim</string>
+    <string name="exp_pro_desc">Tam manuel kontroller, 12 bantlı Renk Mikseri, 360° Renk Seçici, Işık Kilidi ve RAW DNG çekim</string>
     <string name="exp_pro_tags">RAW · Manuel · Renk Mikseri</string>
 
     <string name="settings_title">Ayarlar</string>

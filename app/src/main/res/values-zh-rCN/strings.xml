@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">吸取颜色</string>
     <string name="action_reset_band">重置此色</string>
     <string name="action_reset_all_bands">全部重置</string>
+    <string name="action_multi_select">多选</string>
+    <string name="action_select_all_bands">全选</string>
+    <string name="bands_selected_count">%1$d种颜色</string>
     <string name="action_pick_again">重新吸取</string>
     <string name="pipette_empty_hint">点击“吸取颜色”，再轻触画面中任意颜色即可 360° 转换</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">红色</string>
     <string name="band_orange">橙色</string>
     <string name="band_yellow">黄色</string>
+    <string name="band_lime">黄绿</string>
     <string name="band_green">绿色</string>
+    <string name="band_emerald">翠绿</string>
     <string name="band_cyan">青色</string>
+    <string name="band_azure">天蓝</string>
     <string name="band_blue">蓝色</string>
     <string name="band_purple">紫色</string>
     <string name="band_magenta">品红</string>
+    <string name="band_rose">玫红</string>
 
     <string name="hue_red">红色</string>
     <string name="hue_orange">橙色 / 琥珀</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">相册</string>
     <string name="editor_tab_looks">滤镜</string>
     <string name="editor_empty_title">SpectraS 修图工作室</string>
-    <string name="editor_empty_subtitle">使用清晰胶片滤镜、8通道混色器、360° 吸色与红↔蓝红外互换编辑相册中的任意照片。</string>
+    <string name="editor_empty_subtitle">使用清晰胶片滤镜、12通道混色器、360° 吸色与红↔蓝红外互换编辑相册中的任意照片。</string>
     <string name="editor_choose_gallery">从相册选择</string>
     <string name="editor_use_last_shot">编辑最近拍摄</string>
     <string name="editor_compare_banner">原图（对比）</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">专业相机</string>
-    <string name="exp_pro_desc">全手动控制、8通道混色器、360° 吸取颜色、锁定曝光与 RAW DNG 拍摄</string>
+    <string name="exp_pro_desc">全手动控制、12通道混色器、360° 吸取颜色、锁定曝光与 RAW DNG 拍摄</string>
     <string name="exp_pro_tags">RAW · 手动 · 混色器</string>
 
     <string name="settings_title">设置</string>

@@ -116,8 +116,11 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -346,7 +349,7 @@ internal enum class ColorSubSlider { DOYGUNLUK, KONTRAST }
 // Noktasal renk pipeti ve renk bantları alt tekil kaydırıcı seçimi
 internal enum class PointColorSubSlider { TON, DOYGUNLUK, PARLAKLIK }
 
-// Lightroom / Darkroom tarzı 8 profesyonel renk bandı
+// Lightroom / Darkroom tarzı 12 sık profesyonel renk bandı (30° uniform adım + çoklu seçim uyumlu)
 internal enum class ColorBand(
     val index: Int,
     val labelRes: Int,
@@ -356,11 +359,15 @@ internal enum class ColorBand(
     RED(0, R.string.band_red, 0f, Color(0xFFEF4444)),
     ORANGE(1, R.string.band_orange, 30f, Color(0xFFF97316)),
     YELLOW(2, R.string.band_yellow, 60f, Color(0xFFEAB308)),
-    GREEN(3, R.string.band_green, 120f, Color(0xFF22C55E)),
-    CYAN(4, R.string.band_cyan, 180f, Color(0xFF06B6D4)),
-    BLUE(5, R.string.band_blue, 225f, Color(0xFF3B82F6)),
-    PURPLE(6, R.string.band_purple, 275f, Color(0xFF8B5CF6)),
-    MAGENTA(7, R.string.band_magenta, 320f, Color(0xFFEC4899))
+    LIME(3, R.string.band_lime, 90f, Color(0xFF84CC16)),
+    GREEN(4, R.string.band_green, 120f, Color(0xFF22C55E)),
+    EMERALD(5, R.string.band_emerald, 150f, Color(0xFF10B981)),
+    CYAN(6, R.string.band_cyan, 180f, Color(0xFF06B6D4)),
+    AZURE(7, R.string.band_azure, 210f, Color(0xFF0EA5E9)),
+    BLUE(8, R.string.band_blue, 240f, Color(0xFF3B82F6)),
+    PURPLE(9, R.string.band_purple, 270f, Color(0xFF8B5CF6)),
+    MAGENTA(10, R.string.band_magenta, 300f, Color(0xFFD946EF)),
+    ROSE(11, R.string.band_rose, 330f, Color(0xFFF43F5E))
 }
 
 internal data class BandHslAdjustment(
@@ -373,7 +380,7 @@ internal data class BandHslAdjustment(
 }
 
 internal data class ColorBandsConfig(
-    val bands: List<BandHslAdjustment> = List(8) { BandHslAdjustment() }
+    val bands: List<BandHslAdjustment> = List(ColorBand.entries.size) { BandHslAdjustment() }
 ) {
     val hasAnyModification: Boolean
         get() = bands.any { it.isModified }
@@ -384,6 +391,16 @@ internal data class ColorBandsConfig(
         val next = bands.toMutableList()
         if (band.index in next.indices) {
             next[band.index] = transform(next[band.index])
+        }
+        return ColorBandsConfig(next)
+    }
+
+    fun updateAll(targetBands: Set<ColorBand>, transform: (BandHslAdjustment) -> BandHslAdjustment): ColorBandsConfig {
+        val next = bands.toMutableList()
+        for (band in targetBands) {
+            if (band.index in next.indices) {
+                next[band.index] = transform(next[band.index])
+            }
         }
         return ColorBandsConfig(next)
     }
@@ -674,8 +691,29 @@ internal const val DEFAULT_CONTRAST = 1.0f
 internal const val DEFAULT_SATURATION = 1.0f
 
 internal fun buildBandPreset(vararg entries: Pair<ColorBand, BandHslAdjustment>): ColorBandsConfig {
-    val list = MutableList(8) { BandHslAdjustment() }
-    entries.forEach { (band, adj) -> list[band.index] = adj }
+    val list = MutableList(ColorBand.entries.size) { BandHslAdjustment() }
+    val explicitlySet = HashSet<ColorBand>()
+    entries.forEach { (band, adj) ->
+        list[band.index] = adj
+        explicitlySet.add(band)
+    }
+    val bridges = listOf(
+        Triple(ColorBand.LIME, ColorBand.YELLOW, ColorBand.GREEN),
+        Triple(ColorBand.EMERALD, ColorBand.GREEN, ColorBand.CYAN),
+        Triple(ColorBand.AZURE, ColorBand.CYAN, ColorBand.BLUE),
+        Triple(ColorBand.ROSE, ColorBand.MAGENTA, ColorBand.RED)
+    )
+    for ((mid, prev, next) in bridges) {
+        if (mid !in explicitlySet && prev in explicitlySet && next in explicitlySet) {
+            val a = list[prev.index]
+            val b = list[next.index]
+            list[mid.index] = BandHslAdjustment(
+                deltaHue = (a.deltaHue + b.deltaHue) * 0.5f,
+                deltaSat = (a.deltaSat + b.deltaSat) * 0.5f,
+                deltaLum = (a.deltaLum + b.deltaLum) * 0.5f
+            )
+        }
+    }
     return ColorBandsConfig(list)
 }
 
@@ -1428,21 +1466,20 @@ private fun inverseRgbToKelvinTint(
     val gGain = ((currentGains.greenEven + currentGains.greenOdd) * 0.5f).coerceAtLeast(0.01f)
     val bGain = currentGains.blue.coerceAtLeast(0.01f)
 
-    // Convert sRGB pixel averages (gamma ~2.2) to linear light before computing inverse channel gains
-    val rLin = (rAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
-    val gLin = (gAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
-    val bLin = (bAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
+    val rS = rAvg.coerceAtLeast(1f)
+    val gS = gAvg.coerceAtLeast(1f)
+    val bS = bAvg.coerceAtLeast(1f)
 
-    // 4% neutral deadband: prevent cumulative drift when the scene/patch is already balanced
-    val maxLin = maxOf(rLin, maxOf(gLin, bLin))
-    val minLin = minOf(rLin, minOf(gLin, bLin)).coerceAtLeast(1e-5f)
-    if (maxLin / minLin < 1.04f) {
+    // 2.5% neutral deadband in sRGB: keeps repeated taps on an already-balanced white wall rock-steady
+    val maxC = maxOf(rS, maxOf(gS, bS))
+    val minC = minOf(rS, minOf(gS, bS)).coerceAtLeast(1f)
+    if (maxC / minC < 1.025f) {
         return gainsToKelvinTint(currentGains)
     }
 
-    val rRawInverse = rGain / rLin
-    val bRawInverse = bGain / bLin
-    val gRawInverse = gGain / gLin
+    val rRawInverse = rGain / rS
+    val bRawInverse = bGain / bS
+    val gRawInverse = gGain / gS
 
     val scaleFactor = 5.0f / (rRawInverse + bRawInverse).coerceAtLeast(1e-6f)
     val rTarget = rRawInverse * scaleFactor
@@ -1733,7 +1770,7 @@ private fun hslToRgb01(hDeg: Float, s: Float, l: Float, out: FloatArray) {
  * Unified Pro Color-Grading Engine (CPU bit-exact mirror of AGSL GPU Shader):
  * Edge-Guarded Unsharp Mask + WB/Soft-Shoulder Exposure + Photographic Tone Zones +
  * Skin-Safe Smart Vibrance + Lightroom 3-Way Split Toning + R↔B Channel Swap +
- * Bell-Curve 8-Band HSL + Point Pipette + True B&W Channel Mixer.
+ * Bell-Curve 12-Band HSL + Point Pipette + True B&W Channel Mixer.
  */
 internal fun applyTargetedHslToBitmap(
     bitmap: Bitmap,
@@ -1786,11 +1823,10 @@ internal fun applyTargetedHslToBitmap(
     val dS = config.deltaSat
     val dL = config.deltaLum
 
-    val bandCenters = floatArrayOf(0f, 30f, 60f, 120f, 180f, 225f, 275f, 320f)
-    val bandDH = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaHue ?: 0f }
-    val bandDS = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaSat ?: 0f }
-    val bandDL = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaLum ?: 0f }
-    val bandActive = BooleanArray(8) { colorBands.bands.getOrNull(it)?.isModified == true }
+    val bandDH = FloatArray(12) { colorBands.bands.getOrNull(it)?.deltaHue ?: 0f }
+    val bandDS = FloatArray(12) { colorBands.bands.getOrNull(it)?.deltaSat ?: 0f }
+    val bandDL = FloatArray(12) { colorBands.bands.getOrNull(it)?.deltaLum ?: 0f }
+    val bandActive = BooleanArray(12) { colorBands.bands.getOrNull(it)?.isModified == true }
 
     val stripHeight = 128.coerceAtMost(h)
     val padBuf = IntArray(w * (stripHeight + 2))
@@ -1942,23 +1978,10 @@ internal fun applyTargetedHslToBitmap(
                     val mask = wS * lumLow * lumHigh
 
                     if (mask > 0.001f) {
-                        var idxA = 7
-                        var idxB = 0
-                        var t = 0f
-                        if (hVal >= 320f) {
-                            idxA = 7
-                            idxB = 0
-                            t = ((hVal - 320f) / 40f).coerceIn(0f, 1f)
-                        } else {
-                            for (k in 0 until 7) {
-                                if (hVal >= bandCenters[k] && hVal < bandCenters[k + 1]) {
-                                    idxA = k
-                                    idxB = k + 1
-                                    t = ((hVal - bandCenters[k]) / (bandCenters[k + 1] - bandCenters[k])).coerceIn(0f, 1f)
-                                    break
-                                }
-                            }
-                        }
+                        val scaled = (((hVal % 360f) + 360f) % 360f) / 30f
+                        val idxA = scaled.toInt().coerceIn(0, 11)
+                        val idxB = (idxA + 1) % 12
+                        val t = (scaled - idxA).coerceIn(0f, 1f)
                         val s = t * t * (3f - 2f * t)
                         val wA = if (bandActive[idxA]) (1f - s) * mask else 0f
                         val wB = if (bandActive[idxB]) s * mask else 0f
@@ -2159,10 +2182,13 @@ private const val HSL_SKSL = """
     uniform float uBandsActive;
     uniform vec4 uBandHueA;
     uniform vec4 uBandHueB;
+    uniform vec4 uBandHueC;
     uniform vec4 uBandSatA;
     uniform vec4 uBandSatB;
+    uniform vec4 uBandSatC;
     uniform vec4 uBandLumA;
     uniform vec4 uBandLumB;
+    uniform vec4 uBandLumC;
 
     vec3 rgb2hsl(vec3 c) {
         float cMin = min(min(c.r, c.g), c.b);
@@ -2216,7 +2242,11 @@ private const val HSL_SKSL = """
         if (idx == 4) return vec3(uBandHueB.x, uBandSatB.x, uBandLumB.x);
         if (idx == 5) return vec3(uBandHueB.y, uBandSatB.y, uBandLumB.y);
         if (idx == 6) return vec3(uBandHueB.z, uBandSatB.z, uBandLumB.z);
-        return vec3(uBandHueB.w, uBandSatB.w, uBandLumB.w);
+        if (idx == 7) return vec3(uBandHueB.w, uBandSatB.w, uBandLumB.w);
+        if (idx == 8) return vec3(uBandHueC.x, uBandSatC.x, uBandLumC.x);
+        if (idx == 9) return vec3(uBandHueC.y, uBandSatC.y, uBandLumC.y);
+        if (idx == 10) return vec3(uBandHueC.z, uBandSatC.z, uBandLumC.z);
+        return vec3(uBandHueC.w, uBandSatC.w, uBandLumC.w);
     }
 
     vec4 main(vec2 fragCoord) {
@@ -2294,7 +2324,7 @@ private const val HSL_SKSL = """
             rgb = rgb.bgr;
         }
 
-        // 1) 8-Bantlı Renk Histogramı Mikseri (çan-eğrisi parlaklık korumasıyla net portre tonu)
+        // 1) 12-Bantlı Sık Renk Histogramı Mikseri (30° uniform aralık + çan-eğrisi parlaklık koruması)
         if (uBandsActive > 0.5) {
             vec3 hsl = rgb2hsl(rgb);
             float satClamp = clamp((hsl.y - 0.05) / 0.14, 0.0, 1.0);
@@ -2304,27 +2334,13 @@ private const val HSL_SKSL = """
             float mask = wS * lumLow * lumHigh;
 
             if (mask > 0.001) {
-                float h = hsl.x;
-                int idxA = 7;
-                int idxB = 0;
-                float t = 0.0;
-                if (h < 30.0) {
-                    idxA = 0; idxB = 1; t = h / 30.0;
-                } else if (h < 60.0) {
-                    idxA = 1; idxB = 2; t = (h - 30.0) / 30.0;
-                } else if (h < 120.0) {
-                    idxA = 2; idxB = 3; t = (h - 60.0) / 60.0;
-                } else if (h < 180.0) {
-                    idxA = 3; idxB = 4; t = (h - 120.0) / 60.0;
-                } else if (h < 225.0) {
-                    idxA = 4; idxB = 5; t = (h - 180.0) / 45.0;
-                } else if (h < 275.0) {
-                    idxA = 5; idxB = 6; t = (h - 225.0) / 50.0;
-                } else if (h < 320.0) {
-                    idxA = 6; idxB = 7; t = (h - 275.0) / 45.0;
-                } else {
-                    idxA = 7; idxB = 0; t = (h - 320.0) / 40.0;
-                }
+                float scaled = mod(max(hsl.x, 0.0), 360.0) / 30.0;
+                int idxA = int(floor(scaled));
+                if (idxA < 0) idxA = 0;
+                if (idxA >= 12) idxA = 0;
+                int idxB = idxA + 1;
+                if (idxB >= 12) idxB = 0;
+                float t = fract(scaled);
                 float s = t * t * (3.0 - 2.0 * t);
                 vec3 dA = getBandDelta(idxA);
                 vec3 dB = getBandDelta(idxB);
@@ -2451,12 +2467,16 @@ private fun updateTextureViewShader(
             shader.setFloatUniform("uActive", if (hasPoint) 1.0f else 0.0f)
             shader.setFloatUniform("uBandsActive", if (hasBands) 1.0f else 0.0f)
             val b = colorBands.bands
-            shader.setFloatUniform("uBandHueA", b[0].deltaHue, b[1].deltaHue, b[2].deltaHue, b[3].deltaHue)
-            shader.setFloatUniform("uBandHueB", b[4].deltaHue, b[5].deltaHue, b[6].deltaHue, b[7].deltaHue)
-            shader.setFloatUniform("uBandSatA", b[0].deltaSat, b[1].deltaSat, b[2].deltaSat, b[3].deltaSat)
-            shader.setFloatUniform("uBandSatB", b[4].deltaSat, b[5].deltaSat, b[6].deltaSat, b[7].deltaSat)
-            shader.setFloatUniform("uBandLumA", b[0].deltaLum, b[1].deltaLum, b[2].deltaLum, b[3].deltaLum)
-            shader.setFloatUniform("uBandLumB", b[4].deltaLum, b[5].deltaLum, b[6].deltaLum, b[7].deltaLum)
+            fun bd(idx: Int) = b.getOrElse(idx) { BandHslAdjustment() }
+            shader.setFloatUniform("uBandHueA", bd(0).deltaHue, bd(1).deltaHue, bd(2).deltaHue, bd(3).deltaHue)
+            shader.setFloatUniform("uBandHueB", bd(4).deltaHue, bd(5).deltaHue, bd(6).deltaHue, bd(7).deltaHue)
+            shader.setFloatUniform("uBandHueC", bd(8).deltaHue, bd(9).deltaHue, bd(10).deltaHue, bd(11).deltaHue)
+            shader.setFloatUniform("uBandSatA", bd(0).deltaSat, bd(1).deltaSat, bd(2).deltaSat, bd(3).deltaSat)
+            shader.setFloatUniform("uBandSatB", bd(4).deltaSat, bd(5).deltaSat, bd(6).deltaSat, bd(7).deltaSat)
+            shader.setFloatUniform("uBandSatC", bd(8).deltaSat, bd(9).deltaSat, bd(10).deltaSat, bd(11).deltaSat)
+            shader.setFloatUniform("uBandLumA", bd(0).deltaLum, bd(1).deltaLum, bd(2).deltaLum, bd(3).deltaLum)
+            shader.setFloatUniform("uBandLumB", bd(4).deltaLum, bd(5).deltaLum, bd(6).deltaLum, bd(7).deltaLum)
+            shader.setFloatUniform("uBandLumC", bd(8).deltaLum, bd(9).deltaLum, bd(10).deltaLum, bd(11).deltaLum)
             val effect = RenderEffect.createRuntimeShaderEffect(shader, "uContent")
             view.setRenderEffect(effect)
         } catch (e: Throwable) {
@@ -2528,29 +2548,15 @@ private fun measureRegionLuminance(
     return MeteringStats(avg, maxLuma.toFloat(), ratio)
 }
 
-// 8 renk bandı sınırları (Kırmızı 340°..15°, Turuncu 15°..45°, Sarı 45°..90°, Yeşil 90°..150°,
-// Camgöbeği 150°..202.5°, Mavi 202.5°..250°, Mor 250°..297.5°, Macenta 297.5°..340°)
-private val HUE_BAND_EDGES = floatArrayOf(0f, 35f, 65f, 110f, 170f, 222.5f, 270f, 317.5f, 360f)
-
+// 12 uniform 30° renk bandı sınırları (Kırmızı 0° tam 0. sütunun ortasında, 345°..15°, her bant 30°)
 private fun hueToPerceptualBandPos(hueDeg: Float): Float {
-    // 340° başlangıç olacak şekilde döndür (böylece Kırmızı 0° tam 0. bandın ortasına düşer)
-    val shifted = ((hueDeg - 340f) % 360f + 360f) % 360f
-    for (k in 0 until 8) {
-        if (shifted < HUE_BAND_EDGES[k + 1] || k == 7) {
-            val span = (HUE_BAND_EDGES[k + 1] - HUE_BAND_EDGES[k]).coerceAtLeast(1f)
-            val frac = ((shifted - HUE_BAND_EDGES[k]) / span).coerceIn(0f, 1f)
-            return (k + frac).coerceIn(0f, 7.9999f)
-        }
-    }
-    return 0f
+    val shifted = ((hueDeg + 15f) % 360f + 360f) % 360f
+    return (shifted / 30f).coerceIn(0f, 11.9999f)
 }
 
 private fun perceptualBandPosToHue(pos: Float): Float {
-    val clamped = pos.coerceIn(0f, 7.9999f)
-    val k = clamped.toInt().coerceIn(0, 7)
-    val frac = clamped - k
-    val shifted = HUE_BAND_EDGES[k] + frac * (HUE_BAND_EDGES[k + 1] - HUE_BAND_EDGES[k])
-    return ((shifted + 340f) % 360f + 360f) % 360f
+    val clamped = pos.coerceIn(0f, 11.9999f)
+    return ((clamped * 30f - 15f) % 360f + 360f) % 360f
 }
 
 // Önizleme görüntüsünden 48 sütunlu profesyonel RGB + Parlaklık + Algısal Bant Hizalı Renk Tonu (Hue) histogramı üretir
@@ -2590,13 +2596,13 @@ internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogr
             if (luma >= 250f) highlightClipped++
             totalPixels++
 
-            // Doygunluk ağırlıklı renk tonu (Hue) dağılımı — 8 bant sütunuyla 1:1 hizalı
+            // Doygunluk ağırlıklı renk tonu (Hue) dağılımı — 12 bant sütunuyla 1:1 hizalı
             AndroidColor.RGBToHSV(r, g, b, hsv)
             val sat = hsv[1]
             val lum = hsv[2]
             if (sat > 0.10f && lum > 0.06f && lum < 0.96f) {
                 val bandPos = hueToPerceptualBandPos(hsv[0])
-                val hueBin = ((bandPos / 8f) * bins).toInt().coerceIn(0, bins - 1)
+                val hueBin = ((bandPos / 12f) * bins).toInt().coerceIn(0, bins - 1)
                 hueWeights[hueBin] += sat * sat
             }
             px += stepX
@@ -3184,10 +3190,11 @@ fun CameraScreen(
     var colorPanelMode by remember { mutableStateOf(ColorPanelMode.GENEL) }
     var activeColorSubSlider by remember { mutableStateOf(ColorSubSlider.DOYGUNLUK) }
     var activePointColorSubSlider by remember { mutableStateOf(PointColorSubSlider.TON) }
-    var selectedColorBand by remember { mutableStateOf(ColorBand.RED) }
+    var selectedColorBands by remember { mutableStateOf(setOf(ColorBand.RED)) }
+    var isMultiBandMode by remember { mutableStateOf(false) }
     var activeBandSubSlider by remember { mutableStateOf(PointColorSubSlider.TON) }
     var colorBandsConfig by remember { mutableStateOf(ColorBandsConfig()) }
-    var isDeckCollapsed by remember { mutableStateOf(false) }
+    var isDeckCollapsed by remember { mutableStateOf(experienceMode == ExperienceMode.IR_LAB) }
     var isAnySliderDragging by remember { mutableStateOf(false) }
     var showGrid by remember { mutableStateOf(false) }
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -3387,9 +3394,9 @@ fun CameraScreen(
                 val obj = jsonArray.getJSONObject(i)
                 val name = obj.getString("name")
                 val bandsArr = obj.optJSONArray("bands")
-                val bandsConfig = if (bandsArr != null && bandsArr.length() == 8) {
+                val bandsConfig = if (bandsArr != null && bandsArr.length() == 12) {
                     ColorBandsConfig(
-                        List(8) { idx ->
+                        List(12) { idx ->
                             val bObj = bandsArr.optJSONObject(idx)
                             BandHslAdjustment(
                                 deltaHue = bObj?.optDouble("h", 0.0)?.toFloat() ?: 0f,
@@ -3398,6 +3405,38 @@ fun CameraScreen(
                             )
                         }
                     )
+                } else if (bandsArr != null && bandsArr.length() == 8) {
+                    val legacyTargets = listOf(
+                        ColorBand.RED, ColorBand.ORANGE, ColorBand.YELLOW, ColorBand.GREEN,
+                        ColorBand.CYAN, ColorBand.BLUE, ColorBand.PURPLE, ColorBand.MAGENTA
+                    )
+                    val mapped = MutableList(12) { BandHslAdjustment() }
+                    legacyTargets.forEachIndexed { legacyIdx, band ->
+                        val bObj = bandsArr.optJSONObject(legacyIdx)
+                        mapped[band.index] = BandHslAdjustment(
+                            deltaHue = bObj?.optDouble("h", 0.0)?.toFloat() ?: 0f,
+                            deltaSat = bObj?.optDouble("s", 0.0)?.toFloat() ?: 0f,
+                            deltaLum = bObj?.optDouble("l", 0.0)?.toFloat() ?: 0f
+                        )
+                    }
+                    val bridges = listOf(
+                        Triple(ColorBand.LIME, ColorBand.YELLOW, ColorBand.GREEN),
+                        Triple(ColorBand.EMERALD, ColorBand.GREEN, ColorBand.CYAN),
+                        Triple(ColorBand.AZURE, ColorBand.CYAN, ColorBand.BLUE),
+                        Triple(ColorBand.ROSE, ColorBand.MAGENTA, ColorBand.RED)
+                    )
+                    for ((mid, prev, next) in bridges) {
+                        val a = mapped[prev.index]
+                        val b = mapped[next.index]
+                        if (a.isModified || b.isModified) {
+                            mapped[mid.index] = BandHslAdjustment(
+                                deltaHue = (a.deltaHue + b.deltaHue) * 0.5f,
+                                deltaSat = (a.deltaSat + b.deltaSat) * 0.5f,
+                                deltaLum = (a.deltaLum + b.deltaLum) * 0.5f
+                            )
+                        }
+                    }
+                    ColorBandsConfig(mapped)
                 } else {
                     ColorBandsConfig()
                 }
@@ -4986,7 +5025,7 @@ fun CameraScreen(
             }
             ExperienceMode.IR_LAB -> {
                 // Kızılötesi modu kırmızı Aerochrome filtresiyle değil normal renklerle ve
-                // doğrudan White Balance · Exposure · Color · Metering paneli açık şekilde başlar.
+                // kompakt White Balance · Exposure · Color · Metering sekme şeridi küçültülmüş şekilde başlar.
                 isAutoMode = false
                 kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
                 tintValue = liveAutoTint.coerceIn(-100f, 100f)
@@ -4997,7 +5036,7 @@ fun CameraScreen(
                 targetedColorConfig = TargetedColorConfig()
                 activeLookGrade = LookGradeParams()
                 activeTab = ControlTab.BD
-                isDeckCollapsed = false
+                isDeckCollapsed = true
                 updatePreviewSettings()
             }
             ExperienceMode.PRO -> {
@@ -5315,7 +5354,7 @@ fun CameraScreen(
                                                     bitmap = bitmap,
                                                     x = x,
                                                     y = y,
-                                                    currentGains = if (isAutoMode) holder.lastHardwareGains else kelvinToGains(kelvinValue, tintValue)
+                                                    currentGains = if (holder.hasRealHardwareGains) holder.lastHardwareGains else kelvinToGains(kelvinValue, tintValue)
                                                 )
                                                 pickedMarkerPos = offset
                                                 kelvinValue = newK
@@ -6538,10 +6577,31 @@ fun CameraScreen(
                                         }
 
                                         ColorPanelMode.BANTLAR -> {
-                                            val bandAdj = colorBandsConfig.get(selectedColorBand)
-                                            val bandLabel = stringResource(selectedColorBand.labelRes)
-                                            val bandShiftedHue = (((selectedColorBand.centerHue + bandAdj.deltaHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
-                                            val bandHasHueShift = abs(bandAdj.deltaHue) > 1f
+                                            val activeBands = selectedColorBands.ifEmpty { setOf(ColorBand.RED) }
+                                            val orderedSelected = ColorBand.entries.filter { it in activeBands }
+                                            val primaryBand = orderedSelected.first()
+                                            val isMultiSelection = orderedSelected.size > 1
+                                            val avgHue = orderedSelected.sumOf { colorBandsConfig.get(it).deltaHue.toDouble() }.toFloat() / orderedSelected.size
+                                            val avgSat = orderedSelected.sumOf { colorBandsConfig.get(it).deltaSat.toDouble() }.toFloat() / orderedSelected.size
+                                            val avgLum = orderedSelected.sumOf { colorBandsConfig.get(it).deltaLum.toDouble() }.toFloat() / orderedSelected.size
+                                            val bandLabel = if (isMultiSelection) {
+                                                stringResource(R.string.bands_selected_count, orderedSelected.size)
+                                            } else {
+                                                stringResource(primaryBand.labelRes)
+                                            }
+                                            val bandShiftedHue = (((primaryBand.centerHue + avgHue) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
+                                            val bandHasHueShift = !isMultiSelection && abs(avgHue) > 1f
+                                            val selectedModified = orderedSelected.any { colorBandsConfig.get(it).isModified }
+                                            val satGradColors = if (isMultiSelection) {
+                                                listOf(Color(0xFF475569)) + orderedSelected.map { it.swatchColor }
+                                            } else {
+                                                listOf(Color(0xFF475569), primaryBand.swatchColor)
+                                            }
+                                            val lumGradColors = if (isMultiSelection) {
+                                                listOf(Color(0xFF1E293B)) + orderedSelected.map { it.swatchColor } + listOf(Color.White)
+                                            } else {
+                                                listOf(Color(0xFF1E293B), primaryBand.swatchColor, Color.White)
+                                            }
 
                                             Row(
                                                 modifier = Modifier
@@ -6552,34 +6612,54 @@ fun CameraScreen(
                                             ) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                                     modifier = Modifier.weight(1f, fill = false)
                                                 ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(13.dp)
-                                                            .clip(CircleShape)
-                                                            .background(selectedColorBand.swatchColor)
-                                                            .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape)
-                                                    )
-                                                    if (bandHasHueShift) {
-                                                        val shiftedBandColor = Color.hsv(
-                                                            hue = bandShiftedHue,
-                                                            saturation = (0.85f * (1f + bandAdj.deltaSat * 0.5f)).coerceIn(0.25f, 1f),
-                                                            value = (0.94f + bandAdj.deltaLum * 0.35f).coerceIn(0.30f, 1f)
-                                                        )
-                                                        Text(
-                                                            text = "→",
-                                                            color = IrPalette.TextSecondary,
-                                                            fontSize = 10.sp
-                                                        )
+                                                    if (isMultiSelection) {
+                                                        orderedSelected.take(4).forEach { selBand ->
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(11.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(selBand.swatchColor)
+                                                                    .border(0.9.dp, Color.White.copy(alpha = 0.78f), CircleShape)
+                                                            )
+                                                        }
+                                                        if (orderedSelected.size > 4) {
+                                                            Text(
+                                                                text = "+${orderedSelected.size - 4}",
+                                                                color = IrPalette.TextSecondary,
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    } else {
                                                         Box(
                                                             modifier = Modifier
                                                                 .size(13.dp)
                                                                 .clip(CircleShape)
-                                                                .background(shiftedBandColor)
-                                                                .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                                                                .background(primaryBand.swatchColor)
+                                                                .border(1.dp, Color.White.copy(alpha = 0.75f), CircleShape)
                                                         )
+                                                        if (bandHasHueShift) {
+                                                            val shiftedBandColor = Color.hsv(
+                                                                hue = bandShiftedHue,
+                                                                saturation = (0.85f * (1f + avgSat * 0.5f)).coerceIn(0.25f, 1f),
+                                                                value = (0.94f + avgLum * 0.35f).coerceIn(0.30f, 1f)
+                                                            )
+                                                            Text(
+                                                                text = "→",
+                                                                color = IrPalette.TextSecondary,
+                                                                fontSize = 10.sp
+                                                            )
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .size(13.dp)
+                                                                    .clip(CircleShape)
+                                                                    .background(shiftedBandColor)
+                                                                    .border(1.dp, Color.White.copy(alpha = 0.85f), CircleShape)
+                                                            )
+                                                        }
                                                     }
                                                     Text(
                                                         text = if (bandHasHueShift) {
@@ -6599,7 +6679,63 @@ fun CameraScreen(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    if (bandAdj.isModified) {
+                                                    Text(
+                                                        text = stringResource(R.string.action_multi_select),
+                                                        color = if (isMultiBandMode) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                                        fontSize = 10.sp,
+                                                        fontWeight = if (isMultiBandMode) FontWeight.Bold else FontWeight.SemiBold,
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(6.dp))
+                                                            .background(
+                                                                if (isMultiBandMode) IrPalette.IrAmber.copy(alpha = 0.20f)
+                                                                else Color.White.copy(alpha = 0.07f)
+                                                            )
+                                                            .border(
+                                                                0.8.dp,
+                                                                if (isMultiBandMode) IrPalette.IrAmber.copy(alpha = 0.78f)
+                                                                else IrPalette.BorderSubtle,
+                                                                RoundedCornerShape(6.dp)
+                                                            )
+                                                            .clickable(enabled = cameraReady) {
+                                                                isMultiBandMode = !isMultiBandMode
+                                                                if (!isMultiBandMode) {
+                                                                    selectedColorBands = setOf(primaryBand)
+                                                                }
+                                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                            }
+                                                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                                                    )
+                                                    if (isMultiBandMode) {
+                                                        val allSelected = activeBands.size == ColorBand.entries.size
+                                                        Text(
+                                                            text = stringResource(R.string.action_select_all_bands),
+                                                            color = if (allSelected) IrPalette.IrCyan else IrPalette.TextSecondary,
+                                                            fontSize = 10.sp,
+                                                            fontWeight = if (allSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(
+                                                                    if (allSelected) IrPalette.IrCyan.copy(alpha = 0.18f)
+                                                                    else Color.White.copy(alpha = 0.07f)
+                                                                )
+                                                                .border(
+                                                                    0.8.dp,
+                                                                    if (allSelected) IrPalette.IrCyan.copy(alpha = 0.75f)
+                                                                    else IrPalette.BorderSubtle,
+                                                                    RoundedCornerShape(6.dp)
+                                                                )
+                                                                .clickable(enabled = cameraReady) {
+                                                                    selectedColorBands = if (allSelected) {
+                                                                        setOf(primaryBand)
+                                                                    } else {
+                                                                        ColorBand.entries.toSet()
+                                                                    }
+                                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                                }
+                                                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                                        )
+                                                    }
+                                                    if (selectedModified) {
                                                         Text(
                                                             text = stringResource(R.string.action_reset_band),
                                                             color = IrPalette.IrAmber,
@@ -6608,8 +6744,8 @@ fun CameraScreen(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(6.dp))
                                                                 .background(IrPalette.IrAmber.copy(alpha = 0.14f))
-                                                                .clickable {
-                                                                    colorBandsConfig = colorBandsConfig.update(selectedColorBand) { BandHslAdjustment() }
+                                                                .clickable(enabled = cameraReady) {
+                                                                    colorBandsConfig = colorBandsConfig.updateAll(activeBands) { BandHslAdjustment() }
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                 }
                                                                 .padding(horizontal = 7.dp, vertical = 3.dp)
@@ -6623,7 +6759,7 @@ fun CameraScreen(
                                                             modifier = Modifier
                                                                 .clip(RoundedCornerShape(6.dp))
                                                                 .background(IrPalette.IrCoral.copy(alpha = 0.14f))
-                                                                .clickable {
+                                                                .clickable(enabled = cameraReady) {
                                                                     colorBandsConfig = ColorBandsConfig()
                                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                                 }
@@ -6635,23 +6771,38 @@ fun CameraScreen(
 
                                             ColorHistogramBandPicker(
                                                 hueBins = liveHistogram.hueBins,
-                                                selectedBand = selectedColorBand,
+                                                selectedBands = activeBands,
+                                                multiSelectMode = isMultiBandMode,
                                                 config = colorBandsConfig,
                                                 enabled = cameraReady,
                                                 modifier = Modifier.alpha(ghostChromeAlpha),
                                                 onSelectBand = { band ->
-                                                    if (selectedColorBand != band) {
-                                                        selectedColorBand = band
-                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    if (isMultiBandMode) {
+                                                        selectedColorBands = if (band in activeBands && activeBands.size > 1) {
+                                                            activeBands - band
+                                                        } else {
+                                                            activeBands + band
+                                                        }
+                                                    } else {
+                                                        selectedColorBands = setOf(band)
                                                     }
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                },
+                                                onSelectBandRange = { range ->
+                                                    selectedColorBands = range.ifEmpty { setOf(ColorBand.RED) }
+                                                },
+                                                onLongPressBand = { band ->
+                                                    isMultiBandMode = true
+                                                    selectedColorBands = activeBands + band
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 }
                                             )
 
                                             SegmentedChoiceRow(
                                                 options = listOf(
-                                                    PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(bandAdj.deltaHue)}°",
-                                                    PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.sub_sat_short)} · ${formatSigned(bandAdj.deltaSat * 100f)}%",
-                                                    PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.sub_lum_short)} · ${formatSigned(bandAdj.deltaLum * 100f)}%"
+                                                    PointColorSubSlider.TON to "${stringResource(R.string.sub_tint)} · ${formatSigned(avgHue)}°",
+                                                    PointColorSubSlider.DOYGUNLUK to "${stringResource(R.string.sub_sat_short)} · ${formatSigned(avgSat * 100f)}%",
+                                                    PointColorSubSlider.PARLAKLIK to "${stringResource(R.string.sub_lum_short)} · ${formatSigned(avgLum * 100f)}%"
                                                 ),
                                                 selected = activeBandSubSlider,
                                                 enabled = cameraReady,
@@ -6661,8 +6812,8 @@ fun CameraScreen(
 
                                             when (activeBandSubSlider) {
                                                 PointColorSubSlider.TON -> {
-                                                    val bandSpectrum = remember(selectedColorBand) {
-                                                        val base = selectedColorBand.centerHue
+                                                    val bandSpectrum = remember(primaryBand) {
+                                                        val base = primaryBand.centerHue
                                                         List(9) { idx ->
                                                             val offset = -180f + idx * 45f
                                                             val h = (((base + offset) % 360f + 360f) % 360f).coerceIn(0f, 359.99f)
@@ -6671,9 +6822,9 @@ fun CameraScreen(
                                                     }
                                                     ProGradientSliderRow(
                                                         label = "$bandLabel · ${stringResource(R.string.sub_tint)}",
-                                                        valueBadge = "${formatSigned(bandAdj.deltaHue)}°",
-                                                        isModified = abs(bandAdj.deltaHue) > 0.5f,
-                                                        value = bandAdj.deltaHue,
+                                                        valueBadge = "${formatSigned(avgHue)}°",
+                                                        isModified = orderedSelected.any { abs(colorBandsConfig.get(it).deltaHue) > 0.5f },
+                                                        value = avgHue,
                                                         defaultValue = 0f,
                                                         snapTolerance = 5f,
                                                         valueRange = -180f..180f,
@@ -6681,86 +6832,106 @@ fun CameraScreen(
                                                         gradient = Brush.horizontalGradient(bandSpectrum),
                                                         onDraggingChange = { isAnySliderDragging = it },
                                                         onStepMinus = {
-                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                                 it.copy(deltaHue = (it.deltaHue - 10f).coerceIn(-180f, 180f))
                                                             }
                                                         },
                                                         onStepPlus = {
-                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                            colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                                 it.copy(deltaHue = (it.deltaHue + 10f).coerceIn(-180f, 180f))
                                                             }
                                                         },
                                                         onReset = {
-                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaHue = 0f) }
+                                                            colorBandsConfig = colorBandsConfig.updateAll(activeBands) { it.copy(deltaHue = 0f) }
                                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                         },
                                                         onValueChange = { newVal ->
-                                                            colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaHue = newVal) }
+                                                            colorBandsConfig = if (activeBands.size == 1) {
+                                                                colorBandsConfig.update(primaryBand) { it.copy(deltaHue = newVal) }
+                                                            } else {
+                                                                val liveAvg = activeBands.sumOf { colorBandsConfig.get(it).deltaHue.toDouble() }.toFloat() / activeBands.size
+                                                                val delta = newVal - liveAvg
+                                                                colorBandsConfig.updateAll(activeBands) {
+                                                                    it.copy(deltaHue = (it.deltaHue + delta).coerceIn(-180f, 180f))
+                                                                }
+                                                            }
                                                         }
                                                     )
                                                 }
 
                                                 PointColorSubSlider.DOYGUNLUK -> ProGradientSliderRow(
                                                     label = "$bandLabel · ${stringResource(R.string.slider_saturation)}",
-                                                    valueBadge = "${formatSigned(bandAdj.deltaSat * 100f)}%",
-                                                    isModified = abs(bandAdj.deltaSat) > 0.02f,
-                                                    value = bandAdj.deltaSat,
+                                                    valueBadge = "${formatSigned(avgSat * 100f)}%",
+                                                    isModified = orderedSelected.any { abs(colorBandsConfig.get(it).deltaSat) > 0.02f },
+                                                    value = avgSat,
                                                     defaultValue = 0f,
                                                     snapTolerance = 0.05f,
                                                     valueRange = -1.0f..1.0f,
                                                     enabled = cameraReady,
-                                                    gradient = Brush.horizontalGradient(
-                                                        listOf(Color(0xFF475569), selectedColorBand.swatchColor)
-                                                    ),
+                                                    gradient = Brush.horizontalGradient(satGradColors),
                                                     onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                             it.copy(deltaSat = (it.deltaSat - 0.05f).coerceIn(-1.0f, 1.0f))
                                                         }
                                                     },
                                                     onStepPlus = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                             it.copy(deltaSat = (it.deltaSat + 0.05f).coerceIn(-1.0f, 1.0f))
                                                         }
                                                     },
                                                     onReset = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaSat = 0f) }
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) { it.copy(deltaSat = 0f) }
                                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     },
                                                     onValueChange = { newVal ->
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaSat = newVal) }
+                                                        colorBandsConfig = if (activeBands.size == 1) {
+                                                            colorBandsConfig.update(primaryBand) { it.copy(deltaSat = newVal) }
+                                                        } else {
+                                                            val liveAvg = activeBands.sumOf { colorBandsConfig.get(it).deltaSat.toDouble() }.toFloat() / activeBands.size
+                                                            val delta = newVal - liveAvg
+                                                            colorBandsConfig.updateAll(activeBands) {
+                                                                it.copy(deltaSat = (it.deltaSat + delta).coerceIn(-1.0f, 1.0f))
+                                                            }
+                                                        }
                                                     }
                                                 )
 
                                                 PointColorSubSlider.PARLAKLIK -> ProGradientSliderRow(
                                                     label = "$bandLabel · ${stringResource(R.string.sub_lum_short)}",
-                                                    valueBadge = "${formatSigned(bandAdj.deltaLum * 100f)}%",
-                                                    isModified = abs(bandAdj.deltaLum) > 0.02f,
-                                                    value = bandAdj.deltaLum,
+                                                    valueBadge = "${formatSigned(avgLum * 100f)}%",
+                                                    isModified = orderedSelected.any { abs(colorBandsConfig.get(it).deltaLum) > 0.02f },
+                                                    value = avgLum,
                                                     defaultValue = 0f,
                                                     snapTolerance = 0.05f,
                                                     valueRange = -1.0f..1.0f,
                                                     enabled = cameraReady,
-                                                    gradient = Brush.horizontalGradient(
-                                                        listOf(Color(0xFF1E293B), selectedColorBand.swatchColor, Color.White)
-                                                    ),
+                                                    gradient = Brush.horizontalGradient(lumGradColors),
                                                     onDraggingChange = { isAnySliderDragging = it },
                                                     onStepMinus = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                             it.copy(deltaLum = (it.deltaLum - 0.05f).coerceIn(-1.0f, 1.0f))
                                                         }
                                                     },
                                                     onStepPlus = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) {
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) {
                                                             it.copy(deltaLum = (it.deltaLum + 0.05f).coerceIn(-1.0f, 1.0f))
                                                         }
                                                     },
                                                     onReset = {
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaLum = 0f) }
+                                                        colorBandsConfig = colorBandsConfig.updateAll(activeBands) { it.copy(deltaLum = 0f) }
                                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                     },
                                                     onValueChange = { newVal ->
-                                                        colorBandsConfig = colorBandsConfig.update(selectedColorBand) { it.copy(deltaLum = newVal) }
+                                                        colorBandsConfig = if (activeBands.size == 1) {
+                                                            colorBandsConfig.update(primaryBand) { it.copy(deltaLum = newVal) }
+                                                        } else {
+                                                            val liveAvg = activeBands.sumOf { colorBandsConfig.get(it).deltaLum.toDouble() }.toFloat() / activeBands.size
+                                                            val delta = newVal - liveAvg
+                                                            colorBandsConfig.updateAll(activeBands) {
+                                                                it.copy(deltaLum = (it.deltaLum + delta).coerceIn(-1.0f, 1.0f))
+                                                            }
+                                                        }
                                                     }
                                                 )
                                             }
@@ -7123,6 +7294,7 @@ fun CameraScreen(
                                 .background(Color.White.copy(alpha = 0.05f))
                                 .border(0.8.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
                                 .padding(2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             val chips = listOf(
@@ -7165,7 +7337,7 @@ fun CameraScreen(
                         )
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(40.dp)
                                 .semantics { contentDescription = strPanelCd }
                                 .clip(CircleShape)
                                 .clickable { isDeckCollapsed = !isDeckCollapsed },
@@ -7173,7 +7345,7 @@ fun CameraScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(32.dp)
+                                    .size(36.dp)
                                     .clip(RoundedCornerShape(9.dp))
                                     .background(
                                         if (isDeckCollapsed) IrPalette.IrAmber.copy(alpha = 0.20f)
@@ -8673,20 +8845,25 @@ internal fun LiveHistogramOverlay(
 }
 
 /**
- * Lightroom / Darkroom tarzı etkileşimli Canlı Renk Tonu (Hue) Histogramı ve 8-Bant Seçici.
- * Sahnede hangi renklerin yoğun olduğunu canlı renkli histogram olarak gösterir;
- * histograma dokunarak veya sürükleyerek (ya da alt renk noktalarından) 8 banttan birini anında seçersiniz.
+ * Lightroom / Darkroom tarzı etkileşimli Canlı Renk Tonu (Hue) Histogramı ve 12-Bantlı Çoklu Seçici.
+ * Histogramda veya alttaki 12 renk noktasından tekli ya da çoklu renk seçip eşzamanlı düzenleyebilirsiniz.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ColorHistogramBandPicker(
     hueBins: FloatArray,
-    selectedBand: ColorBand,
+    selectedBands: Set<ColorBand>,
+    multiSelectMode: Boolean,
     config: ColorBandsConfig,
     enabled: Boolean,
     modifier: Modifier = Modifier,
-    onSelectBand: (ColorBand) -> Unit
+    onSelectBand: (ColorBand) -> Unit,
+    onSelectBandRange: (Set<ColorBand>) -> Unit,
+    onLongPressBand: (ColorBand) -> Unit
 ) {
     val currentOnSelect by rememberUpdatedState(onSelectBand)
+    val currentOnSelectRange by rememberUpdatedState(onSelectBandRange)
+    val currentMultiMode by rememberUpdatedState(multiSelectMode)
     val allBands = ColorBand.entries
 
     Column(
@@ -8698,7 +8875,7 @@ internal fun ColorHistogramBandPicker(
             .padding(horizontal = 5.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        // Üst: Canlı 48 sütunlu gökkuşağı Hue histogramı + seçili bant çerçevesi (dokun & sürükle)
+        // Üst: Canlı 48 sütunlu gökkuşağı Hue histogramı + seçili bant çerçeveleri (dokun & aralık sürükle)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -8714,14 +8891,45 @@ internal fun ColorHistogramBandPicker(
                     }
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        currentOnSelect(xToBand(down.position.x))
+                        val anchorBand = xToBand(down.position.x)
                         down.consume()
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!change.pressed) break
-                            currentOnSelect(xToBand(change.position.x))
-                            change.consume()
+                        if (!currentMultiMode) {
+                            var lastBand = anchorBand
+                            currentOnSelect(anchorBand)
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                val curBand = xToBand(change.position.x)
+                                if (curBand != lastBand) {
+                                    lastBand = curBand
+                                    currentOnSelect(curBand)
+                                }
+                                change.consume()
+                            }
+                        } else {
+                            var didRangeDrag = false
+                            var lastRange: Pair<Int, Int>? = null
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                val curBand = xToBand(change.position.x)
+                                if (curBand != anchorBand || didRangeDrag) {
+                                    didRangeDrag = true
+                                    val lo = minOf(anchorBand.index, curBand.index)
+                                    val hi = maxOf(anchorBand.index, curBand.index)
+                                    val pair = lo to hi
+                                    if (pair != lastRange) {
+                                        lastRange = pair
+                                        currentOnSelectRange(allBands.subList(lo, hi + 1).toSet())
+                                    }
+                                }
+                                change.consume()
+                            }
+                            if (!didRangeDrag) {
+                                currentOnSelect(anchorBand)
+                            }
                         }
                     }
                 }
@@ -8731,15 +8939,17 @@ internal fun ColorHistogramBandPicker(
                 val h = size.height
                 val bandW = w / allBands.size.toFloat()
 
-                // 1) Seçili bandın arka plan vurgusu
-                val selLeft = selectedBand.index * bandW
-                drawRect(
-                    color = selectedBand.swatchColor.copy(alpha = 0.16f),
-                    topLeft = Offset(selLeft, 0f),
-                    size = androidx.compose.ui.geometry.Size(bandW, h)
-                )
+                // 1) Seçili tüm bantların arka plan vurgusu
+                for (band in selectedBands) {
+                    val selLeft = band.index * bandW
+                    drawRect(
+                        color = band.swatchColor.copy(alpha = 0.20f),
+                        topLeft = Offset(selLeft, 0f),
+                        size = androidx.compose.ui.geometry.Size(bandW, h)
+                    )
+                }
 
-                // 2) 8 bant dikey ayırıcı çizgileri
+                // 2) 12 bant dikey ayırıcı çizgileri
                 for (i in 1 until allBands.size) {
                     val x = i * bandW
                     drawLine(
@@ -8756,7 +8966,7 @@ internal fun ColorHistogramBandPicker(
                     val maxBarH = h - 6.dp.toPx()
                     for (i in hueBins.indices) {
                         val v = hueBins[i].coerceIn(0f, 1f)
-                        val bandPos = ((i + 0.5f) / hueBins.size.toFloat()) * 8f
+                        val bandPos = ((i + 0.5f) / hueBins.size.toFloat()) * allBands.size.toFloat()
                         val hueDeg = perceptualBandPosToHue(bandPos).coerceIn(0f, 359.99f)
                         val barColor = Color.hsv(hueDeg, 0.86f, 0.96f)
                         val barH = (v * maxBarH).coerceAtLeast(1.5.dp.toPx())
@@ -8776,40 +8986,47 @@ internal fun ColorHistogramBandPicker(
                     }
                 }
 
-                // 4) Seçili bandın keskin optik çerçevesi
-                drawRoundRect(
-                    color = selectedBand.swatchColor,
-                    topLeft = Offset(selLeft + 0.8.dp.toPx(), 0.8.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(bandW - 1.6.dp.toPx(), h - 1.6.dp.toPx()),
-                    cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-                    style = Stroke(width = 1.4.dp.toPx())
-                )
+                // 4) Seçili bantların keskin optik çerçeveleri
+                for (band in selectedBands) {
+                    val selLeft = band.index * bandW
+                    drawRoundRect(
+                        color = band.swatchColor,
+                        topLeft = Offset(selLeft + 0.7.dp.toPx(), 0.7.dp.toPx()),
+                        size = androidx.compose.ui.geometry.Size((bandW - 1.4.dp.toPx()).coerceAtLeast(2f), h - 1.4.dp.toPx()),
+                        cornerRadius = CornerRadius(3.5.dp.toPx(), 3.5.dp.toPx()),
+                        style = Stroke(width = 1.3.dp.toPx())
+                    )
+                }
             }
         }
 
-        // Alt: Histogram bantlarıyla 1:1 hizalı 8 renk noktası (düzenlenen bantlarda üstte nokta göstergesi)
+        // Alt: Histogram bantlarıyla 1:1 hizalı 12 renk noktası (bas-bırak seçim + uzun bas: çoklu seçim)
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
             allBands.forEach { band ->
-                val isSelected = band == selectedBand
+                val isSelected = band in selectedBands
                 val isBandModified = config.get(band).isModified
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(22.dp)
+                        .height(24.dp)
                         .clip(RoundedCornerShape(5.dp))
-                        .clickable(enabled = enabled) { onSelectBand(band) },
+                        .combinedClickable(
+                            enabled = enabled,
+                            onClick = { onSelectBand(band) },
+                            onLongClick = { onLongPressBand(band) }
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(if (isSelected) 15.dp else 11.dp)
+                            .size(if (isSelected) 14.dp else 10.dp)
                             .clip(CircleShape)
                             .background(band.swatchColor)
                             .border(
-                                width = if (isSelected) 1.8.dp else 0.9.dp,
+                                width = if (isSelected) 1.8.dp else 0.8.dp,
                                 color = if (isSelected) Color.White else Color.White.copy(alpha = 0.28f),
                                 shape = CircleShape
                             )
@@ -8818,8 +9035,8 @@ internal fun ColorHistogramBandPicker(
                         Box(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
-                                .padding(top = 1.dp, end = 4.dp)
-                                .size(5.dp)
+                                .padding(top = 1.dp, end = 2.dp)
+                                .size(4.5.dp)
                                 .clip(CircleShape)
                                 .background(IrPalette.IrAmber)
                         )
@@ -8945,27 +9162,37 @@ internal fun TabChip(
 
     Box(
         modifier = modifier
-            .sizeIn(minHeight = 38.dp)
+            .height(40.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
             .border(0.8.dp, borderColor, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 2.dp, vertical = 3.dp),
+            .padding(horizontal = 3.dp),
         contentAlignment = Alignment.Center
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(1.dp)
+            verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically)
         ) {
-            icon?.invoke(contentColor)
+            icon?.let {
+                Box(
+                    modifier = Modifier.size(14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    it(contentColor)
+                }
+            }
             Text(
                 text = title,
                 color = contentColor,
                 fontSize = 10.sp,
+                lineHeight = 11.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
             )
         }
         if (hasActiveIndicator) {
@@ -9682,15 +9909,34 @@ internal fun SparkleAutoIcon(tint: Color, modifier: Modifier = Modifier) {
 internal fun ResetIcon(tint: Color, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val stroke = 1.6.dp.toPx()
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val r = size.minDimension * 0.34f
         drawArc(
             color = tint,
-            startAngle = -60f,
-            sweepAngle = 290f,
+            startAngle = -140f,
+            sweepAngle = 285f,
             useCenter = false,
+            topLeft = Offset(cx - r, cy - r),
+            size = androidx.compose.ui.geometry.Size(r * 2f, r * 2f),
             style = Stroke(width = stroke, cap = StrokeCap.Round)
         )
-        drawLine(tint, Offset(size.width * 0.64f, size.height * 0.10f), Offset(size.width * 0.78f, size.height * 0.26f), stroke, cap = StrokeCap.Round)
-        drawLine(tint, Offset(size.width * 0.56f, size.height * 0.28f), Offset(size.width * 0.78f, size.height * 0.26f), stroke, cap = StrokeCap.Round)
+        val tipRad = Math.toRadians(-140.0)
+        val tipX = cx + (cos(tipRad) * r).toFloat()
+        val tipY = cy + (sin(tipRad) * r).toFloat()
+        val barb = r * 0.48f
+        val a1 = Math.toRadians(-8.0)
+        val a2 = Math.toRadians(-98.0)
+        val arrow = Path().apply {
+            moveTo(tipX + (cos(a1) * barb).toFloat(), tipY + (sin(a1) * barb).toFloat())
+            lineTo(tipX, tipY)
+            lineTo(tipX + (cos(a2) * barb).toFloat(), tipY + (sin(a2) * barb).toFloat())
+        }
+        drawPath(
+            path = arrow,
+            color = tint,
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
     }
 }
 

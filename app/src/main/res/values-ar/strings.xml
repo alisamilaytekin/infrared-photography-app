@@ -80,6 +80,9 @@
     <string name="color_mode_pipette">اختر لوناً</string>
     <string name="action_reset_band">إعادة اللون</string>
     <string name="action_reset_all_bands">إعادة الكل</string>
+    <string name="action_multi_select">متعدد</string>
+    <string name="action_select_all_bands">الكل</string>
+    <string name="bands_selected_count">%1$d ألوان</string>
     <string name="action_pick_again">اختيار آخر</string>
     <string name="pipette_empty_hint">انقر «اختر لوناً» ثم المس أي لون على الشاشة لتغييره 360°</string>
 
@@ -87,11 +90,15 @@
     <string name="band_red">أحمر</string>
     <string name="band_orange">برتقالي</string>
     <string name="band_yellow">أصفر</string>
+    <string name="band_lime">أخضر ليموني</string>
     <string name="band_green">أخضر</string>
+    <string name="band_emerald">زمردي</string>
     <string name="band_cyan">سماوي</string>
+    <string name="band_azure">أزرق سماوي</string>
     <string name="band_blue">أزرق</string>
     <string name="band_purple">بنفسجي</string>
     <string name="band_magenta">أرجواني</string>
+    <string name="band_rose">وردي</string>
 
     <string name="hue_red">أحمر</string>
     <string name="hue_orange">برتقالي / كهرماني</string>
@@ -202,7 +209,7 @@
     <string name="editor_open_sys_gallery">المعرض</string>
     <string name="editor_tab_looks">فلاتر</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">عدّل أي صورة بفلاتر فيلم حادة، مازج ألوان 8 نطاقات، اختيار لون 360° وتبديل أحمر↔أزرق.</string>
+    <string name="editor_empty_subtitle">عدّل أي صورة بفلاتر فيلم حادة، مازج ألوان 12 نطاقات، اختيار لون 360° وتبديل أحمر↔أزرق.</string>
     <string name="editor_choose_gallery">اختيار من المعرض</string>
     <string name="editor_use_last_shot">تعديل آخر لقطة</string>
     <string name="editor_compare_banner">الصورة الأصلية (مقارنة)</string>
@@ -232,7 +239,7 @@
     <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">كاميرا احترافية</string>
-    <string name="exp_pro_desc">تحكم يدوي كامل، مازج ألوان 8 نطاقات، اختيار لون 360°، قفل الإضاءة وتصوير RAW DNG</string>
+    <string name="exp_pro_desc">تحكم يدوي كامل، مازج ألوان 12 نطاقات، اختيار لون 360°، قفل الإضاءة وتصوير RAW DNG</string>
     <string name="exp_pro_tags">RAW · يدوي · مازج ألوان</string>
 
     <string name="settings_title">الإعدادات</string>

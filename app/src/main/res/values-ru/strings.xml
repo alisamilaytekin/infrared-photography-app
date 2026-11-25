@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- Режимы и верхняя панель -->
+    <string name="mode_auto">Авто</string>
+    <string name="mode_pro">Про</string>
+    <string name="mode_studio">Студия</string>
+    <string name="label_wb_short">ББ</string>
+    <string name="label_tint">Оттенок</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">Разрешение</string>
+    <string name="cd_grid_toggle">Показать или скрыть сетку</string>
+    <string name="cd_panel_toggle">Развернуть или свернуть панель</string>
+    <string name="cd_flash_toggle">Переключить режим вспышки</string>
+    <string name="cd_flip_camera">Переключить камеру</string>
+
+    <!-- Вспышка -->
+    <string name="flash_off">Выкл</string>
+    <string name="flash_auto">Авто</string>
+    <string name="flash_on">Вкл</string>
+    <string name="flash_torch">Фонарик</string>
+    <string name="status_flash_set">Вспышка: %1$s</string>
+    <string name="status_camera_front">Фронтальная камера</string>
+    <string name="status_camera_back">Основная камера</string>
+
+    <!-- Главные вкладки -->
+    <string name="chip_wb">Баланс Б.</string>
+    <string name="chip_exposure">Экспозиция</string>
+    <string name="chip_color">Цвет</string>
+    <string name="chip_metering">Замер</string>
+
+    <!-- Подпереключатели -->
+    <string name="sub_kelvin">Теплота</string>
+    <string name="sub_tint">Оттенок</string>
+    <string name="sub_tint_wb">Зел.–Роз.</string>
+    <string name="sub_sat_short">Насыщ.</string>
+    <string name="sub_lum_short">Яркость</string>
+
+    <!-- Ползунки -->
+    <string name="slider_kelvin">Цветовая теплота (Kelvin)</string>
+    <string name="slider_tint">Оттенок (зелёный–розовый)</string>
+    <string name="slider_exposure">Яркость экспозиции (EV)</string>
+    <string name="slider_saturation">Насыщенность цвета</string>
+    <string name="slider_contrast">Контраст</string>
+    <string name="slider_point_hue">Оттенок выбранного цвета</string>
+    <string name="slider_point_sat">Насыщенность выбранного цвета</string>
+    <string name="slider_point_lum">Яркость выбранного цвета</string>
+
+    <!-- Быстрые действия -->
+    <string name="action_auto_calibrate">Авто-Белый</string>
+    <string name="action_spot_wb">Выбрать Белый</string>
+    <string name="action_spot_wb_active">Нажм. Белый</string>
+    <string name="action_color_pipette">Выбрать Цвет</string>
+    <string name="action_color_pipette_active">Нажм. Цвет</string>
+    <string name="action_auto_contrast">Авто-Тон</string>
+    <string name="action_channel_swap">Красн.↔Синий</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">Сбросить всё</string>
+    <string name="action_remove">Удалить</string>
+    <string name="action_highlight_guard">Защита Светов</string>
+    <string name="action_center_box">По центру</string>
+    <string name="action_cancel_pick">Отмена</string>
+
+    <!-- Замер -->
+    <string name="metering_full">Весь кадр</string>
+    <string name="metering_box">Точечный</string>
+    <string name="metering_size_label">Размер зоны</string>
+    <string name="metering_size_small">Малый</string>
+    <string name="metering_size_medium">Средний</string>
+    <string name="metering_size_large">Большой</string>
+    <string name="metering_pinch_hint">Нажмите для перемещения зоны света, сведите два пальца для изменения размера</string>
+    <string name="metering_full_hint">Замер всей сцены · Нажмите на экран для точечного замера</string>
+
+    <!-- Микшер цветов -->
+    <string name="range_narrow">Узкий</string>
+    <string name="range_balanced">Средний</string>
+    <string name="range_wide">Широкий</string>
+    <string name="color_mode_general">Базовый</string>
+    <string name="color_mode_bands">Микшер</string>
+    <string name="color_mode_pipette">Выбрать Цвет</string>
+    <string name="action_reset_band">Сброс цвета</string>
+    <string name="action_reset_all_bands">Сбросить всё</string>
+    <string name="action_pick_again">Выбрать снова</string>
+    <string name="pipette_empty_hint">Нажмите «Выбрать Цвет», затем коснитесь любого цвета на экране для сдвига на 360°</string>
+
+    <!-- Цветовые диапазоны -->
+    <string name="band_red">Красный</string>
+    <string name="band_orange">Оранжевый</string>
+    <string name="band_yellow">Жёлтый</string>
+    <string name="band_green">Зелёный</string>
+    <string name="band_cyan">Голубой</string>
+    <string name="band_blue">Синий</string>
+    <string name="band_purple">Фиолетовый</string>
+    <string name="band_magenta">Пурпурный</string>
+
+    <string name="hue_red">Красный</string>
+    <string name="hue_orange">Оранжевый / Янтарь</string>
+    <string name="hue_yellow">Жёлтый / Листва</string>
+    <string name="hue_green">Зелёный</string>
+    <string name="hue_cyan">Голубой</string>
+    <string name="hue_blue">Синий / Небо</string>
+    <string name="hue_purple">Фиолетовый</string>
+    <string name="hue_magenta">Пурпурный / Розовый</string>
+
+    <!-- Нижняя панель -->
+    <string name="action_presets">Фильтры</string>
+    <string name="cd_shutter">Сделать снимок</string>
+
+    <!-- Диалоги -->
+    <string name="dialog_presets_title">Фильтры и Пресеты</string>
+    <string name="dialog_presets_new">+ Сохранить</string>
+    <string name="presets_section_builtin">Плёночные и ИК-Фильтры</string>
+    <string name="presets_section_custom">Мои Пресеты</string>
+    <string name="dialog_presets_empty">Сохранённых пресетов пока нет. Нажмите «+ Сохранить», чтобы сохранить рецепт цвета.</string>
+    <string name="dialog_save_preset_title">Сохранить Пресет</string>
+    <string name="dialog_preset_name_label">Название пресета</string>
+    <string name="dialog_preset_name_hint">Напр. Осень ИК, Золотой Лес</string>
+    <string name="dialog_save">Сохранить</string>
+    <string name="dialog_cancel">Отмена</string>
+    <string name="dialog_close">Закрыть</string>
+    <string name="dialog_confirm">Сбросить</string>
+
+    <string name="dialog_reset_all_title">Сбросить все настройки?</string>
+    <string name="dialog_reset_all_message">Баланс белого, оттенок, экспозиция, насыщенность, контраст, Красный↔Синий, Микшер и выбранный цвет вернутся к стандартным.</string>
+
+    <!-- Разрешение -->
+    <string name="dialog_resolution_title">Разрешение Фото</string>
+    <string name="dialog_resolution_subtitle">Сначала выберите формат, затем разрешение</string>
+    <string name="dialog_resolution_advanced">Дополнительные разрешения</string>
+    <string name="dialog_resolution_recommended">Рекомендуется</string>
+    <string name="dialog_resolution_selected">Выбрано</string>
+
+    <!-- Статусы -->
+    <string name="status_camera_permission">Требуется разрешение камеры</string>
+    <string name="status_all_reset">Все настройки сброшены</string>
+    <string name="status_highlight_on">Защита светов включена</string>
+    <string name="status_highlight_off">Защита светов выключена</string>
+    <string name="status_tap_color">Коснитесь любого цвета на экране</string>
+    <string name="status_tap_wb">Коснитесь белой или нейтрально-серой зоны</string>
+    <string name="status_enter_name">Введите название</string>
+    <string name="status_box_centered">Зона замера по центру</string>
+    <string name="status_channel_swap_on">Обмен Красный↔Синий включён</string>
+    <string name="status_channel_swap_off">Обмен Красный↔Синий выключен</string>
+    <string name="status_color_picked">Выбран: %1$s</string>
+    <string name="status_preset_applied">Применено: %1$s</string>
+    <string name="status_preset_saved">Сохранено: %1$s</string>
+    <string name="status_preset_deleted">Удалено: %1$s</string>
+    <string name="status_auto_cal_fmt">Авто-Белый: %1$dK · Оттенок %2$s</string>
+    <string name="status_auto_contrast_fmt">Авто-Тон: %1$sx</string>
+    <string name="status_res_fmt">Разрешение: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">Ошибка RAW (JPEG сохранён)</string>
+    <string name="status_raw_unsupported_res">RAW не поддерживается в этом разрешении; включён JPEG</string>
+    <string name="status_res_unsupported">Разрешение не поддерживается</string>
+    <string name="status_capture_failed">Ошибка съёмки, попробуйте снова</string>
+    <string name="status_gallery_open_failed">Не удалось открыть Галерею</string>
+    <string name="status_pre_tiramisu_hsl">Живой предпросмотр цвета требует Android 13+; применяется при съёмке</string>
+
+    <!-- Дополнительно -->
+    <string name="action_compare">Оригинал</string>
+    <string name="banner_compare_auto">Оригинал (удерживайте)</string>
+    <string name="action_zebra">Зебра</string>
+    <string name="action_level">Уровень</string>
+    <string name="badge_zebra">ЗЕБРА</string>
+    <string name="badge_box">ТОЧКА</string>
+    <string name="timer_off">Выкл</string>
+    <string name="timer_3s">3с</string>
+    <string name="timer_10s">10с</string>
+    <string name="status_zebra_on">Предупреждение пересвета (зебра) вкл</string>
+    <string name="status_zebra_off">Предупреждение пересвета выкл</string>
+    <string name="status_level_on">Уровень горизонта включён</string>
+    <string name="status_level_off">Уровень горизонта выключен</string>
+    <string name="status_timer_set">Таймер: %1$s</string>
+
+    <!-- Гид -->
+    <string name="guide_step_1_title">1/3 · Живые Плёночные и ИК-Фильтры</string>
+    <string name="guide_step_1_body">Перейдите в Про или нажмите «Фильтры» для Portra 400, Aerochrome IR, 720nm Ч/Б и Красный↔Синий в реальном времени.</string>
+    <string name="guide_step_2_title">2/3 · Микшер и Выбор Цвета</string>
+    <string name="guide_step_2_body">В Цвет → Микшер или Выбрать Цвет смещайте любой оттенок на 360° прямо в кадре.</string>
+    <string name="guide_step_3_title">3/3 · Обработка Фото из Галереи</string>
+    <string name="guide_step_3_body">Нажмите «Студия» сверху или миниатюру последнего снимка для редактирования любых фото.</string>
+    <string name="guide_next">Далее</string>
+    <string name="guide_done">Начать</string>
+    <string name="guide_skip">Пропустить</string>
+
+    <!-- Галерея и RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">Съёмка RAW + JPEG включена</string>
+    <string name="status_raw_off">Только JPEG</string>
+    <string name="status_raw_saved">RAW (DNG) сохранён</string>
+    <string name="cd_gallery">Открыть в Студии (долгий тап: Галерея)</string>
+    <string name="cd_level_toggle">Включить или выключить уровень</string>
+    <string name="cd_timer_toggle">Переключить таймер</string>
+    <string name="cd_reset_all">Сбросить все настройки</string>
+    <string name="action_pipette_short">Выбрать Цвет</string>
+    <string name="action_auto_short">Авто</string>
+
+    <!-- Фотостудия -->
+    <string name="editor_pick_photo">Открыть</string>
+    <string name="editor_save">Сохранить</string>
+    <string name="editor_saving">Сохранение…</string>
+    <string name="editor_share">Поделиться</string>
+    <string name="editor_open_sys_gallery">Галерея</string>
+    <string name="editor_tab_looks">Фильтры</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">Обрабатывайте любые фото чёткими плёночными фильтрами, 8-полосным Микшером, Выбором цвета 360° и обменом Красный↔Синий.</string>
+    <string name="editor_choose_gallery">Выбрать из Галереи</string>
+    <string name="editor_use_last_shot">Изменить Последнее Фото</string>
+    <string name="editor_compare_banner">Исходное фото (сравнение)</string>
+    <string name="editor_saved_status">Фото сохранено в Галерею</string>
+    <string name="editor_save_failed">Не удалось сохранить фото</string>
+    <string name="editor_load_failed">Не удалось загрузить фото</string>
+    <string name="editor_auto_wb_done">Авто-Белый применён</string>
+    <string name="editor_spot_wb_done">Выбранный Белый применён</string>
+    <string name="editor_reset_done">Изменения сброшены</string>
+    <string name="editor_share_chooser">Поделиться фото</string>
+
+    <!-- Режимы и Настройки -->
+    <string name="cd_settings">Настройки и язык</string>
+    <string name="mode_camera_short">Камера</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">Выберите Стиль Съёмки</string>
+    <string name="welcome_subtitle">Настройте SpectraS под себя. Режим и язык можно поменять в любой момент в Настройках.</string>
+    <string name="welcome_start">Начать</string>
+    <string name="welcome_selected_badge">Выбрано</string>
+
+    <string name="exp_aesthetic_title">Эстетика и Фильтры</string>
+    <string name="exp_aesthetic_desc">Чёткие Auto-HDR портреты с Portra 400, Kodak Gold, Rose Gold, Classic Cuban и силой фильтра</string>
+    <string name="exp_aesthetic_tags">Портреты · Плёнка · Чёткая Кожа</string>
+
+    <string name="exp_ir_title">Инфракрасный (IR Lab)</string>
+    <string name="exp_ir_desc">ИК-съёмка в 1 клик: Красный↔Синий, профили 590–850nm и баланс белого по листве</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">Про Камера</string>
+    <string name="exp_pro_desc">Полный ручной контроль, 8-полосный Микшер, Выбор цвета 360°, Блок Света и RAW DNG</string>
+    <string name="exp_pro_tags">RAW · Ручной · Микшер</string>
+
+    <string name="settings_title">Настройки</string>
+    <string name="settings_exp_section">Режим Съёмки</string>
+    <string name="settings_language_section">Язык</string>
+    <string name="settings_language">Язык Приложения</string>
+    <string name="dialog_language_title">Выберите Язык</string>
+    <string name="settings_tools_section">Инструменты Камеры</string>
+    <string name="settings_grid">Сетка 3×3</string>
+    <string name="settings_level">Уровень Горизонта</string>
+    <string name="settings_timer">Таймер</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">Разрешение Фото</string>
+    <string name="status_exp_mode_changed">Режим: %1$s</string>
+
+    <!-- Ключевые кнопки -->
+    <string name="slider_filter_strength">Сила фильтра</string>
+    <string name="slider_soft_light">Яркость</string>
+    <string name="action_ir_leaf_wb">Белый Листвы</string>
+    <string name="action_ir_pro_tune">Про-Настройка</string>
+    <string name="action_ae_lock">Блок Света</string>
+    <string name="status_ae_lock_on">Свет заблокирован (AE-L)</string>
+    <string name="status_ae_lock_off">Свет разблокирован</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

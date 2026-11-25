@@ -4,7 +4,7 @@
     <!-- Modes and top bar -->
     <string name="mode_auto">Auto</string>
     <string name="mode_pro">Pro</string>
-    <string name="mode_studio">Edit</string>
+    <string name="mode_studio">Studio</string>
     <string name="label_wb_short">WB</string>
     <string name="label_tint">Tint</string>
     <string name="label_ev_short">EV</string>
@@ -24,64 +24,64 @@
     <string name="status_camera_back">Rear camera</string>
 
     <!-- Main control tabs -->
-    <string name="chip_wb">WB</string>
+    <string name="chip_wb">White Bal.</string>
     <string name="chip_exposure">Exposure</string>
     <string name="chip_color">Color</string>
     <string name="chip_metering">Metering</string>
 
     <!-- Sub-selectors -->
-    <string name="sub_kelvin">Temp</string>
+    <string name="sub_kelvin">Warmth</string>
     <string name="sub_tint">Hue</string>
-    <string name="sub_tint_wb">Tint</string>
-    <string name="sub_sat_short">Sat.</string>
-    <string name="sub_lum_short">Lum.</string>
+    <string name="sub_tint_wb">Green–Pink</string>
+    <string name="sub_sat_short">Saturation</string>
+    <string name="sub_lum_short">Brightness</string>
 
     <!-- Slider labels -->
-    <string name="slider_kelvin">Color temperature</string>
-    <string name="slider_tint">Tint (green–magenta)</string>
-    <string name="slider_exposure">Exposure (EV)</string>
-    <string name="slider_saturation">Saturation</string>
+    <string name="slider_kelvin">Color warmth (Kelvin)</string>
+    <string name="slider_tint">Color tint (green–pink)</string>
+    <string name="slider_exposure">Exposure brightness (EV)</string>
+    <string name="slider_saturation">Color saturation</string>
     <string name="slider_contrast">Contrast</string>
-    <string name="slider_point_hue">Color hue</string>
-    <string name="slider_point_sat">Color saturation</string>
-    <string name="slider_point_lum">Color luminance</string>
+    <string name="slider_point_hue">Selected color hue</string>
+    <string name="slider_point_sat">Selected color saturation</string>
+    <string name="slider_point_lum">Selected color brightness</string>
 
     <!-- Quick actions -->
-    <string name="action_auto_calibrate">Auto WB</string>
-    <string name="action_spot_wb">Spot WB</string>
-    <string name="action_spot_wb_active">Picker on</string>
-    <string name="action_color_pipette">Pipette</string>
-    <string name="action_color_pipette_active">Pipette on</string>
-    <string name="action_auto_contrast">Auto Contrast</string>
-    <string name="action_channel_swap">R↔B Swap</string>
+    <string name="action_auto_calibrate">Auto White</string>
+    <string name="action_spot_wb">Pick White</string>
+    <string name="action_spot_wb_active">Tap White</string>
+    <string name="action_color_pipette">Pick Color</string>
+    <string name="action_color_pipette_active">Tap Color</string>
+    <string name="action_auto_contrast">Auto Tone</string>
+    <string name="action_channel_swap">Red↔Blue</string>
     <string name="badge_channel_swap">R↔B</string>
     <string name="action_reset_all">Reset all</string>
     <string name="action_remove">Remove</string>
-    <string name="action_highlight_guard">Highlight guard</string>
+    <string name="action_highlight_guard">Protect Brights</string>
     <string name="action_center_box">Center</string>
     <string name="action_cancel_pick">Cancel</string>
 
     <!-- Metering -->
-    <string name="metering_full">Full frame</string>
-    <string name="metering_box">Spot box</string>
-    <string name="metering_size_label">Box size</string>
+    <string name="metering_full">Full scene</string>
+    <string name="metering_box">Spot touch</string>
+    <string name="metering_size_label">Area size</string>
     <string name="metering_size_small">Small</string>
     <string name="metering_size_medium">Medium</string>
     <string name="metering_size_large">Large</string>
-    <string name="metering_pinch_hint">Tap to move the metering box, pinch with two fingers to resize</string>
-    <string name="metering_full_hint">Metering full scene · Tap preview for spot box metering</string>
+    <string name="metering_pinch_hint">Tap to move the light box, pinch with two fingers to resize</string>
+    <string name="metering_full_hint">Measuring full scene · Tap anywhere on preview for spot metering</string>
 
     <!-- Color range and mixer -->
     <string name="range_narrow">Narrow</string>
     <string name="range_balanced">Balanced</string>
     <string name="range_wide">Wide</string>
-    <string name="color_mode_general">General</string>
-    <string name="color_mode_bands">Bands</string>
-    <string name="color_mode_pipette">Pipette</string>
-    <string name="action_reset_band">Reset band</string>
+    <string name="color_mode_general">Basic</string>
+    <string name="color_mode_bands">Color Mixer</string>
+    <string name="color_mode_pipette">Pick Color</string>
+    <string name="action_reset_band">Reset color</string>
     <string name="action_reset_all_bands">Reset all</string>
-    <string name="action_pick_again">Re-pick</string>
-    <string name="pipette_empty_hint">Activate the pipette and tap any color on screen to shift it 360°</string>
+    <string name="action_pick_again">Pick again</string>
+    <string name="pipette_empty_hint">Tap “Pick Color”, then touch any color on screen to shift it 360°</string>
 
     <!-- Color band & hue names -->
     <string name="band_red">Red</string>
@@ -103,14 +103,14 @@
     <string name="hue_magenta">Magenta / Pink</string>
 
     <!-- Bottom dock -->
-    <string name="action_presets">Looks</string>
+    <string name="action_presets">Filters</string>
     <string name="cd_shutter">Capture photo</string>
 
     <!-- Dialogs -->
-    <string name="dialog_presets_title">Looks &amp; Presets</string>
+    <string name="dialog_presets_title">Filters &amp; Presets</string>
     <string name="dialog_presets_new">+ Save current</string>
-    <string name="presets_section_builtin">Signature Infrared &amp; Cinema Looks</string>
-    <string name="presets_section_custom">My Custom Presets</string>
+    <string name="presets_section_builtin">Signature Film &amp; Infrared Filters</string>
+    <string name="presets_section_custom">My Saved Presets</string>
     <string name="dialog_presets_empty">No custom presets saved yet. Tap “+ Save current” to save your color recipe.</string>
     <string name="dialog_save_preset_title">Save Preset</string>
     <string name="dialog_preset_name_label">Preset name</string>
@@ -121,7 +121,7 @@
     <string name="dialog_confirm">Reset</string>
 
     <string name="dialog_reset_all_title">Reset all adjustments?</string>
-    <string name="dialog_reset_all_message">White balance, tint, exposure, saturation, contrast, channel swap, color bands, and pipette settings will return to default.</string>
+    <string name="dialog_reset_all_message">White balance, tint, exposure, saturation, contrast, Red↔Blue swap, Color Mixer, and picked color settings will return to default.</string>
 
     <!-- Resolution picker -->
     <string name="dialog_resolution_title">Photo Resolution</string>
@@ -133,20 +133,20 @@
     <!-- Status banners -->
     <string name="status_camera_permission">Camera permission is required</string>
     <string name="status_all_reset">All settings reset</string>
-    <string name="status_highlight_on">Highlight guard enabled</string>
-    <string name="status_highlight_off">Highlight guard disabled</string>
+    <string name="status_highlight_on">Highlight protection enabled</string>
+    <string name="status_highlight_off">Highlight protection disabled</string>
     <string name="status_tap_color">Tap any color on the preview</string>
     <string name="status_tap_wb">Tap a white or neutral gray area</string>
     <string name="status_enter_name">Please enter a name</string>
-    <string name="status_box_centered">Metering box centered</string>
-    <string name="status_channel_swap_on">R↔B Channel Swap enabled</string>
-    <string name="status_channel_swap_off">R↔B Channel Swap disabled</string>
+    <string name="status_box_centered">Metering area centered</string>
+    <string name="status_channel_swap_on">Red↔Blue Swap enabled</string>
+    <string name="status_channel_swap_off">Red↔Blue Swap disabled</string>
     <string name="status_color_picked">%1$s picked</string>
     <string name="status_preset_applied">%1$s applied</string>
     <string name="status_preset_saved">%1$s saved</string>
     <string name="status_preset_deleted">%1$s deleted</string>
-    <string name="status_auto_cal_fmt">Auto WB: %1$dK · Tint %2$s</string>
-    <string name="status_auto_contrast_fmt">Auto Contrast: %1$sx</string>
+    <string name="status_auto_cal_fmt">Auto White: %1$dK · Tint %2$s</string>
+    <string name="status_auto_contrast_fmt">Auto Tone: %1$sx</string>
     <string name="status_res_fmt">Resolution: %1$s (%2$s)</string>
     <string name="status_raw_failed_jpeg_ok">RAW failed (JPEG saved)</string>
     <string name="status_raw_unsupported_res">RAW unsupported at this resolution; switched to JPEG</string>
@@ -156,8 +156,8 @@
     <string name="status_pre_tiramisu_hsl">Live color grading preview requires Android 13+; applied on capture</string>
 
     <!-- Extras -->
-    <string name="action_compare">Compare</string>
-    <string name="banner_compare_auto">Original preview (compare)</string>
+    <string name="action_compare">Original</string>
+    <string name="banner_compare_auto">Original preview (hold to compare)</string>
     <string name="action_zebra">Zebra</string>
     <string name="action_level">Level</string>
     <string name="badge_zebra">ZEBRA</string>
@@ -165,19 +165,19 @@
     <string name="timer_off">Off</string>
     <string name="timer_3s">3s</string>
     <string name="timer_10s">10s</string>
-    <string name="status_zebra_on">Highlight clipping warning (zebra) on</string>
-    <string name="status_zebra_off">Highlight clipping warning off</string>
+    <string name="status_zebra_on">Overexposure warning (zebra) on</string>
+    <string name="status_zebra_off">Overexposure warning off</string>
     <string name="status_level_on">Horizon level enabled</string>
     <string name="status_level_off">Horizon level disabled</string>
     <string name="status_timer_set">Timer: %1$s</string>
 
     <!-- Onboarding (3 steps) -->
-    <string name="guide_step_1_title">1/3 · Live HSL &amp; Signature Looks</string>
-    <string name="guide_step_1_body">Switch to Pro or tap “Looks” for instant Aerochrome IR, 720nm B&amp;W, Teal &amp; Orange, or real-time R↔B Channel Swap while shooting.</string>
-    <string name="guide_step_2_title">2/3 · 8-Band Histogram &amp; Pipette</string>
-    <string name="guide_step_2_body">In Color → Bands or Pipette, shift any color up to 360° live. Panels automatically fade into Ghost Mode while you drag sliders.</string>
+    <string name="guide_step_1_title">1/3 · Live Film &amp; Infrared Filters</string>
+    <string name="guide_step_1_body">Switch to Pro or tap “Filters” for instant Portra 400, Aerochrome IR, 720nm B&amp;W, or live Red↔Blue Swap while shooting.</string>
+    <string name="guide_step_2_title">2/3 · Color Mixer &amp; Pick Color</string>
+    <string name="guide_step_2_body">In Color → Color Mixer or Pick Color, shift any color up to 360° live. Panels automatically fade out while you drag sliders.</string>
     <string name="guide_step_3_title">3/3 · Edit Gallery &amp; Captured Photos</string>
-    <string name="guide_step_3_body">Tap “Edit” in the top bar or tap your last photo thumbnail to open SpectraS Studio and grade any gallery photo with the exact same Pro engine.</string>
+    <string name="guide_step_3_body">Tap “Studio” in the top bar or tap your last photo thumbnail to edit any gallery photo with the exact same engine.</string>
     <string name="guide_next">Next</string>
     <string name="guide_done">Start</string>
     <string name="guide_skip">Skip</string>
@@ -191,7 +191,7 @@
     <string name="cd_level_toggle">Toggle horizon level</string>
     <string name="cd_timer_toggle">Cycle self-timer</string>
     <string name="cd_reset_all">Reset all adjustments</string>
-    <string name="action_pipette_short">Pipette</string>
+    <string name="action_pipette_short">Pick Color</string>
     <string name="action_auto_short">Auto</string>
 
     <!-- Photo Editor Studio -->
@@ -200,42 +200,46 @@
     <string name="editor_saving">Saving…</string>
     <string name="editor_share">Share</string>
     <string name="editor_open_sys_gallery">Gallery</string>
-    <string name="editor_tab_looks">Looks</string>
+    <string name="editor_tab_looks">Filters</string>
     <string name="editor_empty_title">SpectraS Photo Studio</string>
-    <string name="editor_empty_subtitle">Grade any photo from your gallery or your latest shot with live 8-band HSL, 360° Color Pipette, R↔B Infrared Swap, and Signature Looks.</string>
+    <string name="editor_empty_subtitle">Edit any gallery photo or your latest shot with crisp film looks, 8-band Color Mixer, 360° Pick Color, and Red↔Blue Infrared Swap.</string>
     <string name="editor_choose_gallery">Pick from Gallery</string>
     <string name="editor_use_last_shot">Edit Last Shot</string>
     <string name="editor_compare_banner">Original photo (compare)</string>
     <string name="editor_saved_status">Edited photo saved to Gallery</string>
     <string name="editor_save_failed">Could not save photo</string>
     <string name="editor_load_failed">Could not load photo</string>
-    <string name="editor_auto_wb_done">Auto WB applied</string>
-    <string name="editor_spot_wb_done">Spot WB applied</string>
+    <string name="editor_auto_wb_done">Auto White applied</string>
+    <string name="editor_spot_wb_done">Picked White applied</string>
     <string name="editor_reset_done">Edits reset</string>
     <string name="editor_share_chooser">Share edited photo</string>
 
     <!-- Experience Modes & Settings -->
-    <string name="cd_settings">Settings and experience mode</string>
+    <string name="cd_settings">Settings and language</string>
     <string name="mode_camera_short">Camera</string>
     <string name="mode_ir_short">IR Lab</string>
-    <string name="welcome_title">Choose Your Experience</string>
-    <string name="welcome_subtitle">Tailor SpectraS to your shooting style. Switch anytime in Settings.</string>
-    <string name="welcome_start">Continue</string>
+    <string name="welcome_title">Choose Your Shooting Style</string>
+    <string name="welcome_subtitle">Pick how SpectraS opens for you. Switch mode or language anytime in Settings.</string>
+    <string name="welcome_start">Start</string>
+    <string name="welcome_selected_badge">Selected</string>
 
     <string name="exp_aesthetic_title">Aesthetic &amp; Filters</string>
-    <string name="exp_aesthetic_desc">Crisp Auto-HDR viewfinder with Portra 400, Kodak Gold, Rose Gold, Classic Cuban &amp; editorial looks</string>
-    <string name="exp_aesthetic_tags">Portra 400 · Rose Gold · Classic Cuban · Crisp Skin</string>
+    <string name="exp_aesthetic_desc">Crisp Auto-HDR portraits with Portra 400, Kodak Gold, Rose Gold, Classic Cuban &amp; live strength slider</string>
+    <string name="exp_aesthetic_tags">Portraits · Film · Crisp Skin</string>
 
     <string name="exp_ir_title">Infrared (IR Lab)</string>
-    <string name="exp_ir_desc">Dedicated infrared workflow with 1-tap R↔B Swap, 590–850nm looks &amp; foliage WB</string>
-    <string name="exp_ir_tags">Aerochrome · R↔B Swap · 590/720nm · RAW</string>
+    <string name="exp_ir_desc">Dedicated infrared workflow with 1-tap Red↔Blue Swap, 590–850nm profiles &amp; leaf white balance</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · Red↔Blue</string>
 
     <string name="exp_pro_title">Pro Camera</string>
-    <string name="exp_pro_desc">Full manual controls, 8-band HSL histogram, 360° pipette, AE Lock &amp; RAW DNG</string>
-    <string name="exp_pro_tags">8-Band HSL · AE Lock · Histogram · RAW</string>
+    <string name="exp_pro_desc">Full manual controls, 8-band Color Mixer, 360° Pick Color, Light Lock &amp; RAW DNG capture</string>
+    <string name="exp_pro_tags">RAW · Manual · Color Mixer</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_exp_section">Experience Mode</string>
+    <string name="settings_exp_section">Shooting Mode</string>
+    <string name="settings_language_section">Language</string>
+    <string name="settings_language">App Language</string>
+    <string name="dialog_language_title">Choose Language</string>
     <string name="settings_tools_section">Camera Tools</string>
     <string name="settings_grid">3×3 Composition Grid</string>
     <string name="settings_level">Horizon Level</string>
@@ -247,10 +251,10 @@
     <!-- Aesthetic & IR Lab & Pro Key Controls -->
     <string name="slider_filter_strength">Filter strength</string>
     <string name="slider_soft_light">Brightness</string>
-    <string name="action_ir_leaf_wb">Foliage WB</string>
-    <string name="action_ir_pro_tune">Fine tune</string>
-    <string name="action_ae_lock">AE Lock</string>
-    <string name="status_ae_lock_on">Exposure locked (AE-L)</string>
-    <string name="status_ae_lock_off">Exposure unlocked</string>
+    <string name="action_ir_leaf_wb">Leaf White</string>
+    <string name="action_ir_pro_tune">Pro Tune</string>
+    <string name="action_ae_lock">Lock Light</string>
+    <string name="status_ae_lock_on">Light locked (AE-L)</string>
+    <string name="status_ae_lock_off">Light unlocked</string>
     <string name="badge_ae_lock">AE-L</string>
 </resources>

@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- 모드 및 상단 바 -->
+    <string name="mode_auto">자동</string>
+    <string name="mode_pro">프로</string>
+    <string name="mode_studio">스튜디오</string>
+    <string name="label_wb_short">WB</string>
+    <string name="label_tint">색조</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">해상도</string>
+    <string name="cd_grid_toggle">그리드 켜기 또는 끄기</string>
+    <string name="cd_panel_toggle">조절 패널 열기 또는 접기</string>
+    <string name="cd_flash_toggle">플래시 모드 전환</string>
+    <string name="cd_flip_camera">전면 또는 후면 카메라 전환</string>
+
+    <!-- 플래시 모드 -->
+    <string name="flash_off">끄기</string>
+    <string name="flash_auto">자동</string>
+    <string name="flash_on">켜기</string>
+    <string name="flash_torch">손전등</string>
+    <string name="status_flash_set">플래시: %1$s</string>
+    <string name="status_camera_front">전면 카메라</string>
+    <string name="status_camera_back">후면 카메라</string>
+
+    <!-- 메인 탭 -->
+    <string name="chip_wb">화이트밸런스</string>
+    <string name="chip_exposure">노출</string>
+    <string name="chip_color">색상</string>
+    <string name="chip_metering">측광</string>
+
+    <!-- 서브 선택 -->
+    <string name="sub_kelvin">색온도</string>
+    <string name="sub_tint">색상환</string>
+    <string name="sub_tint_wb">초록–핑크</string>
+    <string name="sub_sat_short">채도</string>
+    <string name="sub_lum_short">밝기</string>
+
+    <!-- 슬라이더 -->
+    <string name="slider_kelvin">색온도 (Kelvin)</string>
+    <string name="slider_tint">색조 (초록–핑크)</string>
+    <string name="slider_exposure">노출 밝기 (EV)</string>
+    <string name="slider_saturation">색상 채도</string>
+    <string name="slider_contrast">대비</string>
+    <string name="slider_point_hue">선택 색상 톤</string>
+    <string name="slider_point_sat">선택 색상 채도</string>
+    <string name="slider_point_lum">선택 색상 밝기</string>
+
+    <!-- 빠른 작업 -->
+    <string name="action_auto_calibrate">자동 화이트</string>
+    <string name="action_spot_wb">흰색 선택</string>
+    <string name="action_spot_wb_active">흰색 터치</string>
+    <string name="action_color_pipette">색상 선택</string>
+    <string name="action_color_pipette_active">색상 터치</string>
+    <string name="action_auto_contrast">자동 톤</string>
+    <string name="action_channel_swap">빨강↔파랑</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">모두 초기화</string>
+    <string name="action_remove">제거</string>
+    <string name="action_highlight_guard">빛번짐 방지</string>
+    <string name="action_center_box">중앙으로</string>
+    <string name="action_cancel_pick">취소</string>
+
+    <!-- 측광 -->
+    <string name="metering_full">전체 화면</string>
+    <string name="metering_box">터치 측광</string>
+    <string name="metering_size_label">영역 크기</string>
+    <string name="metering_size_small">작게</string>
+    <string name="metering_size_medium">보통</string>
+    <string name="metering_size_large">크게</string>
+    <string name="metering_pinch_hint">탭하여 측광 상자를 이동하고 두 손가락으로 크기를 조절하세요</string>
+    <string name="metering_full_hint">전체 장면 측광 중 · 화면을 탭하면 터치 측광으로 전환됩니다</string>
+
+    <!-- 색상 믹서 -->
+    <string name="range_narrow">좁게</string>
+    <string name="range_balanced">균형</string>
+    <string name="range_wide">넓게</string>
+    <string name="color_mode_general">기본</string>
+    <string name="color_mode_bands">색상 믹서</string>
+    <string name="color_mode_pipette">색상 선택</string>
+    <string name="action_reset_band">색상 초기화</string>
+    <string name="action_reset_all_bands">모두 초기화</string>
+    <string name="action_pick_again">다시 선택</string>
+    <string name="pipette_empty_hint">“색상 선택”을 누른 뒤 화면의 원하는 색을 터치해 360° 변환하세요</string>
+
+    <!-- 색상 밴드 -->
+    <string name="band_red">빨강</string>
+    <string name="band_orange">주황</string>
+    <string name="band_yellow">노랑</string>
+    <string name="band_green">초록</string>
+    <string name="band_cyan">청록</string>
+    <string name="band_blue">파랑</string>
+    <string name="band_purple">보라</string>
+    <string name="band_magenta">마젠타</string>
+
+    <string name="hue_red">빨강</string>
+    <string name="hue_orange">주황 / 앰버</string>
+    <string name="hue_yellow">노랑 / 나뭇잎</string>
+    <string name="hue_green">초록</string>
+    <string name="hue_cyan">청록</string>
+    <string name="hue_blue">파랑 / 하늘</string>
+    <string name="hue_purple">보라 / 바이올렛</string>
+    <string name="hue_magenta">마젠타 / 핑크</string>
+
+    <!-- 하단 독 -->
+    <string name="action_presets">필터</string>
+    <string name="cd_shutter">사진 촬영</string>
+
+    <!-- 다이얼로그 -->
+    <string name="dialog_presets_title">필터 및 프리셋</string>
+    <string name="dialog_presets_new">+ 현재 저장</string>
+    <string name="presets_section_builtin">시그니처 필름 &amp; 적외선 필터</string>
+    <string name="presets_section_custom">내 저장 프리셋</string>
+    <string name="dialog_presets_empty">저장된 프리셋이 없습니다. “+ 현재 저장”을 눌러 나만의 색감을 저장하세요.</string>
+    <string name="dialog_save_preset_title">프리셋 저장</string>
+    <string name="dialog_preset_name_label">프리셋 이름</string>
+    <string name="dialog_preset_name_hint">예: 가을 IR, 황금빛 숲</string>
+    <string name="dialog_save">저장</string>
+    <string name="dialog_cancel">취소</string>
+    <string name="dialog_close">닫기</string>
+    <string name="dialog_confirm">초기화</string>
+
+    <string name="dialog_reset_all_title">모든 조정을 초기화할까요?</string>
+    <string name="dialog_reset_all_message">화이트밸런스, 색조, 노출, 채도, 대비, 빨강↔파랑 전환, 색상 믹서 및 선택 색상이 기본값으로 돌아갑니다.</string>
+
+    <!-- 해상도 -->
+    <string name="dialog_resolution_title">사진 해상도</string>
+    <string name="dialog_resolution_subtitle">비율을 먼저 선택한 후 해상도를 선택하세요</string>
+    <string name="dialog_resolution_advanced">고급 해상도</string>
+    <string name="dialog_resolution_recommended">추천</string>
+    <string name="dialog_resolution_selected">선택됨</string>
+
+    <!-- 상태 배너 -->
+    <string name="status_camera_permission">카메라 권한이 필요합니다</string>
+    <string name="status_all_reset">모든 설정이 초기화되었습니다</string>
+    <string name="status_highlight_on">빛번짐 방지 켜짐</string>
+    <string name="status_highlight_off">빛번짐 방지 꺼짐</string>
+    <string name="status_tap_color">미리보기에서 원하는 색을 터치하세요</string>
+    <string name="status_tap_wb">흰색 또는 무채색 영역을 터치하세요</string>
+    <string name="status_enter_name">이름을 입력해 주세요</string>
+    <string name="status_box_centered">측광 영역을 중앙으로 맞췄습니다</string>
+    <string name="status_channel_swap_on">빨강↔파랑 전환 켜짐</string>
+    <string name="status_channel_swap_off">빨강↔파랑 전환 꺼짐</string>
+    <string name="status_color_picked">%1$s 선택됨</string>
+    <string name="status_preset_applied">%1$s 적용됨</string>
+    <string name="status_preset_saved">%1$s 저장됨</string>
+    <string name="status_preset_deleted">%1$s 삭제됨</string>
+    <string name="status_auto_cal_fmt">자동 화이트: %1$dK · 색조 %2$s</string>
+    <string name="status_auto_contrast_fmt">자동 톤: %1$sx</string>
+    <string name="status_res_fmt">해상도: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">RAW 실패 (JPEG 저장됨)</string>
+    <string name="status_raw_unsupported_res">이 해상도는 RAW 미지원으로 JPEG로 전환되었습니다</string>
+    <string name="status_res_unsupported">지원되지 않는 해상도입니다</string>
+    <string name="status_capture_failed">촬영에 실패했습니다. 다시 시도해 주세요</string>
+    <string name="status_gallery_open_failed">갤러리를 열 수 없습니다</string>
+    <string name="status_pre_tiramisu_hsl">실시간 색보정 미리보기는 Android 13+에서 지원되며 촬영 시 적용됩니다</string>
+
+    <!-- 추가 기능 -->
+    <string name="action_compare">원본</string>
+    <string name="banner_compare_auto">원본 미리보기 (길게 눌러 비교)</string>
+    <string name="action_zebra">지브라</string>
+    <string name="action_level">수평계</string>
+    <string name="badge_zebra">지브라</string>
+    <string name="badge_box">스팟</string>
+    <string name="timer_off">끄기</string>
+    <string name="timer_3s">3초</string>
+    <string name="timer_10s">10초</string>
+    <string name="status_zebra_on">과노출 경고(지브라) 켜짐</string>
+    <string name="status_zebra_off">과노출 경고 꺼짐</string>
+    <string name="status_level_on">수평계 켜짐</string>
+    <string name="status_level_off">수평계 꺼짐</string>
+    <string name="status_timer_set">타이머: %1$s</string>
+
+    <!-- 가이드 -->
+    <string name="guide_step_1_title">1/3 · 라이브 필름 &amp; 적외선 필터</string>
+    <string name="guide_step_1_body">프로 모드나 “필터”에서 Portra 400, Aerochrome IR, 720nm 흑백, 실시간 빨강↔파랑 전환을 바로 써보세요.</string>
+    <string name="guide_step_2_title">2/3 · 색상 믹서 &amp; 색상 선택</string>
+    <string name="guide_step_2_body">색상 → 색상 믹서 또는 색상 선택으로 어떤 색이든 실시간 360° 변환할 수 있습니다.</string>
+    <string name="guide_step_3_title">3/3 · 갤러리 사진 보정</string>
+    <string name="guide_step_3_body">상단 “스튜디오” 또는 최근 사진 썸네일을 눌러 갤러리 사진을 동일한 엔진으로 보정하세요.</string>
+    <string name="guide_next">다음</string>
+    <string name="guide_done">시작</string>
+    <string name="guide_skip">건너뛰기</string>
+
+    <!-- 갤러리 및 RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">RAW + JPEG 촬영 켜짐</string>
+    <string name="status_raw_off">JPEG 전용 모드</string>
+    <string name="status_raw_saved">RAW (DNG) 저장됨</string>
+    <string name="cd_gallery">스튜디오에서 열기 (길게 눌러 갤러리)</string>
+    <string name="cd_level_toggle">수평계 전환</string>
+    <string name="cd_timer_toggle">타이머 전환</string>
+    <string name="cd_reset_all">모든 조정 초기화</string>
+    <string name="action_pipette_short">색상 선택</string>
+    <string name="action_auto_short">자동</string>
+
+    <!-- 포토 스튜디오 -->
+    <string name="editor_pick_photo">열기</string>
+    <string name="editor_save">저장</string>
+    <string name="editor_saving">저장 중…</string>
+    <string name="editor_share">공유</string>
+    <string name="editor_open_sys_gallery">갤러리</string>
+    <string name="editor_tab_looks">필터</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">선명한 필름 필터, 8밴드 색상 믹서, 360° 색상 선택 및 빨강↔파랑 적외선 전환으로 사진을 보정하세요.</string>
+    <string name="editor_choose_gallery">갤러리에서 선택</string>
+    <string name="editor_use_last_shot">최근 사진 보정</string>
+    <string name="editor_compare_banner">원본 사진 (비교)</string>
+    <string name="editor_saved_status">보정된 사진이 갤러리에 저장되었습니다</string>
+    <string name="editor_save_failed">사진을 저장하지 못했습니다</string>
+    <string name="editor_load_failed">사진을 불러오지 못했습니다</string>
+    <string name="editor_auto_wb_done">자동 화이트 적용됨</string>
+    <string name="editor_spot_wb_done">선택한 화이트 적용됨</string>
+    <string name="editor_reset_done">보정 초기화됨</string>
+    <string name="editor_share_chooser">보정된 사진 공유</string>
+
+    <!-- 촬영 스타일 및 설정 -->
+    <string name="cd_settings">설정 및 언어</string>
+    <string name="mode_camera_short">카메라</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">촬영 스타일을 선택하세요</string>
+    <string name="welcome_subtitle">SpectraS의 시작 화면을 맞춤 설정하세요. 모드와 언어는 설정에서 언제든 바꿀 수 있습니다.</string>
+    <string name="welcome_start">시작하기</string>
+    <string name="welcome_selected_badge">선택됨</string>
+
+    <string name="exp_aesthetic_title">감성 &amp; 필터</string>
+    <string name="exp_aesthetic_desc">Portra 400, Kodak Gold, Rose Gold, Classic Cuban과 실시간 강도 조절이 포함된 선명한 Auto-HDR 인물 모드</string>
+    <string name="exp_aesthetic_tags">인물 · 필름 · 선명한 피부</string>
+
+    <string name="exp_ir_title">적외선 (IR Lab)</string>
+    <string name="exp_ir_desc">원탭 빨강↔파랑 전환, 590–850nm 프로파일 및 나뭇잎 화이트밸런스 전용 IR 워크플로</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">프로 카메라</string>
+    <string name="exp_pro_desc">완전 수동 제어, 8밴드 색상 믹서, 360° 색상 선택, 빛 잠금 및 RAW DNG 촬영</string>
+    <string name="exp_pro_tags">RAW · 수동 · 색상 믹서</string>
+
+    <string name="settings_title">설정</string>
+    <string name="settings_exp_section">촬영 모드</string>
+    <string name="settings_language_section">언어</string>
+    <string name="settings_language">앱 언어</string>
+    <string name="dialog_language_title">언어 선택</string>
+    <string name="settings_tools_section">카메라 도구</string>
+    <string name="settings_grid">3×3 구도 그리드</string>
+    <string name="settings_level">수평계</string>
+    <string name="settings_timer">셀프 타이머</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">사진 해상도</string>
+    <string name="status_exp_mode_changed">모드: %1$s</string>
+
+    <!-- 주요 컨트롤 -->
+    <string name="slider_filter_strength">필터 강도</string>
+    <string name="slider_soft_light">밝기</string>
+    <string name="action_ir_leaf_wb">나뭇잎 화이트</string>
+    <string name="action_ir_pro_tune">세부 조절</string>
+    <string name="action_ae_lock">빛 잠금</string>
+    <string name="status_ae_lock_on">빛이 잠겼습니다 (AE-L)</string>
+    <string name="status_ae_lock_off">빛 잠금이 해제되었습니다</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

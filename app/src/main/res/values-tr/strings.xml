@@ -24,64 +24,64 @@
     <string name="status_camera_back">Arka kamera</string>
 
     <!-- Ana kontrol çipleri -->
-    <string name="chip_wb">Beyaz D.</string>
+    <string name="chip_wb">Beyaz Denge</string>
     <string name="chip_exposure">Pozlama</string>
     <string name="chip_color">Renk</string>
     <string name="chip_metering">Ölçüm</string>
 
     <!-- Alt seçiciler -->
     <string name="sub_kelvin">Sıcaklık</string>
-    <string name="sub_tint">Ton</string>
-    <string name="sub_tint_wb">Ton</string>
-    <string name="sub_sat_short">Doyg.</string>
-    <string name="sub_lum_short">Parl.</string>
+    <string name="sub_tint">Renk Tonu</string>
+    <string name="sub_tint_wb">Yeşil–Pembe</string>
+    <string name="sub_sat_short">Doygunluk</string>
+    <string name="sub_lum_short">Parlaklık</string>
 
     <!-- Kaydırıcı etiketleri -->
-    <string name="slider_kelvin">Renk sıcaklığı</string>
-    <string name="slider_tint">Ton (yeşil–macenta)</string>
-    <string name="slider_exposure">Pozlama (EV)</string>
-    <string name="slider_saturation">Doygunluk</string>
+    <string name="slider_kelvin">Renk sıcaklığı (Kelvin)</string>
+    <string name="slider_tint">Renk tonu (yeşil–pembe)</string>
+    <string name="slider_exposure">Işık pozlaması (EV)</string>
+    <string name="slider_saturation">Renk doygunluğu</string>
     <string name="slider_contrast">Kontrast</string>
-    <string name="slider_point_hue">Renk tonu</string>
-    <string name="slider_point_sat">Renk doygunluğu</string>
-    <string name="slider_point_lum">Renk parlaklığı</string>
+    <string name="slider_point_hue">Seçili renk tonu</string>
+    <string name="slider_point_sat">Seçili renk doygunluğu</string>
+    <string name="slider_point_lum">Seçili renk parlaklığı</string>
 
     <!-- Hızlı eylemler -->
-    <string name="action_auto_calibrate">Oto denge</string>
-    <string name="action_spot_wb">Noktasal BD</string>
-    <string name="action_spot_wb_active">Seçici açık</string>
-    <string name="action_color_pipette">Pipet</string>
-    <string name="action_color_pipette_active">Pipet açık</string>
-    <string name="action_auto_contrast">Oto kontrast</string>
-    <string name="action_channel_swap">R↔B Takas</string>
+    <string name="action_auto_calibrate">Oto Beyaz</string>
+    <string name="action_spot_wb">Beyaz Seç</string>
+    <string name="action_spot_wb_active">Beyaza Dokun</string>
+    <string name="action_color_pipette">Renk Seç</string>
+    <string name="action_color_pipette_active">Renge Dokun</string>
+    <string name="action_auto_contrast">Oto Kontrast</string>
+    <string name="action_channel_swap">Kırmızı↔Mavi</string>
     <string name="badge_channel_swap">R↔B</string>
     <string name="action_reset_all">Tümünü sıfırla</string>
     <string name="action_remove">Kaldır</string>
-    <string name="action_highlight_guard">Vurgu koruma</string>
+    <string name="action_highlight_guard">Parlama Koru</string>
     <string name="action_center_box">Merkeze al</string>
     <string name="action_cancel_pick">İptal</string>
 
     <!-- Ölçüm -->
     <string name="metering_full">Tüm ekran</string>
-    <string name="metering_box">Kutu ölçüm</string>
-    <string name="metering_size_label">Kutu boyutu</string>
+    <string name="metering_box">Nokta ölçüm</string>
+    <string name="metering_size_label">Alan boyutu</string>
     <string name="metering_size_small">Küçük</string>
     <string name="metering_size_medium">Orta</string>
     <string name="metering_size_large">Büyük</string>
-    <string name="metering_pinch_hint">Önizlemede dokunarak taşıyın, iki parmakla boyutlandırın</string>
-    <string name="metering_full_hint">Işık tüm sahneden ölçülür · Noktasal ölçüm için önizlemeye dokunun</string>
+    <string name="metering_pinch_hint">Işık alanını taşımak için dokunun, boyutlandırmak için iki parmakla kıstırın</string>
+    <string name="metering_full_hint">Işık tüm sahneden ölçülür · Noktasal ölçüm için ekrana dokunun</string>
 
     <!-- Renk genişliği ve renk mikseri -->
     <string name="range_narrow">Dar</string>
     <string name="range_balanced">Dengeli</string>
     <string name="range_wide">Geniş</string>
-    <string name="color_mode_general">Genel</string>
-    <string name="color_mode_bands">Bantlar</string>
-    <string name="color_mode_pipette">Pipet</string>
-    <string name="action_reset_band">Bandı sıfırla</string>
+    <string name="color_mode_general">Temel</string>
+    <string name="color_mode_bands">Renk Mikseri</string>
+    <string name="color_mode_pipette">Renk Seç</string>
+    <string name="action_reset_band">Rengi sıfırla</string>
     <string name="action_reset_all_bands">Tümünü sıfırla</string>
-    <string name="action_pick_again">Yeniden seç</string>
-    <string name="pipette_empty_hint">Pipeti açıp görüntüdeki herhangi bir renge dokunun ve 360° dönüştürün</string>
+    <string name="action_pick_again">Tekrar seç</string>
+    <string name="pipette_empty_hint">“Renk Seç” düğmesine dokunup görüntüdeki herhangi bir rengi 360° dönüştürün</string>
 
     <!-- Renk bantları ve ton isimleri -->
     <string name="band_red">Kırmızı</string>
@@ -97,21 +97,21 @@
     <string name="hue_orange">Turuncu / Amber</string>
     <string name="hue_yellow">Sarı / Yaprak</string>
     <string name="hue_green">Yeşil</string>
-    <string name="hue_cyan">Camgöbeği (Cyan)</string>
+    <string name="hue_cyan">Camgöbeği</string>
     <string name="hue_blue">Mavi / Gökyüzü</string>
     <string name="hue_purple">Mor / Menekşe</string>
     <string name="hue_magenta">Macenta / Pembe</string>
 
     <!-- Alt çubuk -->
-    <string name="action_presets">Görünüm</string>
+    <string name="action_presets">Filtreler</string>
     <string name="cd_shutter">Fotoğraf çek</string>
 
     <!-- Diyaloglar -->
-    <string name="dialog_presets_title">Görünümler &amp; Ön Ayarlar</string>
+    <string name="dialog_presets_title">Filtreler &amp; Ön Ayarlar</string>
     <string name="dialog_presets_new">+ Kaydet</string>
-    <string name="presets_section_builtin">Hazır Kızılötesi &amp; Sinema Görünümleri</string>
-    <string name="presets_section_custom">Özel Ön Ayarlarım</string>
-    <string name="dialog_presets_empty">Henüz özel ön ayar kaydedilmedi. Mevcut renk ayarlarınızı kaydetmek için “+ Kaydet” düğmesine dokunun.</string>
+    <string name="presets_section_builtin">Hazır Film &amp; Kızılötesi Filtreler</string>
+    <string name="presets_section_custom">Kayıtlı Ön Ayarlarım</string>
+    <string name="dialog_presets_empty">Henüz özel ön ayar kaydedilmedi. Mevcut renk tarifini kaydetmek için “+ Kaydet” düğmesine dokun.</string>
     <string name="dialog_save_preset_title">Ön Ayar Kaydet</string>
     <string name="dialog_preset_name_label">Ön ayar adı</string>
     <string name="dialog_preset_name_hint">Örn. Sonbahar IR, Altın Orman</string>
@@ -121,10 +121,10 @@
     <string name="dialog_confirm">Sıfırla</string>
 
     <string name="dialog_reset_all_title">Tüm ayarlar sıfırlansın mı?</string>
-    <string name="dialog_reset_all_message">Beyaz dengesi, ton, pozlama, doygunluk, kontrast, kanal takası, renk bantları ve pipet ayarları varsayılan değerlere döndürülecek.</string>
+    <string name="dialog_reset_all_message">Beyaz dengesi, ton, pozlama, doygunluk, kontrast, Kırmızı↔Mavi takas, Renk Mikseri ve seçili renk ayarları varsayılan değerlere dönecek.</string>
 
     <!-- Çözünürlük seçici -->
-    <string name="dialog_resolution_title">Fotoğraf çözünürlüğü</string>
+    <string name="dialog_resolution_title">Fotoğraf Çözünürlüğü</string>
     <string name="dialog_resolution_subtitle">Önce en-boy oranını, ardından çözünürlüğü seçin</string>
     <string name="dialog_resolution_advanced">Gelişmiş çözünürlükler</string>
     <string name="dialog_resolution_recommended">Önerilen</string>
@@ -133,20 +133,20 @@
     <!-- Bildirimler -->
     <string name="status_camera_permission">Kamera izni gerekli</string>
     <string name="status_all_reset">Tüm ayarlar sıfırlandı</string>
-    <string name="status_highlight_on">Vurgu koruma açıldı</string>
-    <string name="status_highlight_off">Vurgu koruma kapatıldı</string>
+    <string name="status_highlight_on">Parlama koruma açıldı</string>
+    <string name="status_highlight_off">Parlama koruma kapatıldı</string>
     <string name="status_tap_color">Görüntüde bir renge dokunun</string>
     <string name="status_tap_wb">Beyaz veya gri bir alana dokunun</string>
     <string name="status_enter_name">Lütfen bir ad girin</string>
-    <string name="status_box_centered">Ölçüm kutusu merkeze alındı</string>
-    <string name="status_channel_swap_on">R↔B Kanal Takası açıldı</string>
-    <string name="status_channel_swap_off">R↔B Kanal Takası kapatıldı</string>
+    <string name="status_box_centered">Ölçüm alanı merkeze alındı</string>
+    <string name="status_channel_swap_on">Kırmızı↔Mavi Takas açıldı</string>
+    <string name="status_channel_swap_off">Kırmızı↔Mavi Takas kapatıldı</string>
     <string name="status_color_picked">%1$s seçildi</string>
     <string name="status_preset_applied">%1$s uygulandı</string>
     <string name="status_preset_saved">%1$s kaydedildi</string>
     <string name="status_preset_deleted">%1$s silindi</string>
-    <string name="status_auto_cal_fmt">Oto denge: %1$dK · Ton %2$s</string>
-    <string name="status_auto_contrast_fmt">Oto kontrast: %1$sx</string>
+    <string name="status_auto_cal_fmt">Oto Beyaz: %1$dK · Ton %2$s</string>
+    <string name="status_auto_contrast_fmt">Oto Kontrast: %1$sx</string>
     <string name="status_res_fmt">Çözünürlük: %1$s (%2$s)</string>
     <string name="status_raw_failed_jpeg_ok">RAW kaydedilemedi (JPEG kaydedildi)</string>
     <string name="status_raw_unsupported_res">Bu çözünürlükte RAW desteklenmedi, JPEG moduna geçildi</string>
@@ -156,28 +156,28 @@
     <string name="status_pre_tiramisu_hsl">Canlı renk önizlemesi Android 13+ gerektirir; çekilen fotoğrafa uygulanır</string>
 
     <!-- Ek özellikler -->
-    <string name="action_compare">Karşılaştır</string>
-    <string name="banner_compare_auto">Orijinal önizleme (karşılaştırma)</string>
+    <string name="action_compare">Orijinal</string>
+    <string name="banner_compare_auto">Orijinal önizleme (basılı tut)</string>
     <string name="action_zebra">Zebra</string>
     <string name="action_level">Terazi</string>
     <string name="badge_zebra">ZEBRA</string>
-    <string name="badge_box">KUTU</string>
+    <string name="badge_box">NOKTA</string>
     <string name="timer_off">Kapalı</string>
     <string name="timer_3s">3 sn</string>
     <string name="timer_10s">10 sn</string>
-    <string name="status_zebra_on">Parlak alan uyarısı (zebra) açıldı</string>
-    <string name="status_zebra_off">Parlak alan uyarısı kapatıldı</string>
+    <string name="status_zebra_on">Aşırı parlaklık uyarısı (zebra) açıldı</string>
+    <string name="status_zebra_off">Aşırı parlaklık uyarısı kapatıldı</string>
     <string name="status_level_on">Su terazisi açıldı</string>
     <string name="status_level_off">Su terazisi kapatıldı</string>
     <string name="status_timer_set">Zamanlayıcı: %1$s</string>
 
     <!-- İlk açılış rehberi (3 adım) -->
-    <string name="guide_step_1_title">1/3 · Hazır Kızılötesi &amp; Sinema Görünümleri</string>
-    <string name="guide_step_1_body">Pro moda geçin veya “Görünüm” düğmesine dokunarak Aerochrome IR, 720nm S&amp;B IR, Teal &amp; Orange ve canlı R↔B Kanal Takasını anında deneyin.</string>
-    <string name="guide_step_2_title">2/3 · 8 Bantlı Renk Histogramı &amp; Pipet</string>
-    <string name="guide_step_2_body">Renk → Bantlar veya Pipet ile istediğiniz rengi canlı olarak 360° dönüştürün. Kaydırıcıları sürüklerken panel Hayalet Moda geçip görüntüyü açar.</string>
-    <string name="guide_step_3_title">3/3 · Çekilen &amp; Galeri Fotoğraflarını Düzenle</string>
-    <string name="guide_step_3_body">Üst çubuktaki “Stüdyo” sekmesine veya son çektiğiniz fotoğrafın küçük resmine dokunarak galerideki tüm fotoğrafları aynı Pro motorla düzenleyin.</string>
+    <string name="guide_step_1_title">1/3 · Canlı Film &amp; Kızılötesi Filtreler</string>
+    <string name="guide_step_1_body">Pro moda geçin veya “Filtreler” düğmesine dokunarak Portra 400, Aerochrome IR, 720nm S&amp;B ve canlı Kırmızı↔Mavi takasını anında deneyin.</string>
+    <string name="guide_step_2_title">2/3 · Renk Mikseri &amp; Renk Seçici</string>
+    <string name="guide_step_2_body">Renk → Renk Mikseri veya Renk Seç ile istediğiniz rengi canlı olarak 360° dönüştürün. Kaydırıcıları sürüklerken panel otomatik şeffaflaşır.</string>
+    <string name="guide_step_3_title">3/3 · Galeri &amp; Çekilen Fotoğrafları Düzenle</string>
+    <string name="guide_step_3_body">Üst çubuktaki “Stüdyo” sekmesine veya son fotoğraf küçük resmine dokunarak galerideki tüm fotoğrafları aynı motorla düzenleyin.</string>
     <string name="guide_next">İleri</string>
     <string name="guide_done">Başla</string>
     <string name="guide_skip">Atla</string>
@@ -191,7 +191,7 @@
     <string name="cd_level_toggle">Su terazisini aç veya kapat</string>
     <string name="cd_timer_toggle">Zamanlayıcıyı değiştir</string>
     <string name="cd_reset_all">Tüm ayarları sıfırla</string>
-    <string name="action_pipette_short">Pipet</string>
+    <string name="action_pipette_short">Renk Seç</string>
     <string name="action_auto_short">Oto</string>
 
     <!-- Fotoğraf Düzenleme Stüdyosu -->
@@ -200,42 +200,46 @@
     <string name="editor_saving">Kaydediliyor…</string>
     <string name="editor_share">Paylaş</string>
     <string name="editor_open_sys_gallery">Galeri</string>
-    <string name="editor_tab_looks">Görünüm</string>
+    <string name="editor_tab_looks">Filtreler</string>
     <string name="editor_empty_title">SpectraS Fotoğraf Stüdyosu</string>
-    <string name="editor_empty_subtitle">Galerinizdeki veya yeni çektiğiniz fotoğrafları 8 bantlı renk histogramı, 360° pipet, R↔B kızılötesi kanal takası ve hazır görünümlerle düzenleyin.</string>
+    <string name="editor_empty_subtitle">Galerinizdeki veya yeni çektiğiniz fotoğrafları net film filtreleri, 8 bantlı Renk Mikseri, 360° Renk Seçici ve Kırmızı↔Mavi takasla düzenleyin.</string>
     <string name="editor_choose_gallery">Galeriden Fotoğraf Seç</string>
     <string name="editor_use_last_shot">Son Fotoğrafı Düzenle</string>
     <string name="editor_compare_banner">Orijinal fotoğraf (karşılaştırma)</string>
     <string name="editor_saved_status">Düzenlenen fotoğraf galeriye kaydedildi</string>
     <string name="editor_save_failed">Fotoğraf kaydedilemedi</string>
     <string name="editor_load_failed">Fotoğraf yüklenemedi</string>
-    <string name="editor_auto_wb_done">Oto beyaz dengesi uygulandı</string>
-    <string name="editor_spot_wb_done">Noktasal beyaz dengesi uygulandı</string>
+    <string name="editor_auto_wb_done">Oto Beyaz uygulandı</string>
+    <string name="editor_spot_wb_done">Seçili Beyaz uygulandı</string>
     <string name="editor_reset_done">Düzenlemeler sıfırlandı</string>
     <string name="editor_share_chooser">Düzenlenen fotoğrafı paylaş</string>
 
     <!-- Deneyim Modları & Ayarlar -->
-    <string name="cd_settings">Ayarlar ve deneyim modu</string>
+    <string name="cd_settings">Ayarlar ve dil</string>
     <string name="mode_camera_short">Kamera</string>
     <string name="mode_ir_short">IR Lab</string>
-    <string name="welcome_title">Deneyim Modunu Seç</string>
-    <string name="welcome_subtitle">SpectraS arayüzünü çekim tarzına göre özelleştir. İstediğin zaman Ayarlar’dan değiştirebilirsin.</string>
+    <string name="welcome_title">Çekim Tarzını Seç</string>
+    <string name="welcome_subtitle">SpectraS’ın sana özel başlangıç deneyimini seç. Mod ve dili istediğin zaman Ayarlar’dan değiştirebilirsin.</string>
     <string name="welcome_start">Başla</string>
+    <string name="welcome_selected_badge">Seçili</string>
 
     <string name="exp_aesthetic_title">Estetik &amp; Filtre</string>
-    <string name="exp_aesthetic_desc">Net Auto-HDR vizör, Portra 400, Kodak Gold, Rose Gold, Classic Cuban ve editoryal cilt filtreleri</string>
-    <string name="exp_aesthetic_tags">Portra 400 · Rose Gold · Classic Cuban · Net Cilt</string>
+    <string name="exp_aesthetic_desc">Net Auto-HDR portreler, Portra 400, Kodak Gold, Rose Gold, Classic Cuban ve canlı yoğunluk ayarı</string>
+    <string name="exp_aesthetic_tags">Portre · Film · Net Cilt</string>
 
     <string name="exp_ir_title">Kızılötesi (IR Lab)</string>
-    <string name="exp_ir_desc">Kızılötesi fotoğrafçılığa özel tek tuş R↔B takas, 590–850nm profilleri ve yaprak beyaz dengesi</string>
-    <string name="exp_ir_tags">Aerochrome · R↔B Takas · 590/720nm · RAW</string>
+    <string name="exp_ir_desc">Kızılötesi fotoğrafçılığa özel tek tuş Kırmızı↔Mavi takas, 590–850nm profilleri ve yaprak beyazı</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
 
     <string name="exp_pro_title">Pro Kamera</string>
-    <string name="exp_pro_desc">Tam manuel kontroller, 8 bantlı HSL histogramı, 360° pipet, AE kilidi ve RAW DNG çekim</string>
-    <string name="exp_pro_tags">8 Bant HSL · AE Kilit · Histogram · RAW</string>
+    <string name="exp_pro_desc">Tam manuel kontroller, 8 bantlı Renk Mikseri, 360° Renk Seçici, Işık Kilidi ve RAW DNG çekim</string>
+    <string name="exp_pro_tags">RAW · Manuel · Renk Mikseri</string>
 
     <string name="settings_title">Ayarlar</string>
-    <string name="settings_exp_section">Deneyim Modu</string>
+    <string name="settings_exp_section">Çekim Modu</string>
+    <string name="settings_language_section">Dil</string>
+    <string name="settings_language">Uygulama Dili</string>
+    <string name="dialog_language_title">Dil Seçin</string>
     <string name="settings_tools_section">Kamera Araçları</string>
     <string name="settings_grid">3×3 Kompozisyon Izgarası</string>
     <string name="settings_level">Su Terazisi</string>
@@ -247,10 +251,10 @@
     <!-- Estetik, IR Lab & Pro Kilit Kontrolleri -->
     <string name="slider_filter_strength">Filtre yoğunluğu</string>
     <string name="slider_soft_light">Parlaklık</string>
-    <string name="action_ir_leaf_wb">Yaprak BD</string>
-    <string name="action_ir_pro_tune">İnce ayar</string>
-    <string name="action_ae_lock">AE Kilit</string>
-    <string name="status_ae_lock_on">Pozlama kilitlendi (AE-L)</string>
-    <string name="status_ae_lock_off">Pozlama kilidi açıldı</string>
+    <string name="action_ir_leaf_wb">Yaprak Beyaz</string>
+    <string name="action_ir_pro_tune">Detay Ayar</string>
+    <string name="action_ae_lock">Işık Kilidi</string>
+    <string name="status_ae_lock_on">Işık kilitlendi (AE-L)</string>
+    <string name="status_ae_lock_off">Işık kilidi açıldı</string>
     <string name="badge_ae_lock">AE-L</string>
 </resources>

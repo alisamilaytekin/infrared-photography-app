@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- 模式与顶栏 -->
+    <string name="mode_auto">自动</string>
+    <string name="mode_pro">专业</string>
+    <string name="mode_studio">修图</string>
+    <string name="label_wb_short">白平衡</string>
+    <string name="label_tint">色调</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">分辨率</string>
+    <string name="cd_grid_toggle">开启或关闭网格</string>
+    <string name="cd_panel_toggle">展开或收起控制面板</string>
+    <string name="cd_flash_toggle">切换闪光灯模式</string>
+    <string name="cd_flip_camera">切换前后摄像头</string>
+
+    <!-- 闪光灯模式 -->
+    <string name="flash_off">关闭</string>
+    <string name="flash_auto">自动</string>
+    <string name="flash_on">开启</string>
+    <string name="flash_torch">常亮</string>
+    <string name="status_flash_set">闪光灯：%1$s</string>
+    <string name="status_camera_front">前置摄像头</string>
+    <string name="status_camera_back">后置摄像头</string>
+
+    <!-- 主控制标签 -->
+    <string name="chip_wb">白平衡</string>
+    <string name="chip_exposure">曝光</string>
+    <string name="chip_color">色彩</string>
+    <string name="chip_metering">测光</string>
+
+    <!-- 子选项 -->
+    <string name="sub_kelvin">色温</string>
+    <string name="sub_tint">色相</string>
+    <string name="sub_tint_wb">绿–粉</string>
+    <string name="sub_sat_short">饱和度</string>
+    <string name="sub_lum_short">亮度</string>
+
+    <!-- 滑块标签 -->
+    <string name="slider_kelvin">色温冷暖 (Kelvin)</string>
+    <string name="slider_tint">色调偏移 (绿–粉)</string>
+    <string name="slider_exposure">曝光亮度 (EV)</string>
+    <string name="slider_saturation">色彩饱和度</string>
+    <string name="slider_contrast">对比度</string>
+    <string name="slider_point_hue">所选颜色色相</string>
+    <string name="slider_point_sat">所选颜色饱和度</string>
+    <string name="slider_point_lum">所选颜色亮度</string>
+
+    <!-- 快捷操作 -->
+    <string name="action_auto_calibrate">自动白平衡</string>
+    <string name="action_spot_wb">点选白色</string>
+    <string name="action_spot_wb_active">轻点白色</string>
+    <string name="action_color_pipette">吸取颜色</string>
+    <string name="action_color_pipette_active">轻点颜色</string>
+    <string name="action_auto_contrast">自动影调</string>
+    <string name="action_channel_swap">红↔蓝互换</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">全部重置</string>
+    <string name="action_remove">移除</string>
+    <string name="action_highlight_guard">高光保护</string>
+    <string name="action_center_box">居中</string>
+    <string name="action_cancel_pick">取消</string>
+
+    <!-- 测光 -->
+    <string name="metering_full">全局测光</string>
+    <string name="metering_box">点触测光</string>
+    <string name="metering_size_label">区域大小</string>
+    <string name="metering_size_small">小</string>
+    <string name="metering_size_medium">中</string>
+    <string name="metering_size_large">大</string>
+    <string name="metering_pinch_hint">点击移动测光框，双指缩放调整大小</string>
+    <string name="metering_full_hint">正在全局测光 · 点击取景画面可切换点测光</string>
+
+    <!-- 调色器 -->
+    <string name="range_narrow">窄</string>
+    <string name="range_balanced">均衡</string>
+    <string name="range_wide">宽</string>
+    <string name="color_mode_general">基础</string>
+    <string name="color_mode_bands">混色器</string>
+    <string name="color_mode_pipette">吸取颜色</string>
+    <string name="action_reset_band">重置此色</string>
+    <string name="action_reset_all_bands">全部重置</string>
+    <string name="action_pick_again">重新吸取</string>
+    <string name="pipette_empty_hint">点击“吸取颜色”，再轻触画面中任意颜色即可 360° 转换</string>
+
+    <!-- 颜色通道 -->
+    <string name="band_red">红色</string>
+    <string name="band_orange">橙色</string>
+    <string name="band_yellow">黄色</string>
+    <string name="band_green">绿色</string>
+    <string name="band_cyan">青色</string>
+    <string name="band_blue">蓝色</string>
+    <string name="band_purple">紫色</string>
+    <string name="band_magenta">品红</string>
+
+    <string name="hue_red">红色</string>
+    <string name="hue_orange">橙色 / 琥珀</string>
+    <string name="hue_yellow">黄色 / 树叶</string>
+    <string name="hue_green">绿色</string>
+    <string name="hue_cyan">青色</string>
+    <string name="hue_blue">蓝色 / 天空</string>
+    <string name="hue_purple">紫色</string>
+    <string name="hue_magenta">品红 / 粉色</string>
+
+    <!-- 底部栏 -->
+    <string name="action_presets">滤镜</string>
+    <string name="cd_shutter">拍摄照片</string>
+
+    <!-- 弹窗 -->
+    <string name="dialog_presets_title">滤镜与预设</string>
+    <string name="dialog_presets_new">+ 保存当前</string>
+    <string name="presets_section_builtin">胶片与红外滤镜</string>
+    <string name="presets_section_custom">我的预设</string>
+    <string name="dialog_presets_empty">尚未保存自定义预设。点击“+ 保存当前”即可保存色彩配方。</string>
+    <string name="dialog_save_preset_title">保存预设</string>
+    <string name="dialog_preset_name_label">预设名称</string>
+    <string name="dialog_preset_name_hint">例如：秋日红外、金色森林</string>
+    <string name="dialog_save">保存</string>
+    <string name="dialog_cancel">取消</string>
+    <string name="dialog_close">关闭</string>
+    <string name="dialog_confirm">重置</string>
+
+    <string name="dialog_reset_all_title">重置所有参数？</string>
+    <string name="dialog_reset_all_message">白平衡、色调、曝光、饱和度、对比度、红↔蓝互换、混色器及吸取颜色都将恢复默认。</string>
+
+    <!-- 分辨率 -->
+    <string name="dialog_resolution_title">照片分辨率</string>
+    <string name="dialog_resolution_subtitle">先选择画幅比例，再选择分辨率</string>
+    <string name="dialog_resolution_advanced">更多分辨率</string>
+    <string name="dialog_resolution_recommended">推荐</string>
+    <string name="dialog_resolution_selected">已选</string>
+
+    <!-- 状态提示 -->
+    <string name="status_camera_permission">需要相机权限</string>
+    <string name="status_all_reset">已重置全部设置</string>
+    <string name="status_highlight_on">已开启高光保护</string>
+    <string name="status_highlight_off">已关闭高光保护</string>
+    <string name="status_tap_color">请轻点画面中的任意颜色</string>
+    <string name="status_tap_wb">请轻点白色或中性灰区域</string>
+    <string name="status_enter_name">请输入名称</string>
+    <string name="status_box_centered">测光区域已居中</string>
+    <string name="status_channel_swap_on">已开启红↔蓝互换</string>
+    <string name="status_channel_swap_off">已关闭红↔蓝互换</string>
+    <string name="status_color_picked">已吸取%1$s</string>
+    <string name="status_preset_applied">已应用%1$s</string>
+    <string name="status_preset_saved">已保存%1$s</string>
+    <string name="status_preset_deleted">已删除%1$s</string>
+    <string name="status_auto_cal_fmt">自动白平衡：%1$dK · 色调 %2$s</string>
+    <string name="status_auto_contrast_fmt">自动影调：%1$sx</string>
+    <string name="status_res_fmt">分辨率：%1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">RAW 保存失败（已保存 JPEG）</string>
+    <string name="status_raw_unsupported_res">当前分辨率不支持 RAW，已切换为 JPEG</string>
+    <string name="status_res_unsupported">不支持该分辨率</string>
+    <string name="status_capture_failed">拍摄失败，请重试</string>
+    <string name="status_gallery_open_failed">无法打开相册</string>
+    <string name="status_pre_tiramisu_hsl">实时调色预览需 Android 13+，拍摄后将自动应用</string>
+
+    <!-- 附加工具 -->
+    <string name="action_compare">原图</string>
+    <string name="banner_compare_auto">原图预览（长按对比）</string>
+    <string name="action_zebra">斑马纹</string>
+    <string name="action_level">水平仪</string>
+    <string name="badge_zebra">斑马纹</string>
+    <string name="badge_box">点测</string>
+    <string name="timer_off">关闭</string>
+    <string name="timer_3s">3秒</string>
+    <string name="timer_10s">10秒</string>
+    <string name="status_zebra_on">已开启过曝提示（斑马纹）</string>
+    <string name="status_zebra_off">已关闭过曝提示</string>
+    <string name="status_level_on">已开启水平仪</string>
+    <string name="status_level_off">已关闭水平仪</string>
+    <string name="status_timer_set">定时拍摄：%1$s</string>
+
+    <!-- 引导 -->
+    <string name="guide_step_1_title">1/3 · 实时胶片与红外滤镜</string>
+    <string name="guide_step_1_body">切换至专业模式或点击“滤镜”，实时体验 Portra 400、Aerochrome 红外、720nm 黑白与红↔蓝互换。</string>
+    <string name="guide_step_2_title">2/3 · 混色器与吸取颜色</string>
+    <string name="guide_step_2_body">在 色彩 → 混色器 或 吸取颜色 中，实时 360° 调整任意色彩。</string>
+    <string name="guide_step_3_title">3/3 · 编辑相册与已拍照片</string>
+    <string name="guide_step_3_body">点击顶部“修图”或最近照片缩略图，即可使用同款引擎编辑相册中的任意照片。</string>
+    <string name="guide_next">下一步</string>
+    <string name="guide_done">开始</string>
+    <string name="guide_skip">跳过</string>
+
+    <!-- 相册与 RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">已开启 RAW + JPEG 拍摄</string>
+    <string name="status_raw_off">仅 JPEG 模式</string>
+    <string name="status_raw_saved">已保存 RAW (DNG)</string>
+    <string name="cd_gallery">在修图中打开（长按打开相册）</string>
+    <string name="cd_level_toggle">开启或关闭水平仪</string>
+    <string name="cd_timer_toggle">切换定时拍摄</string>
+    <string name="cd_reset_all">重置全部参数</string>
+    <string name="action_pipette_short">吸取颜色</string>
+    <string name="action_auto_short">自动</string>
+
+    <!-- 修图工作室 -->
+    <string name="editor_pick_photo">打开</string>
+    <string name="editor_save">保存</string>
+    <string name="editor_saving">正在保存…</string>
+    <string name="editor_share">分享</string>
+    <string name="editor_open_sys_gallery">相册</string>
+    <string name="editor_tab_looks">滤镜</string>
+    <string name="editor_empty_title">SpectraS 修图工作室</string>
+    <string name="editor_empty_subtitle">使用清晰胶片滤镜、8通道混色器、360° 吸色与红↔蓝红外互换编辑相册中的任意照片。</string>
+    <string name="editor_choose_gallery">从相册选择</string>
+    <string name="editor_use_last_shot">编辑最近拍摄</string>
+    <string name="editor_compare_banner">原图（对比）</string>
+    <string name="editor_saved_status">已将修图保存到相册</string>
+    <string name="editor_save_failed">照片保存失败</string>
+    <string name="editor_load_failed">照片加载失败</string>
+    <string name="editor_auto_wb_done">已应用自动白平衡</string>
+    <string name="editor_spot_wb_done">已应用点选白平衡</string>
+    <string name="editor_reset_done">已重置编辑</string>
+    <string name="editor_share_chooser">分享编辑后的照片</string>
+
+    <!-- 拍摄风格与设置 -->
+    <string name="cd_settings">设置与语言</string>
+    <string name="mode_camera_short">相机</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">选择你的拍摄风格</string>
+    <string name="welcome_subtitle">定制 SpectraS 的启动体验，随时可在设置中切换模式或语言。</string>
+    <string name="welcome_start">开始使用</string>
+    <string name="welcome_selected_badge">已选</string>
+
+    <string name="exp_aesthetic_title">质感滤镜</string>
+    <string name="exp_aesthetic_desc">清晰 Auto-HDR 人像，内置 Portra 400、Kodak Gold、Rose Gold、Classic Cuban 与实时强度调节</string>
+    <string name="exp_aesthetic_tags">人像 · 胶片 · 清晰肤质</string>
+
+    <string name="exp_ir_title">红外摄影 (IR Lab)</string>
+    <string name="exp_ir_desc">专属红外流程：一键红↔蓝互换、590–850nm 滤镜及树叶白平衡</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">专业相机</string>
+    <string name="exp_pro_desc">全手动控制、8通道混色器、360° 吸取颜色、锁定曝光与 RAW DNG 拍摄</string>
+    <string name="exp_pro_tags">RAW · 手动 · 混色器</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_exp_section">拍摄模式</string>
+    <string name="settings_language_section">语言</string>
+    <string name="settings_language">应用语言</string>
+    <string name="dialog_language_title">选择语言</string>
+    <string name="settings_tools_section">相机工具</string>
+    <string name="settings_grid">3×3 构图网格</string>
+    <string name="settings_level">水平仪</string>
+    <string name="settings_timer">定时拍摄</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">照片分辨率</string>
+    <string name="status_exp_mode_changed">模式：%1$s</string>
+
+    <!-- 核心控制 -->
+    <string name="slider_filter_strength">滤镜强度</string>
+    <string name="slider_soft_light">亮度</string>
+    <string name="action_ir_leaf_wb">树叶白平衡</string>
+    <string name="action_ir_pro_tune">专业微调</string>
+    <string name="action_ae_lock">锁定亮度</string>
+    <string name="status_ae_lock_on">已锁定曝光 (AE-L)</string>
+    <string name="status_ae_lock_off">已解除曝光锁定</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

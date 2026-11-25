@@ -78,6 +78,12 @@ android {
     buildFeatures {
         compose = true
     }
+
+    bundle {
+        language {
+            enableSplit = false
+        }
+    }
 }
 
 dependencies {

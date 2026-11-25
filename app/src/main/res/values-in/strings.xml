@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- Mode & bilah atas -->
+    <string name="mode_auto">Oto</string>
+    <string name="mode_pro">Pro</string>
+    <string name="mode_studio">Studio</string>
+    <string name="label_wb_short">WB</string>
+    <string name="label_tint">Rona</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">Resolusi</string>
+    <string name="cd_grid_toggle">Aktifkan atau matikan grid</string>
+    <string name="cd_panel_toggle">Buka atau tutup panel kontrol</string>
+    <string name="cd_flash_toggle">Ubah mode lampu kilat</string>
+    <string name="cd_flip_camera">Ganti kamera depan atau belakang</string>
+
+    <!-- Mode lampu kilat -->
+    <string name="flash_off">Mati</string>
+    <string name="flash_auto">Oto</string>
+    <string name="flash_on">Nyala</string>
+    <string name="flash_torch">Senter</string>
+    <string name="status_flash_set">Flash: %1$s</string>
+    <string name="status_camera_front">Kamera depan</string>
+    <string name="status_camera_back">Kamera belakang</string>
+
+    <!-- Tab utama -->
+    <string name="chip_wb">Keseimb. Putih</string>
+    <string name="chip_exposure">Eksposur</string>
+    <string name="chip_color">Warna</string>
+    <string name="chip_metering">Ukur Cahaya</string>
+
+    <!-- Sub-pemilih -->
+    <string name="sub_kelvin">Hangat</string>
+    <string name="sub_tint">Corak</string>
+    <string name="sub_tint_wb">Hijau–Pink</string>
+    <string name="sub_sat_short">Saturasi</string>
+    <string name="sub_lum_short">Terang</string>
+
+    <!-- Label slider -->
+    <string name="slider_kelvin">Suhu warna (Kelvin)</string>
+    <string name="slider_tint">Rona warna (hijau–pink)</string>
+    <string name="slider_exposure">Kecerahan eksposur (EV)</string>
+    <string name="slider_saturation">Saturasi warna</string>
+    <string name="slider_contrast">Kontras</string>
+    <string name="slider_point_hue">Corak warna terpilih</string>
+    <string name="slider_point_sat">Saturasi warna terpilih</string>
+    <string name="slider_point_lum">Kecerahan warna terpilih</string>
+
+    <!-- Aksi cepat -->
+    <string name="action_auto_calibrate">Putih Oto</string>
+    <string name="action_spot_wb">Pilih Putih</string>
+    <string name="action_spot_wb_active">Sentuh Putih</string>
+    <string name="action_color_pipette">Pilih Warna</string>
+    <string name="action_color_pipette_active">Sentuh Warna</string>
+    <string name="action_auto_contrast">Nada Oto</string>
+    <string name="action_channel_swap">Merah↔Biru</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">Reset semua</string>
+    <string name="action_remove">Hapus</string>
+    <string name="action_highlight_guard">Jaga Sorotan</string>
+    <string name="action_center_box">Tengahkan</string>
+    <string name="action_cancel_pick">Batal</string>
+
+    <!-- Pengukuran cahaya -->
+    <string name="metering_full">Seluruh layar</string>
+    <string name="metering_box">Titik sentuh</string>
+    <string name="metering_size_label">Ukuran area</string>
+    <string name="metering_size_small">Kecil</string>
+    <string name="metering_size_medium">Sedang</string>
+    <string name="metering_size_large">Besar</string>
+    <string name="metering_pinch_hint">Ketuk untuk memindah area cahaya, cubit dua jari untuk ubah ukuran</string>
+    <string name="metering_full_hint">Mengukur seluruh adegan · Ketuk pratinjau untuk ukur titik</string>
+
+    <!-- Mixer warna -->
+    <string name="range_narrow">Sempit</string>
+    <string name="range_balanced">Seimbang</string>
+    <string name="range_wide">Lebar</string>
+    <string name="color_mode_general">Dasar</string>
+    <string name="color_mode_bands">Mixer Warna</string>
+    <string name="color_mode_pipette">Pilih Warna</string>
+    <string name="action_reset_band">Reset warna</string>
+    <string name="action_reset_all_bands">Reset semua</string>
+    <string name="action_pick_again">Pilih lagi</string>
+    <string name="pipette_empty_hint">Ketuk “Pilih Warna”, lalu sentuh warna apa saja di layar untuk geser 360°</string>
+
+    <!-- Pita warna -->
+    <string name="band_red">Merah</string>
+    <string name="band_orange">Oranye</string>
+    <string name="band_yellow">Kuning</string>
+    <string name="band_green">Hijau</string>
+    <string name="band_cyan">Sian</string>
+    <string name="band_blue">Biru</string>
+    <string name="band_purple">Ungu</string>
+    <string name="band_magenta">Magenta</string>
+
+    <string name="hue_red">Merah</string>
+    <string name="hue_orange">Oranye / Amber</string>
+    <string name="hue_yellow">Kuning / Daun</string>
+    <string name="hue_green">Hijau</string>
+    <string name="hue_cyan">Sian</string>
+    <string name="hue_blue">Biru / Langit</string>
+    <string name="hue_purple">Ungu / Violet</string>
+    <string name="hue_magenta">Magenta / Pink</string>
+
+    <!-- Bilah bawah -->
+    <string name="action_presets">Filter</string>
+    <string name="cd_shutter">Ambil foto</string>
+
+    <!-- Dialog -->
+    <string name="dialog_presets_title">Filter &amp; Preset</string>
+    <string name="dialog_presets_new">+ Simpan saat ini</string>
+    <string name="presets_section_builtin">Filter Film &amp; Inframerah</string>
+    <string name="presets_section_custom">Preset Tersimpan</string>
+    <string name="dialog_presets_empty">Belum ada preset pribadi. Ketuk “+ Simpan saat ini” untuk menyimpan resep warna Anda.</string>
+    <string name="dialog_save_preset_title">Simpan Preset</string>
+    <string name="dialog_preset_name_label">Nama preset</string>
+    <string name="dialog_preset_name_hint">Mis. Musim Gugur IR, Hutan Emas</string>
+    <string name="dialog_save">Simpan</string>
+    <string name="dialog_cancel">Batal</string>
+    <string name="dialog_close">Tutup</string>
+    <string name="dialog_confirm">Reset</string>
+
+    <string name="dialog_reset_all_title">Reset semua pengaturan?</string>
+    <string name="dialog_reset_all_message">Keseimbangan putih, rona, eksposur, saturasi, kontras, Merah↔Biru, Mixer Warna, dan warna pilihan akan kembali ke standar.</string>
+
+    <!-- Resolusi -->
+    <string name="dialog_resolution_title">Resolusi Foto</string>
+    <string name="dialog_resolution_subtitle">Pilih rasio dulu, lalu pilih resolusi</string>
+    <string name="dialog_resolution_advanced">Resolusi lanjutan</string>
+    <string name="dialog_resolution_recommended">Disarankan</string>
+    <string name="dialog_resolution_selected">Dipilih</string>
+
+    <!-- Status -->
+    <string name="status_camera_permission">Izin kamera diperlukan</string>
+    <string name="status_all_reset">Semua pengaturan direset</string>
+    <string name="status_highlight_on">Pelindung sorotan aktif</string>
+    <string name="status_highlight_off">Pelindung sorotan mati</string>
+    <string name="status_tap_color">Sentuh warna apa saja di pratinjau</string>
+    <string name="status_tap_wb">Sentuh area putih atau abu netral</string>
+    <string name="status_enter_name">Masukkan nama</string>
+    <string name="status_box_centered">Area ukur dipusatkan</string>
+    <string name="status_channel_swap_on">Tukar Merah↔Biru aktif</string>
+    <string name="status_channel_swap_off">Tukar Merah↔Biru mati</string>
+    <string name="status_color_picked">%1$s dipilih</string>
+    <string name="status_preset_applied">%1$s diterapkan</string>
+    <string name="status_preset_saved">%1$s disimpan</string>
+    <string name="status_preset_deleted">%1$s dihapus</string>
+    <string name="status_auto_cal_fmt">Putih Oto: %1$dK · Rona %2$s</string>
+    <string name="status_auto_contrast_fmt">Nada Oto: %1$sx</string>
+    <string name="status_res_fmt">Resolusi: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">RAW gagal (JPEG tersimpan)</string>
+    <string name="status_raw_unsupported_res">RAW tidak didukung di resolusi ini; beralih ke JPEG</string>
+    <string name="status_res_unsupported">Resolusi tidak didukung</string>
+    <string name="status_capture_failed">Gagal mengambil foto, coba lagi</string>
+    <string name="status_gallery_open_failed">Tidak dapat membuka Galeri</string>
+    <string name="status_pre_tiramisu_hsl">Pratinjau warna langsung butuh Android 13+; diterapkan saat memotret</string>
+
+    <!-- Tambahan -->
+    <string name="action_compare">Asli</string>
+    <string name="banner_compare_auto">Pratinjau asli (tahan)</string>
+    <string name="action_zebra">Zebra</string>
+    <string name="action_level">Level</string>
+    <string name="badge_zebra">ZEBRA</string>
+    <string name="badge_box">TITIK</string>
+    <string name="timer_off">Mati</string>
+    <string name="timer_3s">3 dtk</string>
+    <string name="timer_10s">10 dtk</string>
+    <string name="status_zebra_on">Peringatan cahaya berlebih (zebra) aktif</string>
+    <string name="status_zebra_off">Peringatan cahaya berlebih mati</string>
+    <string name="status_level_on">Level cakrawala aktif</string>
+    <string name="status_level_off">Level cakrawala mati</string>
+    <string name="status_timer_set">Timer: %1$s</string>
+
+    <!-- Panduan -->
+    <string name="guide_step_1_title">1/3 · Filter Film &amp; Inframerah Langsung</string>
+    <string name="guide_step_1_body">Beralih ke Pro atau ketuk “Filter” untuk Portra 400, Aerochrome IR, 720nm B&amp;W, atau tukar Merah↔Biru langsung.</string>
+    <string name="guide_step_2_title">2/3 · Mixer Warna &amp; Pilih Warna</string>
+    <string name="guide_step_2_body">Di Warna → Mixer Warna atau Pilih Warna, ubah warna apa pun hingga 360° secara langsung.</string>
+    <string name="guide_step_3_title">3/3 · Edit Foto Galeri Anda</string>
+    <string name="guide_step_3_body">Ketuk “Studio” di atas atau pratinjau foto terakhir untuk mengedit foto galeri dengan mesin yang sama.</string>
+    <string name="guide_next">Lanjut</string>
+    <string name="guide_done">Mulai</string>
+    <string name="guide_skip">Lewati</string>
+
+    <!-- Galeri & RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">Foto RAW + JPEG aktif</string>
+    <string name="status_raw_off">Mode hanya JPEG</string>
+    <string name="status_raw_saved">RAW (DNG) tersimpan</string>
+    <string name="cd_gallery">Buka di Studio (tekan lama untuk Galeri)</string>
+    <string name="cd_level_toggle">Aktifkan atau matikan level</string>
+    <string name="cd_timer_toggle">Ubah timer</string>
+    <string name="cd_reset_all">Reset semua pengaturan</string>
+    <string name="action_pipette_short">Pilih Warna</string>
+    <string name="action_auto_short">Oto</string>
+
+    <!-- Studio Foto -->
+    <string name="editor_pick_photo">Buka</string>
+    <string name="editor_save">Simpan</string>
+    <string name="editor_saving">Menyimpan…</string>
+    <string name="editor_share">Bagikan</string>
+    <string name="editor_open_sys_gallery">Galeri</string>
+    <string name="editor_tab_looks">Filter</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">Edit foto galeri dengan filter film tajam, Mixer Warna 8 pita, Pilih Warna 360°, dan tukar Merah↔Biru.</string>
+    <string name="editor_choose_gallery">Pilih dari Galeri</string>
+    <string name="editor_use_last_shot">Edit Foto Terakhir</string>
+    <string name="editor_compare_banner">Foto asli (bandingkan)</string>
+    <string name="editor_saved_status">Foto hasil edit disimpan ke Galeri</string>
+    <string name="editor_save_failed">Gagal menyimpan foto</string>
+    <string name="editor_load_failed">Gagal memuat foto</string>
+    <string name="editor_auto_wb_done">Putih Oto diterapkan</string>
+    <string name="editor_spot_wb_done">Putih pilihan diterapkan</string>
+    <string name="editor_reset_done">Editan direset</string>
+    <string name="editor_share_chooser">Bagikan foto hasil edit</string>
+
+    <!-- Mode Pengalaman & Pengaturan -->
+    <string name="cd_settings">Pengaturan dan bahasa</string>
+    <string name="mode_camera_short">Kamera</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">Pilih Gaya Memotret Anda</string>
+    <string name="welcome_subtitle">Atur tampilan awal SpectraS. Ubah mode atau bahasa kapan saja di Pengaturan.</string>
+    <string name="welcome_start">Mulai</string>
+    <string name="welcome_selected_badge">Dipilih</string>
+
+    <string name="exp_aesthetic_title">Estetik &amp; Filter</string>
+    <string name="exp_aesthetic_desc">Potret Auto-HDR tajam dengan Portra 400, Kodak Gold, Rose Gold, Classic Cuban &amp; kontrol intensitas</string>
+    <string name="exp_aesthetic_tags">Potret · Film · Kulit Tajam</string>
+
+    <string name="exp_ir_title">Inframerah (IR Lab)</string>
+    <string name="exp_ir_desc">Alur kerja inframerah dengan 1 ketuk Merah↔Biru, profil 590–850nm &amp; putih dedaunan</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">Kamera Pro</string>
+    <string name="exp_pro_desc">Kontrol manual penuh, Mixer Warna 8 pita, Pilih Warna 360°, Kunci Cahaya &amp; RAW DNG</string>
+    <string name="exp_pro_tags">RAW · Manual · Mixer Warna</string>
+
+    <string name="settings_title">Pengaturan</string>
+    <string name="settings_exp_section">Mode Kamera</string>
+    <string name="settings_language_section">Bahasa</string>
+    <string name="settings_language">Bahasa Aplikasi</string>
+    <string name="dialog_language_title">Pilih Bahasa</string>
+    <string name="settings_tools_section">Alat Kamera</string>
+    <string name="settings_grid">Grid Komposisi 3×3</string>
+    <string name="settings_level">Level Cakrawala</string>
+    <string name="settings_timer">Timer</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">Resolusi Foto</string>
+    <string name="status_exp_mode_changed">Mode: %1$s</string>
+
+    <!-- Kontrol Utama -->
+    <string name="slider_filter_strength">Kekuatan filter</string>
+    <string name="slider_soft_light">Kecerahan</string>
+    <string name="action_ir_leaf_wb">Putih Daun</string>
+    <string name="action_ir_pro_tune">Setelan Pro</string>
+    <string name="action_ae_lock">Kunci Cahaya</string>
+    <string name="status_ae_lock_on">Cahaya dikunci (AE-L)</string>
+    <string name="status_ae_lock_off">Cahaya dibuka</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- الأوضاع والشريط العلوي -->
+    <string name="mode_auto">تلقائي</string>
+    <string name="mode_pro">احترافي</string>
+    <string name="mode_studio">استوديو</string>
+    <string name="label_wb_short">WB</string>
+    <string name="label_tint">الصبغة</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">الدقة</string>
+    <string name="cd_grid_toggle">إظهار أو إخفاء الشبكة</string>
+    <string name="cd_panel_toggle">فتح أو طي لوحة التحكم</string>
+    <string name="cd_flash_toggle">تبديل وضع الفلاش</string>
+    <string name="cd_flip_camera">التبديل بين الكاميرا الأمامية والخلفية</string>
+
+    <!-- أوضاع الفلاش -->
+    <string name="flash_off">إيقاف</string>
+    <string name="flash_auto">تلقائي</string>
+    <string name="flash_on">تشغيل</string>
+    <string name="flash_torch">مصباح</string>
+    <string name="status_flash_set">الفلاش: %1$s</string>
+    <string name="status_camera_front">الكاميرا الأمامية</string>
+    <string name="status_camera_back">الكاميرا الخلفية</string>
+
+    <!-- التبويبات الرئيسية -->
+    <string name="chip_wb">توازن الأبيض</string>
+    <string name="chip_exposure">التعريض</string>
+    <string name="chip_color">الألوان</string>
+    <string name="chip_metering">قياس الضوء</string>
+
+    <!-- المحددات الفرعية -->
+    <string name="sub_kelvin">الدفء</string>
+    <string name="sub_tint">الدرجة</string>
+    <string name="sub_tint_wb">أخضر–وردي</string>
+    <string name="sub_sat_short">التشبع</string>
+    <string name="sub_lum_short">السطوع</string>
+
+    <!-- أشرطة التمرير -->
+    <string name="slider_kelvin">حرارة اللون (كلفن)</string>
+    <string name="slider_tint">صبغة اللون (أخضر–وردي)</string>
+    <string name="slider_exposure">سطوع التعريض (EV)</string>
+    <string name="slider_saturation">تشبع الألوان</string>
+    <string name="slider_contrast">التباين</string>
+    <string name="slider_point_hue">درجة اللون المختار</string>
+    <string name="slider_point_sat">تشبع اللون المختار</string>
+    <string name="slider_point_lum">سطوع اللون المختار</string>
+
+    <!-- إجراءات سريعة -->
+    <string name="action_auto_calibrate">أبيض تلقائي</string>
+    <string name="action_spot_wb">اختر أبيض</string>
+    <string name="action_spot_wb_active">المس الأبيض</string>
+    <string name="action_color_pipette">اختر لوناً</string>
+    <string name="action_color_pipette_active">المس اللون</string>
+    <string name="action_auto_contrast">تباين تلقائي</string>
+    <string name="action_channel_swap">أحمر↔أزرق</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">إعادة ضبط الكل</string>
+    <string name="action_remove">إزالة</string>
+    <string name="action_highlight_guard">حماية الإضاءة</string>
+    <string name="action_center_box">توسيط</string>
+    <string name="action_cancel_pick">إلغاء</string>
+
+    <!-- قياس الضوء -->
+    <string name="metering_full">المشهد بالكامل</string>
+    <string name="metering_box">نقطة اللمس</string>
+    <string name="metering_size_label">حجم المنطقة</string>
+    <string name="metering_size_small">صغير</string>
+    <string name="metering_size_medium">متوسط</string>
+    <string name="metering_size_large">كبير</string>
+    <string name="metering_pinch_hint">انقر لتحريك مربع الإضاءة، وقرّب بإصبعين لتغيير الحجم</string>
+    <string name="metering_full_hint">قياس المشهد بالكامل · انقر على الشاشة للقياس النقطي</string>
+
+    <!-- مازج الألوان -->
+    <string name="range_narrow">ضيق</string>
+    <string name="range_balanced">متوازن</string>
+    <string name="range_wide">واسع</string>
+    <string name="color_mode_general">أساسي</string>
+    <string name="color_mode_bands">مازج الألوان</string>
+    <string name="color_mode_pipette">اختر لوناً</string>
+    <string name="action_reset_band">إعادة اللون</string>
+    <string name="action_reset_all_bands">إعادة الكل</string>
+    <string name="action_pick_again">اختيار آخر</string>
+    <string name="pipette_empty_hint">انقر «اختر لوناً» ثم المس أي لون على الشاشة لتغييره 360°</string>
+
+    <!-- نطاقات الألوان -->
+    <string name="band_red">أحمر</string>
+    <string name="band_orange">برتقالي</string>
+    <string name="band_yellow">أصفر</string>
+    <string name="band_green">أخضر</string>
+    <string name="band_cyan">سماوي</string>
+    <string name="band_blue">أزرق</string>
+    <string name="band_purple">بنفسجي</string>
+    <string name="band_magenta">أرجواني</string>
+
+    <string name="hue_red">أحمر</string>
+    <string name="hue_orange">برتقالي / كهرماني</string>
+    <string name="hue_yellow">أصفر / أوراق</string>
+    <string name="hue_green">أخضر</string>
+    <string name="hue_cyan">سماوي</string>
+    <string name="hue_blue">أزرق / سماء</string>
+    <string name="hue_purple">بنفسجي</string>
+    <string name="hue_magenta">أرجواني / وردي</string>
+
+    <!-- الشريط السفلي -->
+    <string name="action_presets">فلاتر</string>
+    <string name="cd_shutter">التقاط صورة</string>
+
+    <!-- النوافذ -->
+    <string name="dialog_presets_title">الفلاتر والإعدادات المسبقة</string>
+    <string name="dialog_presets_new">+ حفظ الحالي</string>
+    <string name="presets_section_builtin">فلاتر الفيلم والأشعة تحت الحمراء</string>
+    <string name="presets_section_custom">إعداداتي المحفوظة</string>
+    <string name="dialog_presets_empty">لا توجد إعدادات محفوظة بعد. انقر «+ حفظ الحالي» لحفظ وصفتك اللونية.</string>
+    <string name="dialog_save_preset_title">حفظ الإعداد المسبق</string>
+    <string name="dialog_preset_name_label">اسم الإعداد</string>
+    <string name="dialog_preset_name_hint">مثال: خريف IR، غابة ذهبية</string>
+    <string name="dialog_save">حفظ</string>
+    <string name="dialog_cancel">إلغاء</string>
+    <string name="dialog_close">إغلاق</string>
+    <string name="dialog_confirm">إعادة ضبط</string>
+
+    <string name="dialog_reset_all_title">إعادة ضبط جميع التعديلات؟</string>
+    <string name="dialog_reset_all_message">سيعود توازن الأبيض والصبغة والتعريض والتشبع والتباين وتبديل أحمر↔أزرق ومازج الألوان إلى الوضع الافتراضي.</string>
+
+    <!-- الدقة -->
+    <string name="dialog_resolution_title">دقة الصورة</string>
+    <string name="dialog_resolution_subtitle">اختر نسبة العرض أولاً، ثم الدقة</string>
+    <string name="dialog_resolution_advanced">دقات متقدمة</string>
+    <string name="dialog_resolution_recommended">موصى بها</string>
+    <string name="dialog_resolution_selected">محددة</string>
+
+    <!-- رسائل الحالة -->
+    <string name="status_camera_permission">إذن الكاميرا مطلوب</string>
+    <string name="status_all_reset">تمت إعادة ضبط جميع الإعدادات</string>
+    <string name="status_highlight_on">تم تفعيل حماية الإضاءة الساطعة</string>
+    <string name="status_highlight_off">تم إيقاف حماية الإضاءة الساطعة</string>
+    <string name="status_tap_color">المس أي لون على المعاينة</string>
+    <string name="status_tap_wb">المس منطقة بيضاء أو رمادية محايدة</string>
+    <string name="status_enter_name">يرجى إدخال اسم</string>
+    <string name="status_box_centered">تم توسيط منطقة القياس</string>
+    <string name="status_channel_swap_on">تم تفعيل تبديل أحمر↔أزرق</string>
+    <string name="status_channel_swap_off">تم إيقاف تبديل أحمر↔أزرق</string>
+    <string name="status_color_picked">تم اختيار %1$s</string>
+    <string name="status_preset_applied">تم تطبيق %1$s</string>
+    <string name="status_preset_saved">تم حفظ %1$s</string>
+    <string name="status_preset_deleted">تم حذف %1$s</string>
+    <string name="status_auto_cal_fmt">أبيض تلقائي: %1$dK · صبغة %2$s</string>
+    <string name="status_auto_contrast_fmt">تباين تلقائي: %1$sx</string>
+    <string name="status_res_fmt">الدقة: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">فشل RAW (تم حفظ JPEG)</string>
+    <string name="status_raw_unsupported_res">RAW غير مدعوم بهذه الدقة؛ تم التحويل إلى JPEG</string>
+    <string name="status_res_unsupported">الدقة غير مدعومة</string>
+    <string name="status_capture_failed">فشل الالتقاط، حاول مرة أخرى</string>
+    <string name="status_gallery_open_failed">تعذر فتح المعرض</string>
+    <string name="status_pre_tiramisu_hsl">المعاينة اللونية الحية تتطلب Android 13+؛ يتم التطبيق عند الالتقاط</string>
+
+    <!-- إضافات -->
+    <string name="action_compare">الأصل</string>
+    <string name="banner_compare_auto">المعاينة الأصلية (اضغط مطولاً)</string>
+    <string name="action_zebra">زيبرا</string>
+    <string name="action_level">ميزان</string>
+    <string name="badge_zebra">زيبرا</string>
+    <string name="badge_box">نقطة</string>
+    <string name="timer_off">إيقاف</string>
+    <string name="timer_3s">3 ث</string>
+    <string name="timer_10s">10 ث</string>
+    <string name="status_zebra_on">تم تفعيل تنبيه فرط التعريض (زيبرا)</string>
+    <string name="status_zebra_off">تم إيقاف تنبيه فرط التعريض</string>
+    <string name="status_level_on">تم تفعيل ميزان الأفق</string>
+    <string name="status_level_off">تم إيقاف ميزان الأفق</string>
+    <string name="status_timer_set">المؤقت: %1$s</string>
+
+    <!-- الدليل -->
+    <string name="guide_step_1_title">1/3 · فلاتر الفيلم والأشعة تحت الحمراء</string>
+    <string name="guide_step_1_body">بدّل إلى الاحترافي أو انقر «فلاتر» لتجربة Portra 400 وAerochrome IR و720nm وتبديل أحمر↔أزرق مباشرة.</string>
+    <string name="guide_step_2_title">2/3 · مازج الألوان واختيار اللون</string>
+    <string name="guide_step_2_body">في الألوان ← مازج الألوان أو اختر لوناً، غيّر أي لون حتى 360° مباشرة.</string>
+    <string name="guide_step_3_title">3/3 · عدّل صور المعرض</string>
+    <string name="guide_step_3_body">انقر «استوديو» بالأعلى أو مصغرة آخر صورة لتعديل أي صورة من معرضك بنفس المحرك.</string>
+    <string name="guide_next">التالي</string>
+    <string name="guide_done">ابدأ</string>
+    <string name="guide_skip">تخطي</string>
+
+    <!-- المعرض وRAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">تم تفعيل التقاط RAW + JPEG</string>
+    <string name="status_raw_off">وضع JPEG فقط</string>
+    <string name="status_raw_saved">تم حفظ RAW (DNG)</string>
+    <string name="cd_gallery">فتح في الاستوديو (ضغط مطول للمعرض)</string>
+    <string name="cd_level_toggle">تبديل ميزان الأفق</string>
+    <string name="cd_timer_toggle">تغيير المؤقت</string>
+    <string name="cd_reset_all">إعادة ضبط كل التعديلات</string>
+    <string name="action_pipette_short">اختر لوناً</string>
+    <string name="action_auto_short">تلقائي</string>
+
+    <!-- استوديو التعديل -->
+    <string name="editor_pick_photo">فتح</string>
+    <string name="editor_save">حفظ</string>
+    <string name="editor_saving">جارٍ الحفظ…</string>
+    <string name="editor_share">مشاركة</string>
+    <string name="editor_open_sys_gallery">المعرض</string>
+    <string name="editor_tab_looks">فلاتر</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">عدّل أي صورة بفلاتر فيلم حادة، مازج ألوان 8 نطاقات، اختيار لون 360° وتبديل أحمر↔أزرق.</string>
+    <string name="editor_choose_gallery">اختيار من المعرض</string>
+    <string name="editor_use_last_shot">تعديل آخر لقطة</string>
+    <string name="editor_compare_banner">الصورة الأصلية (مقارنة)</string>
+    <string name="editor_saved_status">تم حفظ الصورة المعدلة في المعرض</string>
+    <string name="editor_save_failed">تعذر حفظ الصورة</string>
+    <string name="editor_load_failed">تعذر تحميل الصورة</string>
+    <string name="editor_auto_wb_done">تم تطبيق الأبيض التلقائي</string>
+    <string name="editor_spot_wb_done">تم تطبيق الأبيض المختار</string>
+    <string name="editor_reset_done">تمت إعادة ضبط التعديلات</string>
+    <string name="editor_share_chooser">مشاركة الصورة المعدلة</string>
+
+    <!-- أوضاع التجربة والإعدادات -->
+    <string name="cd_settings">الإعدادات واللغة</string>
+    <string name="mode_camera_short">الكاميرا</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">اختر أسلوب التصوير</string>
+    <string name="welcome_subtitle">خصّص تجربة SpectraS لطريقة تصويرك. يمكنك تغيير الوضع أو اللغة في أي وقت من الإعدادات.</string>
+    <string name="welcome_start">ابدأ</string>
+    <string name="welcome_selected_badge">محدد</string>
+
+    <string name="exp_aesthetic_title">فلاتر وجماليات</string>
+    <string name="exp_aesthetic_desc">صور بورتريه Auto-HDR حادة بفلاتر Portra 400 وKodak Gold وRose Gold وClassic Cuban مع تحكم بالقوة</string>
+    <string name="exp_aesthetic_tags">بورتريه · فيلم · بشرة صافية</string>
+
+    <string name="exp_ir_title">الأشعة تحت الحمراء (IR Lab)</string>
+    <string name="exp_ir_desc">تصوير تحت الأحمر بضغطة واحدة لتبديل أحمر↔أزرق وملفات 590–850nm وتوازن الأوراق</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">كاميرا احترافية</string>
+    <string name="exp_pro_desc">تحكم يدوي كامل، مازج ألوان 8 نطاقات، اختيار لون 360°، قفل الإضاءة وتصوير RAW DNG</string>
+    <string name="exp_pro_tags">RAW · يدوي · مازج ألوان</string>
+
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_exp_section">وضع التصوير</string>
+    <string name="settings_language_section">اللغة</string>
+    <string name="settings_language">لغة التطبيق</string>
+    <string name="dialog_language_title">اختر اللغة</string>
+    <string name="settings_tools_section">أدوات الكاميرا</string>
+    <string name="settings_grid">شبكة التكوين 3×3</string>
+    <string name="settings_level">ميزان الأفق</string>
+    <string name="settings_timer">المؤقت الذاتي</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">دقة الصورة</string>
+    <string name="status_exp_mode_changed">الوضع: %1$s</string>
+
+    <!-- عناصر التحكم الرئيسية -->
+    <string name="slider_filter_strength">قوة الفلتر</string>
+    <string name="slider_soft_light">السطوع</string>
+    <string name="action_ir_leaf_wb">أبيض الأوراق</string>
+    <string name="action_ir_pro_tune">ضبط دقيق</string>
+    <string name="action_ae_lock">قفل الإضاءة</string>
+    <string name="status_ae_lock_on">تم قفل الإضاءة (AE-L)</string>
+    <string name="status_ae_lock_off">تم فتح قفل الإضاءة</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

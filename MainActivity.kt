@@ -9,6 +9,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color as AndroidColor
@@ -111,6 +112,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -170,7 +172,58 @@ internal object IrPalette {
     val BorderBright = Color(0x47FFFFFF)
 }
 
+internal enum class AppLanguage(val code: String, val nativeName: String, val shortCode: String) {
+    EN("en", "English", "EN"),
+    TR("tr", "Türkçe", "TR"),
+    ES("es", "Español", "ES"),
+    PT("pt", "Português", "PT"),
+    HI("hi", "हिन्दी", "HI"),
+    ID("in", "Bahasa Indonesia", "ID"),
+    AR("ar", "العربية", "AR"),
+    FR("fr", "Français", "FR"),
+    DE("de", "Deutsch", "DE"),
+    RU("ru", "Русский", "RU"),
+    JA("ja", "日本語", "JA"),
+    KO("ko", "한국어", "KO"),
+    ZH("zh-CN", "简体中文", "中文");
+
+    fun toLocale(): Locale = when (code) {
+        "zh-CN" -> Locale("zh", "CN")
+        "in" -> Locale("in")
+        else -> Locale(code)
+    }
+
+    companion object {
+        const val PREF_KEY = "app_language_code"
+        fun fromCode(code: String?): AppLanguage =
+            entries.firstOrNull {
+                it.code.equals(code, ignoreCase = true) || (code.equals("id", ignoreCase = true) && it == ID)
+            } ?: EN
+    }
+}
+
+internal fun getSavedAppLanguage(context: Context): AppLanguage {
+    val prefs = context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE)
+    return AppLanguage.fromCode(prefs.getString(AppLanguage.PREF_KEY, AppLanguage.EN.code))
+}
+
+internal fun saveAppLanguageAndRecreate(context: Context, language: AppLanguage) {
+    val prefs = context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE)
+    prefs.edit().putString(AppLanguage.PREF_KEY, language.code).commit()
+    (context as? Activity)?.recreate()
+}
+
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        val lang = getSavedAppLanguage(newBase)
+        val locale = lang.toLocale()
+        Locale.setDefault(locale)
+        val config = Configuration(newBase.resources.configuration)
+        config.setLocale(locale)
+        config.setLayoutDirection(locale)
+        super.attachBaseContext(newBase.createConfigurationContext(config))
+    }
+
     private var hasCameraPermission by mutableStateOf(false)
     private var incomingEditUri by mutableStateOf<Uri?>(null)
     private var incomingEditNonce by mutableIntStateOf(0)
@@ -370,6 +423,12 @@ private class CameraHolder {
     @Volatile var hasFlash: Boolean = false
     @Volatile var flashMode: FlashMode = FlashMode.OFF
     @Volatile var availableAeModes: IntArray = intArrayOf()
+    @Volatile var lastAeState: Int = CaptureResult.CONTROL_AE_STATE_INACTIVE
+    @Volatile var flashPrecaptureActive: Boolean = false
+    @Volatile var flashPrecaptureSawActiveState: Boolean = false
+    @Volatile var flashPrecaptureStartMs: Long = 0L
+    @Volatile var pendingFlashCaptureRunner: (() -> Unit)? = null
+    @Volatile var pendingTorchFallbackActive: Boolean = false
 
     @Volatile var selectedResolution: Size? = null
     @Volatile var activePreviewSize: Size? = null
@@ -3119,6 +3178,8 @@ fun CameraScreen(
         mutableStateOf(!sharedPrefs.getBoolean("experience_mode_chosen_v1", false))
     }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+    val activeLanguage = remember { getSavedAppLanguage(context) }
     var selectedAestheticPreset by remember { mutableStateOf(AESTHETIC_PRESETS.first()) }
     var activeLookGrade by remember { mutableStateOf(LookGradeParams()) }
     var aestheticFilterStrength by remember { mutableFloatStateOf(1.0f) }
@@ -3345,7 +3406,8 @@ fun CameraScreen(
                 builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
             }
             FlashMode.AUTO -> {
-                if (isStillCapture && holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
+                if (holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)) {
+                    // Arm AE auto-flash on BOTH preview & still capture so AE continuously evaluates ambient light
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
                     builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 } else {
@@ -3354,22 +3416,31 @@ fun CameraScreen(
                 }
             }
             FlashMode.ON -> {
-                if (isStillCapture) {
-                    if (holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
-                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
-                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                    } else {
-                        builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                        builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_SINGLE)
-                    }
+                if (holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)) {
+                    // Arm AE always-flash on BOTH preview & still capture with FLASH_MODE_OFF for true AE flash sync
+                    builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
                 } else {
                     builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-                    builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+                    builder.set(
+                        CaptureRequest.FLASH_MODE,
+                        if (holder.pendingTorchFallbackActive) CaptureRequest.FLASH_MODE_TORCH
+                        else CaptureRequest.FLASH_MODE_OFF
+                    )
                 }
             }
             FlashMode.OFF -> {
                 builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
                 builder.set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
+            }
+        }
+        if (isStillCapture && (desiredFlash == FlashMode.ON || desiredFlash == FlashMode.AUTO)) {
+            try {
+                builder.set(
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_IDLE
+                )
+            } catch (_: Exception) {
             }
         }
         when {
@@ -3385,7 +3456,8 @@ fun CameraScreen(
             builder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedEv)
         }
         try {
-            builder.set(CaptureRequest.CONTROL_AE_LOCK, holder.currentAeLock)
+            val allowAeLock = !(isStillCapture && (desiredFlash == FlashMode.ON || desiredFlash == FlashMode.AUTO))
+            builder.set(CaptureRequest.CONTROL_AE_LOCK, if (allowAeLock) holder.currentAeLock else false)
         } catch (_: Exception) {
         }
         // Keep optical ISP edge clarity & noise reduction active on both preview & still capture
@@ -3515,6 +3587,40 @@ fun CameraScreen(
                 r: CaptureRequest,
                 result: TotalCaptureResult
             ) {
+                val aeState = result[CaptureResult.CONTROL_AE_STATE]
+                if (aeState != null) {
+                    holder.lastAeState = aeState
+                }
+                if (holder.flashPrecaptureActive) {
+                    val elapsed = System.currentTimeMillis() - holder.flashPrecaptureStartMs
+                    if (aeState == CaptureResult.CONTROL_AE_STATE_PRECAPTURE ||
+                        aeState == CaptureResult.CONTROL_AE_STATE_SEARCHING
+                    ) {
+                        holder.flashPrecaptureSawActiveState = true
+                    }
+                    val precaptureSettled =
+                        (holder.flashPrecaptureSawActiveState &&
+                            aeState != null &&
+                            aeState != CaptureResult.CONTROL_AE_STATE_PRECAPTURE &&
+                            aeState != CaptureResult.CONTROL_AE_STATE_SEARCHING) ||
+                            (!holder.flashPrecaptureSawActiveState &&
+                                elapsed >= 280L &&
+                                (aeState == CaptureResult.CONTROL_AE_STATE_CONVERGED ||
+                                    aeState == CaptureResult.CONTROL_AE_STATE_LOCKED)) ||
+                            elapsed >= 1350L
+                    if (precaptureSettled) {
+                        val runner = synchronized(holder) {
+                            if (holder.flashPrecaptureActive) {
+                                holder.flashPrecaptureActive = false
+                                holder.flashPrecaptureSawActiveState = false
+                                val cb = holder.pendingFlashCaptureRunner
+                                holder.pendingFlashCaptureRunner = null
+                                cb
+                            } else null
+                        }
+                        runner?.invoke()
+                    }
+                }
                 result[CaptureResult.COLOR_CORRECTION_GAINS]?.let { gains ->
                     holder.lastHardwareGains = gains
                     if (holder.currentAutoMode) {
@@ -3691,6 +3797,10 @@ fun CameraScreen(
             closeGenSnapshot = holder.cameraGeneration
             holder.isOpening = false
             holder.isTakingPhoto = false
+            holder.flashPrecaptureActive = false
+            holder.flashPrecaptureSawActiveState = false
+            holder.pendingFlashCaptureRunner = null
+            holder.pendingTorchFallbackActive = false
             if (pendingReopen != null) {
                 holder.pendingReopenSurfaceTexture = pendingReopen
             }
@@ -4115,14 +4225,21 @@ fun CameraScreen(
         val snapBoxSize = holder.currentExposureBoxSizeNorm
 
         holder.isTakingPhoto = true
+        fun playShutterFeedback() {
+            coroutineScope.launch {
+                isShutterPressed = true
+                shutterFlashAlpha.snapTo(0.45f)
+                shutterFlashAlpha.animateTo(0f, animationSpec = tween(220))
+                isShutterPressed = false
+            }
+        }
         coroutineScope.launch {
-            isShutterPressed = true
-            shutterFlashAlpha.snapTo(0.45f)
-            shutterFlashAlpha.animateTo(0f, animationSpec = tween(220))
-            isShutterPressed = false
-            delay(5000)
+            delay(7500)
             if (holder.isTakingPhoto) {
                 holder.isTakingPhoto = false
+                holder.flashPrecaptureActive = false
+                holder.pendingFlashCaptureRunner = null
+                holder.pendingTorchFallbackActive = false
             }
         }
 
@@ -4257,6 +4374,78 @@ fun CameraScreen(
             }.build()
         }
 
+        val desiredFlash = if (holder.hasFlash) holder.flashMode else FlashMode.OFF
+        val supportsAlwaysFlash = holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_ALWAYS_FLASH)
+        val supportsAutoFlash = holder.availableAeModes.contains(CaptureRequest.CONTROL_AE_MODE_ON_AUTO_FLASH)
+        val needsAePrecapture =
+            (desiredFlash == FlashMode.ON && supportsAlwaysFlash) ||
+                (desiredFlash == FlashMode.AUTO && supportsAutoFlash &&
+                    holder.lastAeState != CaptureResult.CONTROL_AE_STATE_CONVERGED)
+        val needsTorchFallback = (desiredFlash == FlashMode.ON && !supportsAlwaysFlash)
+        val usedFlashSync = needsAePrecapture || needsTorchFallback
+
+        fun unlockAfterFlashCapture() {
+            if (!usedFlashSync) return
+            cameraHandler.post {
+                val activeDev = holder.device
+                val activeSess = holder.session
+                val previewSurf = holder.activeSurface
+                synchronized(holder) {
+                    holder.flashPrecaptureActive = false
+                    holder.flashPrecaptureSawActiveState = false
+                    holder.pendingFlashCaptureRunner = null
+                    holder.pendingTorchFallbackActive = false
+                }
+                if (activeDev != null && activeSess != null && previewSurf != null && previewSurf.isValid) {
+                    try {
+                        val unlockReq = activeDev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                            addTarget(previewSurf)
+                            applyCamera2Settings(
+                                builder = this,
+                                auto = snapAuto,
+                                kVal = snapKelvin,
+                                tVal = snapTint,
+                                contrastVal = snapContrast,
+                                saturationVal = snapSat,
+                                exposureEv = snapEv,
+                                meteringModeVal = snapMetering,
+                                boxNorm = snapBoxNorm,
+                                boxSizeNorm = snapBoxSize,
+                                isStillCapture = false
+                            )
+                            if (holder.availableAfModes.isNotEmpty()) {
+                                set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_CANCEL)
+                            }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                set(
+                                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                                    CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_CANCEL
+                                )
+                            }
+                        }.build()
+                        activeSess.capture(unlockReq, null, cameraHandler)
+                    } catch (_: Exception) {
+                    }
+                    holder.previewBuilder?.let { pb ->
+                        applyCamera2Settings(
+                            builder = pb,
+                            auto = holder.currentAutoMode,
+                            kVal = holder.currentKelvin,
+                            tVal = holder.currentTint,
+                            contrastVal = holder.currentContrast,
+                            saturationVal = holder.currentSaturation,
+                            exposureEv = holder.currentExposureEv,
+                            meteringModeVal = holder.currentMeteringMode,
+                            boxNorm = holder.currentExposureBoxNorm,
+                            boxSizeNorm = holder.currentExposureBoxSizeNorm,
+                            isStillCapture = false
+                        )
+                        submitRepeatingRequest(activeSess, pb)
+                    }
+                }
+            }
+        }
+
         val stillCallback = object : CameraCaptureSession.CaptureCallback() {
             override fun onCaptureCompleted(
                 s: CameraCaptureSession,
@@ -4265,6 +4454,7 @@ fun CameraScreen(
             ) {
                 holder.lastStillCaptureResult = result
                 shotResultDeferred.complete(result)
+                unlockAfterFlashCapture()
             }
 
             override fun onCaptureFailed(
@@ -4274,31 +4464,134 @@ fun CameraScreen(
             ) {
                 shotResultDeferred.complete(null)
                 holder.isTakingPhoto = false
+                unlockAfterFlashCapture()
             }
         }
 
-        try {
-            try { shutterSound?.play(MediaActionSound.SHUTTER_CLICK) } catch (_: Throwable) {}
-            session.capture(
-                buildStillCaptureRequest(includeRaw = activeRawReader != null, fallbackMode = false),
-                stillCallback,
-                cameraHandler
-            )
-        } catch (e: Exception) {
-            Log.w("CameraScreen", "Primary still capture failed, trying compatibility fallback", e)
+        fun executeStillCaptureNow() {
+            val activeSess = holder.session
+            if (activeSess == null || holder.device == null) {
+                holder.isTakingPhoto = false
+                unlockAfterFlashCapture()
+                return
+            }
             try {
-                // İlk yedek: Manuel matris/tonemap uyumluluk yedeğiyle tekrar dene (JPEG öncelikli)
-                session.capture(
-                    buildStillCaptureRequest(includeRaw = false, fallbackMode = true),
+                playShutterFeedback()
+                try { shutterSound?.play(MediaActionSound.SHUTTER_CLICK) } catch (_: Throwable) {}
+                activeSess.capture(
+                    buildStillCaptureRequest(includeRaw = activeRawReader != null, fallbackMode = false),
                     stillCallback,
                     cameraHandler
                 )
-            } catch (e2: Exception) {
-                shotResultDeferred.complete(null)
-                holder.isTakingPhoto = false
-                Log.e("CameraScreen", "Failed to capture photo even with fallback", e2)
-                mainHandler.post { showStatus(context.getString(R.string.status_capture_failed)) }
+            } catch (e: Exception) {
+                Log.w("CameraScreen", "Primary still capture failed, trying compatibility fallback", e)
+                try {
+                    activeSess.capture(
+                        buildStillCaptureRequest(includeRaw = false, fallbackMode = true),
+                        stillCallback,
+                        cameraHandler
+                    )
+                } catch (e2: Exception) {
+                    shotResultDeferred.complete(null)
+                    holder.isTakingPhoto = false
+                    unlockAfterFlashCapture()
+                    Log.e("CameraScreen", "Failed to capture photo even with fallback", e2)
+                    mainHandler.post { showStatus(context.getString(R.string.status_capture_failed)) }
+                }
             }
+        }
+
+        if (needsAePrecapture) {
+            cameraHandler.post {
+                val previewSurf = holder.activeSurface
+                val activeDev = holder.device
+                val activeSess = holder.session
+                if (previewSurf == null || !previewSurf.isValid || activeDev == null || activeSess == null) {
+                    executeStillCaptureNow()
+                    return@post
+                }
+                val startMs = System.currentTimeMillis()
+                synchronized(holder) {
+                    holder.flashPrecaptureActive = true
+                    holder.flashPrecaptureSawActiveState = false
+                    holder.flashPrecaptureStartMs = startMs
+                    holder.pendingFlashCaptureRunner = { executeStillCaptureNow() }
+                }
+                try {
+                    val precaptureReq = activeDev.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                        addTarget(previewSurf)
+                        applyCamera2Settings(
+                            builder = this,
+                            auto = snapAuto,
+                            kVal = snapKelvin,
+                            tVal = snapTint,
+                            contrastVal = snapContrast,
+                            saturationVal = snapSat,
+                            exposureEv = snapEv,
+                            meteringModeVal = snapMetering,
+                            boxNorm = snapBoxNorm,
+                            boxSizeNorm = snapBoxSize,
+                            isStillCapture = false
+                        )
+                        // Ensure AE lock doesn't block pre-flash metering
+                        set(CaptureRequest.CONTROL_AE_LOCK, false)
+                        set(
+                            CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
+                            CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START
+                        )
+                        if (holder.availableAfModes.isNotEmpty()) {
+                            set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
+                        }
+                    }.build()
+                    activeSess.capture(precaptureReq, captureCallback, cameraHandler)
+                    // Safety watchdog: if a HAL stops delivering repeating frames during precapture, fire cleanly after 1450ms
+                    cameraHandler.postDelayed({
+                        val timedOutRunner = synchronized(holder) {
+                            if (holder.flashPrecaptureActive && holder.flashPrecaptureStartMs == startMs) {
+                                holder.flashPrecaptureActive = false
+                                holder.flashPrecaptureSawActiveState = false
+                                val cb = holder.pendingFlashCaptureRunner
+                                holder.pendingFlashCaptureRunner = null
+                                cb
+                            } else null
+                        }
+                        timedOutRunner?.invoke()
+                    }, 1450L)
+                } catch (e: Exception) {
+                    Log.w("CameraScreen", "AE precapture trigger failed, shooting directly", e)
+                    synchronized(holder) {
+                        holder.flashPrecaptureActive = false
+                        holder.pendingFlashCaptureRunner = null
+                    }
+                    executeStillCaptureNow()
+                }
+            }
+        } else if (needsTorchFallback) {
+            // Fallback for rare devices without ON_ALWAYS_FLASH: synchronized 360ms pre-flash torch metering
+            cameraHandler.post {
+                holder.pendingTorchFallbackActive = true
+                val activeSess = holder.session
+                val pb = holder.previewBuilder
+                if (activeSess != null && pb != null) {
+                    applyCamera2Settings(
+                        builder = pb,
+                        auto = snapAuto,
+                        kVal = snapKelvin,
+                        tVal = snapTint,
+                        contrastVal = snapContrast,
+                        saturationVal = snapSat,
+                        exposureEv = snapEv,
+                        meteringModeVal = snapMetering,
+                        boxNorm = snapBoxNorm,
+                        boxSizeNorm = snapBoxSize,
+                        isStillCapture = false
+                    )
+                    submitRepeatingRequest(activeSess, pb)
+                }
+                cameraHandler.postDelayed({ executeStillCaptureNow() }, 360L)
+            }
+        } else {
+            executeStillCaptureNow()
         }
     }
 
@@ -7129,145 +7422,272 @@ fun CameraScreen(
         }
     }
 
-    // İLK AÇILIŞ 3 DENEYİM MODU SEÇİCİSİ (Estetik & Filtre · Kızılötesi IR Lab · Pro Kamera)
+    // İLK AÇILIŞ GÖRSEL DENEYİM MODU SEÇİCİSİ (A1 Estetik · B1 IR Lab · C1 Pro Kamera + Dil Seçici)
     AnimatedVisibility(
         visible = showExperienceWelcome,
-        enter = fadeIn(tween(220)),
+        enter = fadeIn(tween(240)),
         exit = fadeOut(tween(220))
     ) {
-        var pickedWelcomeMode by remember { mutableStateOf(experienceMode) }
+        val defaultWelcomeMode = remember {
+            if (sharedPrefs.getBoolean("experience_mode_chosen_v1", false)) experienceMode else ExperienceMode.AESTHETIC
+        }
+        var pickedWelcomeMode by remember { mutableStateOf(defaultWelcomeMode) }
+        val ctaAccent by animateColorAsState(
+            targetValue = when (pickedWelcomeMode) {
+                ExperienceMode.AESTHETIC -> IrPalette.IrMagenta
+                ExperienceMode.IR_LAB -> IrPalette.IrCoral
+                ExperienceMode.PRO -> IrPalette.IrAmber
+            },
+            animationSpec = tween(220),
+            label = "welcomeAccent"
+        )
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(IrPalette.VoidBlack.copy(alpha = 0.96f))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            ctaAccent.copy(alpha = 0.14f),
+                            IrPalette.VoidBlack,
+                            IrPalette.VoidBlack
+                        )
+                    )
+                )
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp, vertical = 18.dp),
-            contentAlignment = Alignment.Center
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
             Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "SpectraS",
-                    color = IrPalette.TextPrimary,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 0.4.sp
-                )
-                Text(
-                    text = stringResource(R.string.welcome_title),
-                    color = IrPalette.IrAmber,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                // Üst başlık + Sağ üst Dil değiştirme kapsülü (🌐 EN ▾)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = "SpectraS",
+                            color = IrPalette.TextPrimary,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.3.sp
+                        )
+                        Text(
+                            text = stringResource(R.string.welcome_title),
+                            color = ctaAccent,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(IrPalette.HudCard)
+                            .border(1.dp, IrPalette.BorderBright, RoundedCornerShape(50))
+                            .clickable { showLanguageDialog = true }
+                            .padding(horizontal = 11.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        GlobeIcon(tint = IrPalette.IrCyan, modifier = Modifier.size(14.dp))
+                        Text(
+                            text = activeLanguage.shortCode,
+                            color = IrPalette.TextPrimary,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+
                 Text(
                     text = stringResource(R.string.welcome_subtitle),
                     color = IrPalette.TextSecondary,
                     fontSize = 12.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    lineHeight = 16.sp
                 )
-                Spacer(modifier = Modifier.height(4.dp))
 
                 val modeCards = listOf(
-                    Triple(
+                    listOf(
                         ExperienceMode.AESTHETIC,
                         IrPalette.IrMagenta,
-                        Triple(R.string.exp_aesthetic_title, R.string.exp_aesthetic_desc, R.string.exp_aesthetic_tags)
+                        R.drawable.mode_aesthetic,
+                        R.string.exp_aesthetic_title,
+                        R.string.exp_aesthetic_desc,
+                        R.string.exp_aesthetic_tags
                     ),
-                    Triple(
+                    listOf(
                         ExperienceMode.IR_LAB,
                         IrPalette.IrCoral,
-                        Triple(R.string.exp_ir_title, R.string.exp_ir_desc, R.string.exp_ir_tags)
+                        R.drawable.mode_ir_lab,
+                        R.string.exp_ir_title,
+                        R.string.exp_ir_desc,
+                        R.string.exp_ir_tags
                     ),
-                    Triple(
+                    listOf(
                         ExperienceMode.PRO,
                         IrPalette.IrAmber,
-                        Triple(R.string.exp_pro_title, R.string.exp_pro_desc, R.string.exp_pro_tags)
+                        R.drawable.mode_pro,
+                        R.string.exp_pro_title,
+                        R.string.exp_pro_desc,
+                        R.string.exp_pro_tags
                     )
                 )
 
-                modeCards.forEach { (mode, accent, resTriple) ->
-                    val (titleRes, descRes, tagsRes) = resTriple
-                    val selected = pickedWelcomeMode == mode
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(if (selected) accent.copy(alpha = 0.16f) else IrPalette.HudCard)
-                            .border(
-                                width = if (selected) 1.5.dp else 1.dp,
-                                color = if (selected) accent else IrPalette.BorderSubtle,
-                                shape = RoundedCornerShape(16.dp)
-                            )
-                            .clickable {
-                                pickedWelcomeMode = mode
-                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            }
-                            .padding(horizontal = 14.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    contentPadding = PaddingValues(vertical = 2.dp)
+                ) {
+                    items(modeCards, key = { (it[0] as ExperienceMode).prefKey }) { card ->
+                        val mode = card[0] as ExperienceMode
+                        val accent = card[1] as Color
+                        val imageRes = card[2] as Int
+                        val titleRes = card[3] as Int
+                        val descRes = card[4] as Int
+                        val tagsRes = card[5] as Int
+                        val selected = pickedWelcomeMode == mode
+                        val cardHeight by animateDpAsState(
+                            targetValue = if (selected) 174.dp else 144.dp,
+                            animationSpec = tween(220),
+                            label = "welcomeCardH_${mode.prefKey}"
+                        )
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(accent.copy(alpha = 0.18f))
-                                .border(1.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(12.dp)),
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .height(cardHeight)
+                                .clip(RoundedCornerShape(18.dp))
+                                .border(
+                                    width = if (selected) 2.dp else 1.dp,
+                                    color = if (selected) accent else IrPalette.BorderSubtle,
+                                    shape = RoundedCornerShape(18.dp)
+                                )
+                                .clickable {
+                                    pickedWelcomeMode = mode
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
                         ) {
-                            when (mode) {
-                                ExperienceMode.AESTHETIC -> SparkleAutoIcon(tint = accent, modifier = Modifier.size(20.dp))
-                                ExperienceMode.IR_LAB -> SwapChannelIcon(tint = accent, modifier = Modifier.size(20.dp))
-                                ExperienceMode.PRO -> ColorWheelIcon(tint = accent, modifier = Modifier.size(20.dp))
+                            Image(
+                                painter = painterResource(id = imageRes),
+                                contentDescription = stringResource(titleRes),
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // Seçili kart parlak ve canlı, diğerleri odak için hafif koyu
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = if (selected) 0.06f else 0.30f))
+                            )
+                            // Alt okunabilirlik degrade katmanı (WCAG kontrast)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colorStops = arrayOf(
+                                                0.0f to Color.Black.copy(alpha = 0.22f),
+                                                0.38f to Color.Transparent,
+                                                0.66f to Color(0xAA06080D),
+                                                1.0f to Color(0xF205070B)
+                                            )
+                                        )
+                                    )
+                            )
+
+                            // Üst satır: Sol etiket kapsülü + Sağ seçili rozeti
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.TopCenter)
+                                    .padding(horizontal = 11.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color(0xB8080B10))
+                                        .border(0.8.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(50))
+                                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = stringResource(tagsRes),
+                                        color = IrPalette.TextPrimary,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                if (selected) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(50))
+                                            .background(accent)
+                                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "✓ ${stringResource(R.string.welcome_selected_badge)}",
+                                            color = if (mode == ExperienceMode.PRO) Color.Black else Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            maxLines = 1
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0x66000000))
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.65f), CircleShape)
+                                    )
+                                }
                             }
-                        }
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(3.dp)
-                        ) {
-                            Text(
-                                text = stringResource(titleRes),
-                                color = if (selected) accent else IrPalette.TextPrimary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = stringResource(descRes),
-                                color = IrPalette.TextSecondary,
-                                fontSize = 12.sp,
-                                lineHeight = 16.sp
-                            )
-                            Text(
-                                text = stringResource(tagsRes),
-                                color = accent.copy(alpha = 0.90f),
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(20.dp)
-                                .clip(CircleShape)
-                                .background(if (selected) accent else Color.Transparent)
-                                .border(1.5.dp, if (selected) accent else IrPalette.BorderBright, CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (selected) {
-                                Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(Color.Black))
+
+                            // Alt satır: Mod başlığı + net 1-2 satır açıklama
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .align(Alignment.BottomStart)
+                                    .padding(horizontal = 13.dp, vertical = 11.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = stringResource(titleRes),
+                                    color = if (selected) accent else Color.White,
+                                    fontSize = 17.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = stringResource(descRes),
+                                    color = Color(0xFFE2E8F0),
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
-                val ctaAccent = when (pickedWelcomeMode) {
-                    ExperienceMode.AESTHETIC -> IrPalette.IrMagenta
-                    ExperienceMode.IR_LAB -> IrPalette.IrCoral
-                    ExperienceMode.PRO -> IrPalette.IrAmber
+                // Alt aksiyon düğmesi
+                val pickedTitle = when (pickedWelcomeMode) {
+                    ExperienceMode.AESTHETIC -> stringResource(R.string.exp_aesthetic_title)
+                    ExperienceMode.IR_LAB -> stringResource(R.string.exp_ir_title)
+                    ExperienceMode.PRO -> stringResource(R.string.exp_pro_title)
                 }
                 Button(
                     onClick = {
@@ -7275,14 +7695,18 @@ fun CameraScreen(
                         switchExperienceMode(pickedWelcomeMode, announce = true)
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ctaAccent),
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                    shape = RoundedCornerShape(15.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
                 ) {
                     Text(
-                        text = stringResource(R.string.welcome_start),
+                        text = "${stringResource(R.string.welcome_start)} · $pickedTitle",
                         color = if (pickedWelcomeMode == ExperienceMode.PRO) Color.Black else Color.White,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -7748,6 +8172,51 @@ fun CameraScreen(
                         }
                     }
 
+                    item(key = "sec_lang") {
+                        Text(
+                            text = stringResource(R.string.settings_language_section),
+                            color = IrPalette.IrCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                    item(key = "tool_lang") {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(0.8.dp, IrPalette.IrCyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    showSettingsDialog = false
+                                    showLanguageDialog = true
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                GlobeIcon(tint = IrPalette.IrCyan, modifier = Modifier.size(16.dp))
+                                Text(
+                                    text = stringResource(R.string.settings_language),
+                                    color = IrPalette.TextPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            Text(
+                                text = activeLanguage.nativeName,
+                                color = IrPalette.IrCyan,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
                     item(key = "sec_tools") {
                         Text(
                             text = stringResource(R.string.settings_tools_section),
@@ -7819,6 +8288,110 @@ fun CameraScreen(
                     Text(stringResource(R.string.dialog_close), color = IrPalette.IrAmber, fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+
+    // 13 Küresel Dil Seçim Diyalogu (Varsayılan: English)
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            containerColor = IrPalette.SurfaceElevated,
+            titleContentColor = IrPalette.TextPrimary,
+            textContentColor = IrPalette.TextSecondary,
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    GlobeIcon(tint = IrPalette.IrCyan, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = stringResource(R.string.dialog_language_title),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            },
+            text = {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 380.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(AppLanguage.entries, key = { it.code }) { lang ->
+                        val isSel = activeLanguage == lang
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (isSel) IrPalette.IrCyan.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f))
+                                .border(
+                                    1.dp,
+                                    if (isSel) IrPalette.IrCyan else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable {
+                                    showLanguageDialog = false
+                                    if (lang != activeLanguage) {
+                                        saveAppLanguageAndRecreate(context, lang)
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = lang.nativeName,
+                                color = if (isSel) IrPalette.IrCyan else IrPalette.TextPrimary,
+                                fontSize = 14.sp,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = lang.shortCode,
+                                    color = IrPalette.TextTertiary,
+                                    fontSize = 11.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (isSel) {
+                                    Box(modifier = Modifier.size(9.dp).clip(CircleShape).background(IrPalette.IrCyan))
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text(stringResource(R.string.dialog_close), color = IrPalette.IrCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun GlobeIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val stroke = size.minDimension * 0.11f
+        val r = size.minDimension * 0.42f
+        val c = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(color = tint, radius = r, center = c, style = Stroke(width = stroke))
+        drawOval(
+            color = tint,
+            topLeft = Offset(c.x - r * 0.48f, c.y - r),
+            size = androidx.compose.ui.geometry.Size(r * 0.96f, r * 2f),
+            style = Stroke(width = stroke * 0.85f)
+        )
+        drawLine(
+            color = tint,
+            start = Offset(c.x - r, c.y),
+            end = Offset(c.x + r, c.y),
+            strokeWidth = stroke * 0.85f
         )
     }
 }

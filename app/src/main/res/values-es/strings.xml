@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- Modos y barra superior -->
+    <string name="mode_auto">Auto</string>
+    <string name="mode_pro">Pro</string>
+    <string name="mode_studio">Estudio</string>
+    <string name="label_wb_short">BB</string>
+    <string name="label_tint">Matiz</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">Resolución</string>
+    <string name="cd_grid_toggle">Mostrar u ocultar cuadrícula</string>
+    <string name="cd_panel_toggle">Expandir o contraer panel</string>
+    <string name="cd_flash_toggle">Cambiar modo de flash</string>
+    <string name="cd_flip_camera">Cambiar cámara frontal o trasera</string>
+
+    <!-- Modos de flash -->
+    <string name="flash_off">No</string>
+    <string name="flash_auto">Auto</string>
+    <string name="flash_on">Sí</string>
+    <string name="flash_torch">Linterna</string>
+    <string name="status_flash_set">Flash: %1$s</string>
+    <string name="status_camera_front">Cámara frontal</string>
+    <string name="status_camera_back">Cámara trasera</string>
+
+    <!-- Pestañas principales -->
+    <string name="chip_wb">Blancos</string>
+    <string name="chip_exposure">Exposición</string>
+    <string name="chip_color">Color</string>
+    <string name="chip_metering">Medición</string>
+
+    <!-- Subselectores -->
+    <string name="sub_kelvin">Calidez</string>
+    <string name="sub_tint">Tono</string>
+    <string name="sub_tint_wb">Verde–Rosa</string>
+    <string name="sub_sat_short">Saturación</string>
+    <string name="sub_lum_short">Brillo</string>
+
+    <!-- Deslizadores -->
+    <string name="slider_kelvin">Temperatura de color (Kelvin)</string>
+    <string name="slider_tint">Matiz de color (verde–rosa)</string>
+    <string name="slider_exposure">Brillo de exposición (EV)</string>
+    <string name="slider_saturation">Saturación de color</string>
+    <string name="slider_contrast">Contraste</string>
+    <string name="slider_point_hue">Tono del color elegido</string>
+    <string name="slider_point_sat">Saturación del color elegido</string>
+    <string name="slider_point_lum">Brillo del color elegido</string>
+
+    <!-- Acciones rápidas -->
+    <string name="action_auto_calibrate">Blanco Auto</string>
+    <string name="action_spot_wb">Elegir Blanco</string>
+    <string name="action_spot_wb_active">Toca Blanco</string>
+    <string name="action_color_pipette">Elegir Color</string>
+    <string name="action_color_pipette_active">Toca Color</string>
+    <string name="action_auto_contrast">Tono Auto</string>
+    <string name="action_channel_swap">Rojo↔Azul</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">Restablecer todo</string>
+    <string name="action_remove">Quitar</string>
+    <string name="action_highlight_guard">Proteger Luces</string>
+    <string name="action_center_box">Centrar</string>
+    <string name="action_cancel_pick">Cancelar</string>
+
+    <!-- Medición -->
+    <string name="metering_full">Escena completa</string>
+    <string name="metering_box">Punto táctil</string>
+    <string name="metering_size_label">Tamaño de zona</string>
+    <string name="metering_size_small">Pequeño</string>
+    <string name="metering_size_medium">Medio</string>
+    <string name="metering_size_large">Grande</string>
+    <string name="metering_pinch_hint">Toca para mover el cuadro de luz, pellizca con dos dedos para cambiar tamaño</string>
+    <string name="metering_full_hint">Midiendo toda la escena · Toca la vista previa para medición puntual</string>
+
+    <!-- Mezclador de color -->
+    <string name="range_narrow">Estrecho</string>
+    <string name="range_balanced">Equilibrado</string>
+    <string name="range_wide">Amplio</string>
+    <string name="color_mode_general">Básico</string>
+    <string name="color_mode_bands">Mezclador</string>
+    <string name="color_mode_pipette">Elegir Color</string>
+    <string name="action_reset_band">Restablecer color</string>
+    <string name="action_reset_all_bands">Restablecer todo</string>
+    <string name="action_pick_again">Elegir otro</string>
+    <string name="pipette_empty_hint">Toca “Elegir Color” y luego toca cualquier color en pantalla para girarlo 360°</string>
+
+    <!-- Bandas de color -->
+    <string name="band_red">Rojo</string>
+    <string name="band_orange">Naranja</string>
+    <string name="band_yellow">Amarillo</string>
+    <string name="band_green">Verde</string>
+    <string name="band_cyan">Cian</string>
+    <string name="band_blue">Azul</string>
+    <string name="band_purple">Púrpura</string>
+    <string name="band_magenta">Magenta</string>
+
+    <string name="hue_red">Rojo</string>
+    <string name="hue_orange">Naranja / Ámbar</string>
+    <string name="hue_yellow">Amarillo / Follaje</string>
+    <string name="hue_green">Verde</string>
+    <string name="hue_cyan">Cian</string>
+    <string name="hue_blue">Azul / Cielo</string>
+    <string name="hue_purple">Púrpura / Violeta</string>
+    <string name="hue_magenta">Magenta / Rosa</string>
+
+    <!-- Barra inferior -->
+    <string name="action_presets">Filtros</string>
+    <string name="cd_shutter">Tomar foto</string>
+
+    <!-- Diálogos -->
+    <string name="dialog_presets_title">Filtros y Preajustes</string>
+    <string name="dialog_presets_new">+ Guardar actual</string>
+    <string name="presets_section_builtin">Filtros de Película e Infrarrojo</string>
+    <string name="presets_section_custom">Mis Preajustes</string>
+    <string name="dialog_presets_empty">Aún no hay preajustes propios. Toca “+ Guardar actual” para guardar tu receta de color.</string>
+    <string name="dialog_save_preset_title">Guardar Preajuste</string>
+    <string name="dialog_preset_name_label">Nombre del preajuste</string>
+    <string name="dialog_preset_name_hint">Ej. Otoño IR, Bosque Dorado</string>
+    <string name="dialog_save">Guardar</string>
+    <string name="dialog_cancel">Cancelar</string>
+    <string name="dialog_close">Cerrar</string>
+    <string name="dialog_confirm">Restablecer</string>
+
+    <string name="dialog_reset_all_title">¿Restablecer todos los ajustes?</string>
+    <string name="dialog_reset_all_message">El balance de blancos, matiz, exposición, saturación, contraste, Rojo↔Azul, Mezclador y color elegido volverán a los valores predeterminados.</string>
+
+    <!-- Resolución -->
+    <string name="dialog_resolution_title">Resolución de Foto</string>
+    <string name="dialog_resolution_subtitle">Elige primero la proporción y luego la resolución</string>
+    <string name="dialog_resolution_advanced">Resoluciones avanzadas</string>
+    <string name="dialog_resolution_recommended">Recomendada</string>
+    <string name="dialog_resolution_selected">Seleccionada</string>
+
+    <!-- Avisos de estado -->
+    <string name="status_camera_permission">Se requiere permiso de cámara</string>
+    <string name="status_all_reset">Ajustes restablecidos</string>
+    <string name="status_highlight_on">Protección de altas luces activada</string>
+    <string name="status_highlight_off">Protección de altas luces desactivada</string>
+    <string name="status_tap_color">Toca cualquier color en la vista previa</string>
+    <string name="status_tap_wb">Toca una zona blanca o gris neutra</string>
+    <string name="status_enter_name">Ingresa un nombre</string>
+    <string name="status_box_centered">Zona de medición centrada</string>
+    <string name="status_channel_swap_on">Intercambio Rojo↔Azul activado</string>
+    <string name="status_channel_swap_off">Intercambio Rojo↔Azul desactivado</string>
+    <string name="status_color_picked">%1$s seleccionado</string>
+    <string name="status_preset_applied">%1$s aplicado</string>
+    <string name="status_preset_saved">%1$s guardado</string>
+    <string name="status_preset_deleted">%1$s eliminado</string>
+    <string name="status_auto_cal_fmt">Blanco Auto: %1$dK · Matiz %2$s</string>
+    <string name="status_auto_contrast_fmt">Tono Auto: %1$sx</string>
+    <string name="status_res_fmt">Resolución: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">Error en RAW (JPEG guardado)</string>
+    <string name="status_raw_unsupported_res">RAW no compatible en esta resolución; cambiado a JPEG</string>
+    <string name="status_res_unsupported">Resolución no compatible</string>
+    <string name="status_capture_failed">Error al capturar, inténtalo de nuevo</string>
+    <string name="status_gallery_open_failed">No se pudo abrir la Galería</string>
+    <string name="status_pre_tiramisu_hsl">La vista previa en vivo requiere Android 13+; se aplica al capturar</string>
+
+    <!-- Extras -->
+    <string name="action_compare">Original</string>
+    <string name="banner_compare_auto">Vista original (mantén pulsado)</string>
+    <string name="action_zebra">Cebra</string>
+    <string name="action_level">Nivel</string>
+    <string name="badge_zebra">CEBRA</string>
+    <string name="badge_box">PUNTO</string>
+    <string name="timer_off">No</string>
+    <string name="timer_3s">3s</string>
+    <string name="timer_10s">10s</string>
+    <string name="status_zebra_on">Aviso de sobreexposición (cebra) activado</string>
+    <string name="status_zebra_off">Aviso de sobreexposición desactivado</string>
+    <string name="status_level_on">Nivel de horizonte activado</string>
+    <string name="status_level_off">Nivel de horizonte desactivado</string>
+    <string name="status_timer_set">Temporizador: %1$s</string>
+
+    <!-- Guía -->
+    <string name="guide_step_1_title">1/3 · Filtros de Película e Infrarrojo</string>
+    <string name="guide_step_1_body">Cambia a Pro o toca “Filtros” para probar Portra 400, Aerochrome IR, 720nm B/N o Rojo↔Azul en vivo.</string>
+    <string name="guide_step_2_title">2/3 · Mezclador y Selector de Color</string>
+    <string name="guide_step_2_body">En Color → Mezclador o Elegir Color, transforma cualquier tono hasta 360° en tiempo real.</string>
+    <string name="guide_step_3_title">3/3 · Edita Fotos de tu Galería</string>
+    <string name="guide_step_3_body">Toca “Estudio” arriba o la miniatura de tu última foto para editar cualquier imagen con el mismo motor.</string>
+    <string name="guide_next">Siguiente</string>
+    <string name="guide_done">Empezar</string>
+    <string name="guide_skip">Omitir</string>
+
+    <!-- Galería y RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">Captura RAW + JPEG activada</string>
+    <string name="status_raw_off">Modo solo JPEG</string>
+    <string name="status_raw_saved">RAW (DNG) guardado</string>
+    <string name="cd_gallery">Abrir en Estudio (mantén pulsado para Galería)</string>
+    <string name="cd_level_toggle">Activar o desactivar nivel</string>
+    <string name="cd_timer_toggle">Cambiar temporizador</string>
+    <string name="cd_reset_all">Restablecer todos los ajustes</string>
+    <string name="action_pipette_short">Elegir Color</string>
+    <string name="action_auto_short">Auto</string>
+
+    <!-- Estudio de edición -->
+    <string name="editor_pick_photo">Abrir</string>
+    <string name="editor_save">Guardar</string>
+    <string name="editor_saving">Guardando…</string>
+    <string name="editor_share">Compartir</string>
+    <string name="editor_open_sys_gallery">Galería</string>
+    <string name="editor_tab_looks">Filtros</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">Edita cualquier foto con filtros de película nítidos, Mezclador de 8 bandas, Selector 360° e intercambio Rojo↔Azul.</string>
+    <string name="editor_choose_gallery">Elegir de la Galería</string>
+    <string name="editor_use_last_shot">Editar Última Foto</string>
+    <string name="editor_compare_banner">Foto original (comparar)</string>
+    <string name="editor_saved_status">Foto editada guardada en la Galería</string>
+    <string name="editor_save_failed">No se pudo guardar la foto</string>
+    <string name="editor_load_failed">No se pudo cargar la foto</string>
+    <string name="editor_auto_wb_done">Blanco Auto aplicado</string>
+    <string name="editor_spot_wb_done">Blanco elegido aplicado</string>
+    <string name="editor_reset_done">Ediciones restablecidas</string>
+    <string name="editor_share_chooser">Compartir foto editada</string>
+
+    <!-- Modos de experiencia y Ajustes -->
+    <string name="cd_settings">Ajustes e idioma</string>
+    <string name="mode_camera_short">Cámara</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">Elige tu Estilo de Foto</string>
+    <string name="welcome_subtitle">Personaliza cómo se abre SpectraS. Cambia de modo o idioma cuando quieras en Ajustes.</string>
+    <string name="welcome_start">Empezar</string>
+    <string name="welcome_selected_badge">Elegido</string>
+
+    <string name="exp_aesthetic_title">Estética y Filtros</string>
+    <string name="exp_aesthetic_desc">Retratos Auto-HDR nítidos con Portra 400, Kodak Gold, Rose Gold, Classic Cuban e intensidad en vivo</string>
+    <string name="exp_aesthetic_tags">Retratos · Película · Piel Nítida</string>
+
+    <string name="exp_ir_title">Infrarrojo (IR Lab)</string>
+    <string name="exp_ir_desc">Flujo infrarrojo con Rojo↔Azul en 1 toque, perfiles 590–850nm y balance de follaje</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">Cámara Pro</string>
+    <string name="exp_pro_desc">Control manual completo, Mezclador 8 bandas, Selector 360°, Bloqueo de Luz y RAW DNG</string>
+    <string name="exp_pro_tags">RAW · Manual · Mezclador</string>
+
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_exp_section">Modo de Captura</string>
+    <string name="settings_language_section">Idioma</string>
+    <string name="settings_language">Idioma de la App</string>
+    <string name="dialog_language_title">Elegir Idioma</string>
+    <string name="settings_tools_section">Herramientas de Cámara</string>
+    <string name="settings_grid">Cuadrícula 3×3</string>
+    <string name="settings_level">Nivel de Horizonte</string>
+    <string name="settings_timer">Temporizador</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">Resolución de Foto</string>
+    <string name="status_exp_mode_changed">Modo: %1$s</string>
+
+    <!-- Controles clave -->
+    <string name="slider_filter_strength">Intensidad del filtro</string>
+    <string name="slider_soft_light">Brillo</string>
+    <string name="action_ir_leaf_wb">Blanco Hojas</string>
+    <string name="action_ir_pro_tune">Ajuste Pro</string>
+    <string name="action_ae_lock">Bloquear Luz</string>
+    <string name="status_ae_lock_on">Luz bloqueada (AE-L)</string>
+    <string name="status_ae_lock_off">Luz desbloqueada</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

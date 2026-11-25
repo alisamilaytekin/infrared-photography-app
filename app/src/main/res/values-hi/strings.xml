@@ -1,0 +1,260 @@
+<resources>
+    <string name="app_name">SpectraS</string>
+
+    <!-- मोड और टॉप बार -->
+    <string name="mode_auto">ऑटो</string>
+    <string name="mode_pro">प्रो</string>
+    <string name="mode_studio">स्टूडियो</string>
+    <string name="label_wb_short">WB</string>
+    <string name="label_tint">टिंट</string>
+    <string name="label_ev_short">EV</string>
+    <string name="label_res_fallback">रेज़ोल्यूशन</string>
+    <string name="cd_grid_toggle">ग्रिड चालू या बंद करें</string>
+    <string name="cd_panel_toggle">पैनल खोलें या बंद करें</string>
+    <string name="cd_flash_toggle">फ़्लैश मोड बदलें</string>
+    <string name="cd_flip_camera">फ्रंट या बैक कैमरा बदलें</string>
+
+    <!-- फ़्लैश मोड -->
+    <string name="flash_off">बंद</string>
+    <string name="flash_auto">ऑटो</string>
+    <string name="flash_on">चालू</string>
+    <string name="flash_torch">टॉर्च</string>
+    <string name="status_flash_set">फ़्लैश: %1$s</string>
+    <string name="status_camera_front">फ्रंट कैमरा</string>
+    <string name="status_camera_back">रियर कैमरा</string>
+
+    <!-- मुख्य टैब -->
+    <string name="chip_wb">व्हाइट बैलेंस</string>
+    <string name="chip_exposure">एक्सपोज़र</string>
+    <string name="chip_color">रंग</string>
+    <string name="chip_metering">मीटरिंग</string>
+
+    <!-- उप-चयनकर्ता -->
+    <string name="sub_kelvin">गर्माहट</string>
+    <string name="sub_tint">रंगत</string>
+    <string name="sub_tint_wb">हरा–गुलाबी</string>
+    <string name="sub_sat_short">सैचुरेशन</string>
+    <string name="sub_lum_short">चमक</string>
+
+    <!-- स्लाइडर लेबल -->
+    <string name="slider_kelvin">रंग गर्माहट (Kelvin)</string>
+    <string name="slider_tint">रंग टिंट (हरा–गुलाबी)</string>
+    <string name="slider_exposure">एक्सपोज़र चमक (EV)</string>
+    <string name="slider_saturation">रंग गहराई</string>
+    <string name="slider_contrast">कंट्रास्ट</string>
+    <string name="slider_point_hue">चुने रंग की रंगत</string>
+    <string name="slider_point_sat">चुने रंग की गहराई</string>
+    <string name="slider_point_lum">चुने रंग की चमक</string>
+
+    <!-- त्वरित क्रियाएं -->
+    <string name="action_auto_calibrate">ऑटो व्हाइट</string>
+    <string name="action_spot_wb">सफेद चुनें</string>
+    <string name="action_spot_wb_active">सफेद छूएं</string>
+    <string name="action_color_pipette">रंग चुनें</string>
+    <string name="action_color_pipette_active">रंग छूएं</string>
+    <string name="action_auto_contrast">ऑटो टोन</string>
+    <string name="action_channel_swap">लाल↔नीला</string>
+    <string name="badge_channel_swap">R↔B</string>
+    <string name="action_reset_all">सब रीसेट करें</string>
+    <string name="action_remove">हटाएं</string>
+    <string name="action_highlight_guard">तेज रोशनी रोकें</string>
+    <string name="action_center_box">बीच में लाएं</string>
+    <string name="action_cancel_pick">रद्द करें</string>
+
+    <!-- मीटरिंग -->
+    <string name="metering_full">पूरा दृश्य</string>
+    <string name="metering_box">स्पॉट टच</string>
+    <string name="metering_size_label">क्षेत्र का आकार</string>
+    <string name="metering_size_small">छोटा</string>
+    <string name="metering_size_medium">मध्यम</string>
+    <string name="metering_size_large">बड़ा</string>
+    <string name="metering_pinch_hint">बॉक्स खिसकाने के लिए टैप करें, आकार बदलने के लिए दो अंगुलियों से पिंच करें</string>
+    <string name="metering_full_hint">पूरे दृश्य की माप · स्पॉट मीटरिंग के लिए स्क्रीन पर टैप करें</string>
+
+    <!-- रंग मिक्सर -->
+    <string name="range_narrow">संकीर्ण</string>
+    <string name="range_balanced">संतुलित</string>
+    <string name="range_wide">विस्तृत</string>
+    <string name="color_mode_general">बेसिक</string>
+    <string name="color_mode_bands">रंग मिक्सर</string>
+    <string name="color_mode_pipette">रंग चुनें</string>
+    <string name="action_reset_band">रंग रीसेट</string>
+    <string name="action_reset_all_bands">सब रीसेट</string>
+    <string name="action_pick_again">फिर चुनें</string>
+    <string name="pipette_empty_hint">“रंग चुनें” दबाएं और स्क्रीन पर किसी भी रंग को छूकर 360° बदलें</string>
+
+    <!-- रंग बैंड -->
+    <string name="band_red">लाल</string>
+    <string name="band_orange">नारंगी</string>
+    <string name="band_yellow">पीला</string>
+    <string name="band_green">हरा</string>
+    <string name="band_cyan">सियान</string>
+    <string name="band_blue">नीला</string>
+    <string name="band_purple">बैंगनी</string>
+    <string name="band_magenta">मैजेंटा</string>
+
+    <string name="hue_red">लाल</string>
+    <string name="hue_orange">नारंगी / एम्बर</string>
+    <string name="hue_yellow">पीला / पत्तियां</string>
+    <string name="hue_green">हरा</string>
+    <string name="hue_cyan">सियान</string>
+    <string name="hue_blue">नीला / आकाश</string>
+    <string name="hue_purple">बैंगनी</string>
+    <string name="hue_magenta">मैजेंटा / गुलाबी</string>
+
+    <!-- निचला बार -->
+    <string name="action_presets">फ़िल्टर</string>
+    <string name="cd_shutter">फ़ोटो लें</string>
+
+    <!-- संवाद -->
+    <string name="dialog_presets_title">फ़िल्टर और प्रीसेट</string>
+    <string name="dialog_presets_new">+ अभी सहेजें</string>
+    <string name="presets_section_builtin">फ़िल्म और इन्फ्रारेड फ़िल्टर</string>
+    <string name="presets_section_custom">मेरे सहेजे प्रीसेट</string>
+    <string name="dialog_presets_empty">अभी कोई कस्टम प्रीसेट नहीं है। अपनी रंग सेटिंग सहेजने के लिए “+ अभी सहेजें” पर टैप करें।</string>
+    <string name="dialog_save_preset_title">प्रीसेट सहेजें</string>
+    <string name="dialog_preset_name_label">प्रीसेट नाम</string>
+    <string name="dialog_preset_name_hint">जैसे: ऑटम IR, गोल्डन फॉरेस्ट</string>
+    <string name="dialog_save">सहेजें</string>
+    <string name="dialog_cancel">रद्द करें</string>
+    <string name="dialog_close">बंद करें</string>
+    <string name="dialog_confirm">रीसेट</string>
+
+    <string name="dialog_reset_all_title">सभी सेटिंग्स रीसेट करें?</string>
+    <string name="dialog_reset_all_message">व्हाइट बैलेंस, टिंट, एक्सपोज़र, सैचुरेशन, कंट्रास्ट, लाल↔नीला, रंग मिक्सर और चुने गए रंग डिफ़ॉल्ट पर लौट आएंगे।</string>
+
+    <!-- रेज़ोल्यूशन -->
+    <string name="dialog_resolution_title">फ़ोटो रेज़ोल्यूशन</string>
+    <string name="dialog_resolution_subtitle">पहले अनुपात चुनें, फिर रेज़ोल्यूशन</string>
+    <string name="dialog_resolution_advanced">उन्नत रेज़ोल्यूशन</string>
+    <string name="dialog_resolution_recommended">अनुशंसित</string>
+    <string name="dialog_resolution_selected">चयनित</string>
+
+    <!-- स्थिति संदेश -->
+    <string name="status_camera_permission">कैमरा अनुमति आवश्यक है</string>
+    <string name="status_all_reset">सभी सेटिंग्स रीसेट हुईं</string>
+    <string name="status_highlight_on">हाइलाइट सुरक्षा चालू</string>
+    <string name="status_highlight_off">हाइलाइट सुरक्षा बंद</string>
+    <string name="status_tap_color">प्रीव्यू पर किसी रंग को छूएं</string>
+    <string name="status_tap_wb">सफेद या न्यूट्रल ग्रे क्षेत्र छूएं</string>
+    <string name="status_enter_name">कृपया नाम दर्ज करें</string>
+    <string name="status_box_centered">मीटरिंग क्षेत्र केंद्र में आया</string>
+    <string name="status_channel_swap_on">लाल↔नीला स्वैप चालू</string>
+    <string name="status_channel_swap_off">लाल↔नीला स्वैप बंद</string>
+    <string name="status_color_picked">%1$s चुना गया</string>
+    <string name="status_preset_applied">%1$s लागू हुआ</string>
+    <string name="status_preset_saved">%1$s सहेजा गया</string>
+    <string name="status_preset_deleted">%1$s हटाया गया</string>
+    <string name="status_auto_cal_fmt">ऑटो व्हाइट: %1$dK · टिंट %2$s</string>
+    <string name="status_auto_contrast_fmt">ऑटो टोन: %1$sx</string>
+    <string name="status_res_fmt">रेज़ोल्यूशन: %1$s (%2$s)</string>
+    <string name="status_raw_failed_jpeg_ok">RAW विफल (JPEG सहेजा गया)</string>
+    <string name="status_raw_unsupported_res">इस रेज़ोल्यूशन पर RAW समर्थित नहीं; JPEG पर स्विच किया गया</string>
+    <string name="status_res_unsupported">रेज़ोल्यूशन समर्थित नहीं</string>
+    <string name="status_capture_failed">फ़ोटो नहीं ली जा सकी, पुनः प्रयास करें</string>
+    <string name="status_gallery_open_failed">गैलरी नहीं खुल सकी</string>
+    <string name="status_pre_tiramisu_hsl">लाइव कलर प्रीव्यू के लिए Android 13+ चाहिए; कैप्चर पर लागू होगा</string>
+
+    <!-- अतिरिक्त -->
+    <string name="action_compare">मूल</string>
+    <string name="banner_compare_auto">मूल प्रीव्यू (तुलना के लिए दबाए रखें)</string>
+    <string name="action_zebra">ज़ेबरा</string>
+    <string name="action_level">लेवल</string>
+    <string name="badge_zebra">ज़ेबरा</string>
+    <string name="badge_box">स्पॉट</string>
+    <string name="timer_off">बंद</string>
+    <string name="timer_3s">3 से.</string>
+    <string name="timer_10s">10 से.</string>
+    <string name="status_zebra_on">ओवरएक्सपोज़र चेतावनी (ज़ेबरा) चालू</string>
+    <string name="status_zebra_off">ओवरएक्सपोज़र चेतावनी बंद</string>
+    <string name="status_level_on">होराइज़न लेवल चालू</string>
+    <string name="status_level_off">होराइज़न लेवल बंद</string>
+    <string name="status_timer_set">टाइमर: %1$s</string>
+
+    <!-- गाइड -->
+    <string name="guide_step_1_title">1/3 · लाइव फ़िल्म और IR फ़िल्टर</string>
+    <string name="guide_step_1_body">प्रो मोड चुनें या “फ़िल्टर” टैप कर Portra 400, Aerochrome IR, 720nm B&amp;W या लाल↔नीला लाइव आज़माएं।</string>
+    <string name="guide_step_2_title">2/3 · रंग मिक्सर और रंग चुनें</string>
+    <string name="guide_step_2_body">रंग → रंग मिक्सर या रंग चुनें से किसी भी रंग को लाइव 360° बदलें।</string>
+    <string name="guide_step_3_title">3/3 · गैलरी फ़ोटो एडिट करें</string>
+    <string name="guide_step_3_body">ऊपर “स्टूडियो” या पिछली फ़ोटो के थंबनेल पर टैप कर किसी भी फ़ोटो को एडिट करें।</string>
+    <string name="guide_next">अगला</string>
+    <string name="guide_done">शुरू करें</string>
+    <string name="guide_skip">छोड़ें</string>
+
+    <!-- गैलरी और RAW -->
+    <string name="action_raw">RAW</string>
+    <string name="status_raw_on">RAW + JPEG कैप्चर चालू</string>
+    <string name="status_raw_off">केवल JPEG मोड</string>
+    <string name="status_raw_saved">RAW (DNG) सहेजा गया</string>
+    <string name="cd_gallery">स्टूडियो में खोलें (गैलरी के लिए देर तक दबाएं)</string>
+    <string name="cd_level_toggle">होराइज़न लेवल बदलें</string>
+    <string name="cd_timer_toggle">सेल्फ़-टाइमर बदलें</string>
+    <string name="cd_reset_all">सभी सेटिंग्स रीसेट करें</string>
+    <string name="action_pipette_short">रंग चुनें</string>
+    <string name="action_auto_short">ऑटो</string>
+
+    <!-- फ़ोटो स्टूडियो -->
+    <string name="editor_pick_photo">खोलें</string>
+    <string name="editor_save">सहेजें</string>
+    <string name="editor_saving">सहेजा जा रहा है…</string>
+    <string name="editor_share">शेयर</string>
+    <string name="editor_open_sys_gallery">गैलरी</string>
+    <string name="editor_tab_looks">फ़िल्टर</string>
+    <string name="editor_empty_title">SpectraS Photo Studio</string>
+    <string name="editor_empty_subtitle">स्पष्ट फ़िल्म फ़िल्टर, 8-बैंड रंग मिक्सर, 360° रंग चयन और लाल↔नीला IR स्वैप से कोई भी फ़ोटो एडिट करें।</string>
+    <string name="editor_choose_gallery">गैलरी से चुनें</string>
+    <string name="editor_use_last_shot">पिछली फ़ोटो एडिट करें</string>
+    <string name="editor_compare_banner">मूल फ़ोटो (तुलना)</string>
+    <string name="editor_saved_status">एडिट की गई फ़ोटो गैलरी में सहेजी गई</string>
+    <string name="editor_save_failed">फ़ोटो सहेजी नहीं जा सकी</string>
+    <string name="editor_load_failed">फ़ोटो लोड नहीं हो सकी</string>
+    <string name="editor_auto_wb_done">ऑटो व्हाइट लागू</string>
+    <string name="editor_spot_wb_done">चुना हुआ व्हाइट लागू</string>
+    <string name="editor_reset_done">एडिट रीसेट किए गए</string>
+    <string name="editor_share_chooser">एडिट की गई फ़ोटो शेयर करें</string>
+
+    <!-- अनुभव मोड और सेटिंग्स -->
+    <string name="cd_settings">सेटिंग्स और भाषा</string>
+    <string name="mode_camera_short">कैमरा</string>
+    <string name="mode_ir_short">IR Lab</string>
+    <string name="welcome_title">अपनी शूटिंग शैली चुनें</string>
+    <string name="welcome_subtitle">चुनें कि SpectraS आपके लिए कैसे खुले। सेटिंग्स से कभी भी मोड या भाषा बदलें।</string>
+    <string name="welcome_start">शुरू करें</string>
+    <string name="welcome_selected_badge">चयनित</string>
+
+    <string name="exp_aesthetic_title">एस्थेटिक और फ़िल्टर</string>
+    <string name="exp_aesthetic_desc">Portra 400, Kodak Gold, Rose Gold, Classic Cuban और लाइव इंटेंसिटी के साथ क्रिस्प Auto-HDR पोर्ट्रेट</string>
+    <string name="exp_aesthetic_tags">पोर्ट्रेट · फ़िल्म · साफ त्वचा</string>
+
+    <string name="exp_ir_title">इन्फ्रारेड (IR Lab)</string>
+    <string name="exp_ir_desc">1-टैप लाल↔नीला स्वैप, 590–850nm प्रोफ़ाइल और पत्तियों के व्हाइट बैलेंस वाला IR मोड</string>
+    <string name="exp_ir_tags">Aerochrome · 590–850nm · R↔B</string>
+
+    <string name="exp_pro_title">प्रो कैमरा</string>
+    <string name="exp_pro_desc">पूरा मैनुअल नियंत्रण, 8-बैंड रंग मिक्सर, 360° रंग चयन, लाइट लॉक और RAW DNG कैप्चर</string>
+    <string name="exp_pro_tags">RAW · मैनुअल · रंग मिक्सर</string>
+
+    <string name="settings_title">सेटिंग्स</string>
+    <string name="settings_exp_section">शूटिंग मोड</string>
+    <string name="settings_language_section">भाषा</string>
+    <string name="settings_language">ऐप की भाषा</string>
+    <string name="dialog_language_title">भाषा चुनें</string>
+    <string name="settings_tools_section">कैमरा टूल्स</string>
+    <string name="settings_grid">3×3 ग्रिड</string>
+    <string name="settings_level">होराइज़न लेवल</string>
+    <string name="settings_timer">सेल्फ़-टाइमर</string>
+    <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_resolution">फ़ोटो रेज़ोल्यूशन</string>
+    <string name="status_exp_mode_changed">मोड: %1$s</string>
+
+    <!-- मुख्य नियंत्रण -->
+    <string name="slider_filter_strength">फ़िल्टर तीव्रता</string>
+    <string name="slider_soft_light">चमक</string>
+    <string name="action_ir_leaf_wb">पत्ती व्हाइट</string>
+    <string name="action_ir_pro_tune">प्रो ट्यून</string>
+    <string name="action_ae_lock">लाइट लॉक</string>
+    <string name="status_ae_lock_on">रोशनी लॉक हुई (AE-L)</string>
+    <string name="status_ae_lock_off">रोशनी अनलॉक हुई</string>
+    <string name="badge_ae_lock">AE-L</string>
+</resources>

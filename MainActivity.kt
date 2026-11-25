@@ -442,6 +442,8 @@ private class CameraHolder {
     var cameraGeneration: Int = 0
 
     @Volatile var lastHardwareGains: RggbChannelVector = RggbChannelVector(1.5f, 1.0f, 1.0f, 1.5f)
+    @Volatile var hasRealHardwareGains: Boolean = false
+    @Volatile var lastAwbState: Int = CaptureResult.CONTROL_AWB_STATE_INACTIVE
     @Volatile var lastAutoColorTransform: ColorSpaceTransform? = null
     @Volatile var lastNativeTonemapCurve: TonemapCurve? = null
     @Volatile var lastTelemetryUpdateMs: Long = 0L
@@ -1426,9 +1428,21 @@ private fun inverseRgbToKelvinTint(
     val gGain = ((currentGains.greenEven + currentGains.greenOdd) * 0.5f).coerceAtLeast(0.01f)
     val bGain = currentGains.blue.coerceAtLeast(0.01f)
 
-    val rRawInverse = rGain / rAvg.coerceAtLeast(1f)
-    val bRawInverse = bGain / bAvg.coerceAtLeast(1f)
-    val gRawInverse = gGain / gAvg.coerceAtLeast(1f)
+    // Convert sRGB pixel averages (gamma ~2.2) to linear light before computing inverse channel gains
+    val rLin = (rAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
+    val gLin = (gAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
+    val bLin = (bAvg / 255f).coerceIn(0.01f, 1f).pow(2.2f)
+
+    // 4% neutral deadband: prevent cumulative drift when the scene/patch is already balanced
+    val maxLin = maxOf(rLin, maxOf(gLin, bLin))
+    val minLin = minOf(rLin, minOf(gLin, bLin)).coerceAtLeast(1e-5f)
+    if (maxLin / minLin < 1.04f) {
+        return gainsToKelvinTint(currentGains)
+    }
+
+    val rRawInverse = rGain / rLin
+    val bRawInverse = bGain / bLin
+    val gRawInverse = gGain / gLin
 
     val scaleFactor = 5.0f / (rRawInverse + bRawInverse).coerceAtLeast(1e-6f)
     val rTarget = rRawInverse * scaleFactor
@@ -2745,7 +2759,51 @@ private fun autoCalibrateSceneFromPreview(
 
     val avgLuma = (lumaSum / totalCount.coerceAtLeast(1)).toFloat()
     if (neutCount < 6) {
-        return AutoCalibrateResult(3348f, 13f, avgLuma, neutCount)
+        // Fallback: Gray-World average across midtones (35..240) instead of hard-coded yellow 3348K
+        var allR = 0.0
+        var allG = 0.0
+        var allB = 0.0
+        var allCnt = 0
+        var y2 = h / 8
+        while (y2 < (h * 7) / 8) {
+            var x2 = w / 8
+            while (x2 < (w * 7) / 8) {
+                val c = bitmap[x2, y2]
+                val rr = AndroidColor.red(c)
+                val gg = AndroidColor.green(c)
+                val bb = AndroidColor.blue(c)
+                val mx = maxOf(rr, maxOf(gg, bb))
+                if (mx in 35..240) {
+                    allR += rr
+                    allG += gg
+                    allB += bb
+                    allCnt++
+                }
+                x2 += stepX
+            }
+            y2 += stepY
+        }
+        if (allCnt < 4) {
+            val (curK, curT) = gainsToKelvinTint(currentGains)
+            return AutoCalibrateResult(
+                kelvin = curK.coerceIn(KELVIN_MIN, KELVIN_MAX),
+                tint = curT.coerceIn(-60f, 60f),
+                avgLuma = avgLuma,
+                foundNeutralCount = 0
+            )
+        }
+        val (gwK, gwT) = inverseRgbToKelvinTint(
+            rAvg = (allR / allCnt).toFloat(),
+            gAvg = (allG / allCnt).toFloat(),
+            bAvg = (allB / allCnt).toFloat(),
+            currentGains = currentGains
+        )
+        return AutoCalibrateResult(
+            kelvin = gwK.coerceIn(KELVIN_MIN, KELVIN_MAX),
+            tint = gwT.coerceIn(-60f, 60f),
+            avgLuma = avgLuma,
+            foundNeutralCount = allCnt
+        )
     }
 
     val (estK, estT) = inverseRgbToKelvinTint(
@@ -2755,7 +2813,7 @@ private fun autoCalibrateSceneFromPreview(
         currentGains = currentGains
     )
     return AutoCalibrateResult(
-        kelvin = estK.coerceIn(1600f, 7500f),
+        kelvin = estK.coerceIn(KELVIN_MIN, KELVIN_MAX),
         tint = estT.coerceIn(-60f, 60f),
         avgLuma = avgLuma,
         foundNeutralCount = neutCount
@@ -3620,8 +3678,14 @@ fun CameraScreen(
                         runner?.invoke()
                     }
                 }
+                result[CaptureResult.CONTROL_AWB_STATE]?.let { awbState ->
+                    holder.lastAwbState = awbState
+                }
                 result[CaptureResult.COLOR_CORRECTION_GAINS]?.let { gains ->
-                    holder.lastHardwareGains = gains
+                    if (gains.red.isFinite() && gains.blue.isFinite() && gains.red > 0.05f && gains.blue > 0.05f) {
+                        holder.lastHardwareGains = gains
+                        holder.hasRealHardwareGains = true
+                    }
                     if (holder.currentAutoMode) {
                         val now = System.currentTimeMillis()
                         if (now - holder.lastTelemetryUpdateMs >= 250L) {
@@ -3735,27 +3799,79 @@ fun CameraScreen(
         }
     }
 
+    var isAutoCalibrating by remember { mutableStateOf(false) }
+
     fun runAutoCalibrate() {
-        val view = textureViewInstance ?: return
-        if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
-        val bmp = try { view.getBitmap(240, 240) } catch (_: Exception) { null } ?: return
-        coroutineScope.launch(Dispatchers.Default) {
+        if (isAutoCalibrating || !cameraReady) return
+        isAutoCalibrating = true
+        coroutineScope.launch(Dispatchers.Main) {
             try {
-                val cal = autoCalibrateSceneFromPreview(bmp, holder.lastHardwareGains)
-                withContext(Dispatchers.Main) {
-                    isPickerActive = false
-                    isExposureBoxPicking = false
-                    isAutoMode = false
-                    kelvinValue = cal.kelvin
-                    tintValue = cal.tint
-                    contrastValue = DEFAULT_CONTRAST
-                    saturationValue = DEFAULT_SATURATION
-                    measureAndApplyExposureMetering(applyEvAdjust = true)
-                    updatePreviewSettings()
-                    showStatus(context.getString(R.string.status_auto_cal_fmt, cal.kelvin.toInt(), formatSigned(cal.tint)))
+                if (!holder.currentAutoMode) {
+                    holder.lastAwbState = CaptureResult.CONTROL_AWB_STATE_INACTIVE
+                    holder.hasRealHardwareGains = false
+                    cameraHandler.post {
+                        val builder = holder.previewBuilder ?: return@post
+                        val session = holder.session ?: return@post
+                        applyCamera2Settings(
+                            builder = builder,
+                            auto = true,
+                            kVal = holder.currentKelvin,
+                            tVal = holder.currentTint,
+                            contrastVal = DEFAULT_CONTRAST,
+                            saturationVal = DEFAULT_SATURATION,
+                            exposureEv = holder.currentExposureEv,
+                            meteringModeVal = holder.currentMeteringMode,
+                            boxNorm = holder.currentExposureBoxNorm,
+                            boxSizeNorm = holder.currentExposureBoxSizeNorm,
+                            isStillCapture = false
+                        )
+                        submitRepeatingRequest(session, builder)
+                    }
                 }
+                delay(180)
+                for (attempt in 0 until 10) {
+                    if (holder.lastAwbState == CaptureResult.CONTROL_AWB_STATE_CONVERGED ||
+                        holder.lastAwbState == CaptureResult.CONTROL_AWB_STATE_LOCKED
+                    ) {
+                        break
+                    }
+                    delay(45)
+                }
+
+                val (finalK, finalT) = if (holder.hasRealHardwareGains) {
+                    val (hwK, hwT) = gainsToKelvinTint(holder.lastHardwareGains)
+                    hwK.coerceIn(KELVIN_MIN, KELVIN_MAX) to hwT.coerceIn(-100f, 100f)
+                } else {
+                    val view = textureViewInstance
+                    val bmp = if (view != null && view.isAvailable && view.width > 0 && view.height > 0) {
+                        try { view.getBitmap(240, 240) } catch (_: Exception) { null }
+                    } else null
+                    if (bmp != null) {
+                        try {
+                            val cal = withContext(Dispatchers.Default) {
+                                autoCalibrateSceneFromPreview(bmp, kelvinToGains(kelvinValue, tintValue))
+                            }
+                            cal.kelvin to cal.tint
+                        } finally {
+                            bmp.recycle()
+                        }
+                    } else {
+                        kelvinValue to tintValue
+                    }
+                }
+
+                isPickerActive = false
+                isExposureBoxPicking = false
+                isAutoMode = false
+                kelvinValue = finalK
+                tintValue = finalT
+                contrastValue = DEFAULT_CONTRAST
+                saturationValue = DEFAULT_SATURATION
+                updatePreviewSettings()
+                measureAndApplyExposureMetering(applyEvAdjust = true)
+                showStatus(context.getString(R.string.status_auto_cal_fmt, finalK.toInt(), formatSigned(finalT)))
             } finally {
-                bmp.recycle()
+                isAutoCalibrating = false
             }
         }
     }
@@ -5199,7 +5315,7 @@ fun CameraScreen(
                                                     bitmap = bitmap,
                                                     x = x,
                                                     y = y,
-                                                    currentGains = holder.lastHardwareGains
+                                                    currentGains = if (isAutoMode) holder.lastHardwareGains else kelvinToGains(kelvinValue, tintValue)
                                                 )
                                                 pickedMarkerPos = offset
                                                 kelvinValue = newK

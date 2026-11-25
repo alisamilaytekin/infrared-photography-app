@@ -82,7 +82,8 @@ internal data class PhotoEditConfig(
     val contrast: Float = DEFAULT_CONTRAST,
     val channelSwap: Boolean = false,
     val colorBands: ColorBandsConfig = ColorBandsConfig(),
-    val targetedColor: TargetedColorConfig = TargetedColorConfig()
+    val targetedColor: TargetedColorConfig = TargetedColorConfig(),
+    val lookGrade: LookGradeParams = LookGradeParams()
 ) {
     val isWbModified: Boolean
         get() = abs(kelvin - 5500f) > 40f || abs(tint) > 1.5f
@@ -94,6 +95,7 @@ internal data class PhotoEditConfig(
         get() = abs(saturation - DEFAULT_SATURATION) > 0.02f ||
             abs(contrast - DEFAULT_CONTRAST) > 0.02f ||
             channelSwap ||
+            lookGrade.isActive ||
             colorBands.hasAnyModification ||
             (targetedColor.isActive && (targetedColor.deltaHue != 0f || targetedColor.deltaSat != 0f || targetedColor.deltaLum != 0f))
 
@@ -117,6 +119,23 @@ private const val EDITOR_FULL_SKSL = """
     uniform float uExposureScale;
     uniform float uContrast;
     uniform float uSaturation;
+    uniform float uLookActive;
+    uniform float uLookSharpness;
+    uniform vec3 uLookWbGains;
+    uniform float uLookExpScale;
+    uniform float uLookContrast;
+    uniform float uLookHighlights;
+    uniform float uLookShadows;
+    uniform float uLookWhites;
+    uniform float uLookBlacks;
+    uniform float uLookVibrance;
+    uniform float uLookSat;
+    uniform float uSplitActive;
+    uniform vec3 uSplitShadow;
+    uniform vec3 uSplitMid;
+    uniform vec3 uSplitHigh;
+    uniform float uMonoMix;
+    uniform vec3 uBwWeights;
     uniform float uChannelSwap;
     uniform float uTargetHue;
     uniform float uHueWidth;
@@ -201,6 +220,23 @@ private const val EDITOR_FULL_SKSL = """
         vec4 color = uContent.eval(fragCoord);
         vec3 rgb = color.rgb;
 
+        // 0) Edge-guarded luminance-only optical unsharp mask
+        if (uLookSharpness > 0.004) {
+            vec3 cN = uContent.eval(fragCoord + vec2(0.0, -1.0)).rgb;
+            vec3 cS = uContent.eval(fragCoord + vec2(0.0,  1.0)).rgb;
+            vec3 cW = uContent.eval(fragCoord + vec2(-1.0, 0.0)).rgb;
+            vec3 cE = uContent.eval(fragCoord + vec2( 1.0, 0.0)).rgb;
+            vec3 avg = (cN + cS + cW + cE) * 0.25;
+            float lumC = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lumAvg = dot(avg, vec3(0.2126, 0.7152, 0.0722));
+            float detail = lumC - lumAvg;
+            float absD = abs(detail);
+            float noiseGate = smoothstep(0.006, 0.025, absD);
+            float haloGuard = 1.0 - smoothstep(0.18, 0.45, absD);
+            float boost = detail * uLookSharpness * 1.35 * noiseGate * haloGuard;
+            rgb = clamp(rgb + vec3(boost), 0.0, 1.0);
+        }
+
         // 1) White balance + exposure
         rgb = clamp(rgb * uWbGains * uExposureScale, 0.0, 1.0);
 
@@ -219,12 +255,61 @@ private const val EDITOR_FULL_SKSL = """
             rgb = clamp(mix(vec3(luma), rgb, uSaturation), 0.0, 1.0);
         }
 
+        // 3.5) Pro Lightroom Look Grade (WB + Soft-Shoulder + Tone Zones + Vibrance + 3-Way Split Toning)
+        if (uLookActive > 0.5) {
+            rgb = rgb * uLookWbGains * uLookExpScale;
+            rgb = rgb / (1.0 + max(rgb - vec3(0.88), vec3(0.0)) * 0.55);
+            rgb = clamp(rgb, 0.0, 1.0);
+
+            float l = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+            float oml = 1.0 - l;
+            float shMask = oml * oml * smoothstep(0.0, 0.08, l);
+            float hiMask = l * l * (1.0 - smoothstep(0.96, 1.0, l) * 0.25);
+            float blkMask = oml * oml * oml;
+            float whtMask = l * l * l;
+            float targetL = clamp(
+                l + uLookShadows * 0.24 * shMask
+                  + uLookHighlights * 0.22 * hiMask
+                  + uLookBlacks * 0.10 * blkMask
+                  + uLookWhites * 0.12 * whtMask,
+                0.0, 1.0
+            );
+            if (abs(uLookContrast) > 0.004) {
+                float k = clamp(1.0 + uLookContrast * 0.85, 0.70, 1.55);
+                targetL = targetL <= 0.5
+                    ? 0.5 * pow(max(2.0 * targetL, 0.00001), k)
+                    : 1.0 - 0.5 * pow(max(2.0 * (1.0 - targetL), 0.00001), k);
+            }
+            float lRatio = targetL / max(l, 0.001);
+            rgb = clamp(rgb * mix(1.0, lRatio, 0.92) + vec3((targetL - l) * 0.08), 0.0, 1.0);
+
+            if (abs(uLookVibrance) > 0.004 || abs(uLookSat) > 0.004) {
+                float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+                float maxC = max(max(rgb.r, rgb.g), rgb.b);
+                float minC = min(min(rgb.r, rgb.g), rgb.b);
+                float curSat = maxC - minC;
+                float skinMask = clamp((rgb.r - rgb.g) * 3.0, 0.0, 1.0) * clamp((rgb.g - rgb.b) * 3.0, 0.0, 1.0);
+                float vibBoost = uLookVibrance * (1.0 - curSat) * (1.0 - skinMask * 0.65);
+                float satFactor = clamp(1.0 + uLookSat + vibBoost, 0.0, 2.0);
+                rgb = clamp(mix(vec3(luma), rgb, satFactor), 0.0, 1.0);
+            }
+
+            if (uSplitActive > 0.5) {
+                float ls = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+                float omls = 1.0 - ls;
+                float wSh = omls * omls * smoothstep(0.0, 0.10, ls);
+                float wHi = ls * ls * (1.0 - smoothstep(0.92, 1.0, ls) * 0.70);
+                float wMid = 4.0 * ls * omls;
+                rgb = clamp(rgb + (uSplitShadow * wSh + uSplitMid * wMid + uSplitHigh * wHi) * 0.42, 0.0, 1.0);
+            }
+        }
+
         // 4) Infrared R<->B Channel Swap
         if (uChannelSwap > 0.5) {
             rgb = rgb.bgr;
         }
 
-        // 5) 8-Band Color Histogram Mixer
+        // 5) 8-Band Color Histogram Mixer (skin-safe bell-curve luminance)
         if (uBandsActive > 0.5) {
             vec3 hsl = rgb2hsl(rgb);
             float satClamp = clamp((hsl.y - 0.05) / 0.14, 0.0, 1.0);
@@ -264,12 +349,13 @@ private const val EDITOR_FULL_SKSL = """
                 float wB = actB ? s * mask : 0.0;
                 float wTot = clamp(wA + wB, 0.0, 1.0);
                 if (wTot > 0.001) {
+                    float lumBell = 4.0 * hsl.z * (1.0 - hsl.z);
                     vec3 acc = rgb * (1.0 - wTot);
                     if (wA > 0.001) {
                         vec3 shA = vec3(
                             mod(hsl.x + dA.x + 360.0, 360.0),
                             clamp(hsl.y * (1.0 + dA.y), 0.0, 1.0),
-                            clamp(hsl.z + dA.z * 0.45, 0.0, 1.0)
+                            clamp(hsl.z + dA.z * 0.42 * lumBell, 0.0, 1.0)
                         );
                         acc += hsl2rgb(shA) * wA;
                     }
@@ -277,7 +363,7 @@ private const val EDITOR_FULL_SKSL = """
                         vec3 shB = vec3(
                             mod(hsl.x + dB.x + 360.0, 360.0),
                             clamp(hsl.y * (1.0 + dB.y), 0.0, 1.0),
-                            clamp(hsl.z + dB.z * 0.45, 0.0, 1.0)
+                            clamp(hsl.z + dB.z * 0.42 * lumBell, 0.0, 1.0)
                         );
                         acc += hsl2rgb(shB) * wB;
                     }
@@ -308,15 +394,22 @@ private const val EDITOR_FULL_SKSL = """
 
             float weight = wH * wS * wL;
             if (weight > 0.001) {
+                float lumBell = 4.0 * hsl.z * (1.0 - hsl.z);
                 vec3 shifted = hsl;
                 shifted.x = mod(hsl.x + uDeltaHue + 360.0, 360.0);
                 shifted.y = clamp(hsl.y * (1.0 + uDeltaSat), 0.0, 1.0);
-                shifted.z = clamp(hsl.z + uDeltaLum * 0.45, 0.0, 1.0);
+                shifted.z = clamp(hsl.z + uDeltaLum * 0.42 * lumBell, 0.0, 1.0);
                 rgb = mix(rgb, hsl2rgb(shifted), weight);
             }
         }
 
-        return vec4(rgb, color.a);
+        // 7) True Channel-Mixed Monochrome (e.g. Fujifilm Acros B&W)
+        if (uMonoMix > 0.004) {
+            float mono = clamp(dot(rgb, uBwWeights), 0.0, 1.0);
+            rgb = mix(rgb, vec3(mono), clamp(uMonoMix, 0.0, 1.0));
+        }
+
+        return vec4(clamp(rgb, 0.0, 1.0), color.a);
     }
 """
 
@@ -338,11 +431,35 @@ private fun updateEditorImageViewShader(
             val pt = config.targetedColor
             val hasPoint = pt.isActive && (pt.deltaHue != 0f || pt.deltaSat != 0f || pt.deltaLum != 0f)
             val hasBands = config.colorBands.hasAnyModification
+            val lg = config.lookGrade
+            val hasLook = lg.isActive
+            val (lWbR, lWbG, lWbB) = if (hasLook) computeLookWbGains(lg.tempShift, lg.tintShift) else Triple(1f, 1f, 1f)
+            val hasSplit = hasLook && lg.hasSplitToning
+            val (shR, shG, shB) = if (hasSplit) computeSplitWheelTint(lg.shadowHue, lg.shadowSat) else Triple(0f, 0f, 0f)
+            val (midR, midG, midB) = if (hasSplit) computeSplitWheelTint(lg.midtoneHue, lg.midtoneSat) else Triple(0f, 0f, 0f)
+            val (hiR, hiG, hiB) = if (hasSplit) computeSplitWheelTint(lg.highlightHue, lg.highlightSat) else Triple(0f, 0f, 0f)
 
             shader.setFloatUniform("uWbGains", rG, gG, bG)
             shader.setFloatUniform("uExposureScale", evScale)
             shader.setFloatUniform("uContrast", config.contrast)
             shader.setFloatUniform("uSaturation", config.saturation)
+            shader.setFloatUniform("uLookActive", if (hasLook) 1.0f else 0.0f)
+            shader.setFloatUniform("uLookSharpness", if (hasLook) lg.sharpness else 0.0f)
+            shader.setFloatUniform("uLookWbGains", lWbR, lWbG, lWbB)
+            shader.setFloatUniform("uLookExpScale", if (hasLook) 2.0f.pow(lg.exposureEv) else 1.0f)
+            shader.setFloatUniform("uLookContrast", if (hasLook) lg.contrast else 0.0f)
+            shader.setFloatUniform("uLookHighlights", if (hasLook) lg.highlights else 0.0f)
+            shader.setFloatUniform("uLookShadows", if (hasLook) lg.shadows else 0.0f)
+            shader.setFloatUniform("uLookWhites", if (hasLook) lg.whites else 0.0f)
+            shader.setFloatUniform("uLookBlacks", if (hasLook) lg.blacks else 0.0f)
+            shader.setFloatUniform("uLookVibrance", if (hasLook) lg.vibrance else 0.0f)
+            shader.setFloatUniform("uLookSat", if (hasLook) lg.saturation else 0.0f)
+            shader.setFloatUniform("uSplitActive", if (hasSplit) 1.0f else 0.0f)
+            shader.setFloatUniform("uSplitShadow", shR, shG, shB)
+            shader.setFloatUniform("uSplitMid", midR, midG, midB)
+            shader.setFloatUniform("uSplitHigh", hiR, hiG, hiB)
+            shader.setFloatUniform("uMonoMix", if (hasLook) lg.monochromeMix else 0.0f)
+            shader.setFloatUniform("uBwWeights", lg.bwWeightR, lg.bwWeightG, lg.bwWeightB)
             shader.setFloatUniform("uChannelSwap", if (config.channelSwap) 1.0f else 0.0f)
             shader.setFloatUniform("uTargetHue", pt.targetHue)
             shader.setFloatUniform("uHueWidth", pt.hueWidth)
@@ -439,7 +556,8 @@ private fun applyFullPhotoEditToBitmap(source: Bitmap, config: PhotoEditConfig):
         bitmap = work,
         config = config.targetedColor,
         colorBands = config.colorBands,
-        channelSwap = config.channelSwap
+        channelSwap = config.channelSwap,
+        lookGrade = config.lookGrade
     )
 }
 
@@ -855,7 +973,8 @@ internal fun PhotoEditorScreen(
             contrast = preset.contrast.coerceIn(0.50f, 1.80f),
             channelSwap = preset.channelSwap,
             colorBands = preset.colorBands,
-            targetedColor = TargetedColorConfig()
+            targetedColor = TargetedColorConfig(),
+            lookGrade = preset.lookGrade
         )
         showEditorStatus(context.getString(R.string.status_preset_applied, preset.name))
     }

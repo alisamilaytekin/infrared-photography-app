@@ -404,6 +404,8 @@ private class CameraHolder {
     @Volatile var currentExposureBoxSizeNorm: Float = 0.32f
     @Volatile var currentTargetedColor: TargetedColorConfig = TargetedColorConfig()
     @Volatile var currentColorBands: ColorBandsConfig = ColorBandsConfig()
+    @Volatile var currentLookGrade: LookGradeParams = LookGradeParams()
+    @Volatile var currentExperienceMode: ExperienceMode = ExperienceMode.PRO
     @Volatile var currentChannelSwap: Boolean = false
     @Volatile var currentAeLock: Boolean = false
 
@@ -507,6 +509,91 @@ private fun applyPreviewTransform(
     view.setTransform(matrix)
 }
 
+/**
+ * Pro-grade Lightroom/Filmic Look Parameters executed in 60fps AGSL GPU Shader & full-res CPU capture.
+ * Runs ON TOP of Camera2 Hardware Auto-HDR + AWB so portraits stay razor-sharp with zero ISP downgrade.
+ */
+internal data class LookGradeParams(
+    val tempShift: Float = 0f,       // Relative warmth (-1..+1)
+    val tintShift: Float = 0f,       // Relative rosy/magenta (+) vs green (-) (-1..+1)
+    val exposureEv: Float = 0f,      // Soft-shoulder radiance lift (-1..+1 EV)
+    val contrast: Float = 0f,        // Midpoint-anchored crisp S-curve (-0.5..+0.5)
+    val highlights: Float = 0f,      // Highlight roll-off recovery (-1..+1)
+    val shadows: Float = 0f,         // Shadow detail lift anchored above pure black (-1..+1)
+    val whites: Float = 0f,          // Crisp white-point punch (-1..+1)
+    val blacks: Float = 0f,          // Deep black anchor (-1..+1, negative deepens blacks)
+    val vibrance: Float = 0f,        // Skin-protecting smart vibrance (-1..+1)
+    val saturation: Float = 0f,      // Relative global saturation delta (-1..+1)
+    val sharpness: Float = 0f,       // Edge-guarded luminance unsharp mask (0..0.6)
+    val shadowHue: Float = 0f,       // 3-Way Color Grading: Shadows hue (0..360°)
+    val shadowSat: Float = 0f,       // Shadows tint strength (0..0.35)
+    val midtoneHue: Float = 0f,      // Midtones hue (0..360°)
+    val midtoneSat: Float = 0f,      // Midtones tint strength (0..0.35)
+    val highlightHue: Float = 0f,    // Highlights hue (0..360°)
+    val highlightSat: Float = 0f,    // Highlights tint strength (0..0.35)
+    val monochromeMix: Float = 0f,   // 0..1 smooth blend into true channel-mixed B&W
+    val bwWeightR: Float = 0.34f,
+    val bwWeightG: Float = 0.56f,
+    val bwWeightB: Float = 0.10f
+) {
+    val hasSplitToning: Boolean
+        get() = shadowSat > 0.003f || midtoneSat > 0.003f || highlightSat > 0.003f
+
+    val isActive: Boolean
+        get() = monochromeMix > 0.004f ||
+            sharpness > 0.004f ||
+            hasSplitToning ||
+            abs(tempShift) > 0.004f || abs(tintShift) > 0.004f ||
+            abs(exposureEv) > 0.004f || abs(contrast) > 0.004f ||
+            abs(highlights) > 0.004f || abs(shadows) > 0.004f ||
+            abs(whites) > 0.004f || abs(blacks) > 0.004f ||
+            abs(vibrance) > 0.004f || abs(saturation) > 0.004f
+}
+
+internal fun scaleLookGrade(grade: LookGradeParams, strength: Float): LookGradeParams {
+    val s = strength.coerceIn(0f, 1f)
+    if (s <= 0.005f || !grade.isActive) return LookGradeParams()
+    if (s >= 0.995f) return grade
+    return grade.copy(
+        tempShift = grade.tempShift * s,
+        tintShift = grade.tintShift * s,
+        exposureEv = grade.exposureEv * s,
+        contrast = grade.contrast * s,
+        highlights = grade.highlights * s,
+        shadows = grade.shadows * s,
+        whites = grade.whites * s,
+        blacks = grade.blacks * s,
+        vibrance = grade.vibrance * s,
+        saturation = grade.saturation * s,
+        sharpness = grade.sharpness * s,
+        shadowSat = grade.shadowSat * s,
+        midtoneSat = grade.midtoneSat * s,
+        highlightSat = grade.highlightSat * s,
+        monochromeMix = grade.monochromeMix * s
+    )
+}
+
+internal fun computeLookWbGains(tempShift: Float, tintShift: Float): Triple<Float, Float, Float> {
+    val t = tempShift.coerceIn(-1f, 1f)
+    val ti = tintShift.coerceIn(-1f, 1f)
+    val rRaw = (1.0f + t * 0.34f + ti * 0.14f).coerceAtLeast(0.45f)
+    val gRaw = (1.0f - ti * 0.24f).coerceAtLeast(0.45f)
+    val bRaw = (1.0f - t * 0.34f + ti * 0.14f).coerceAtLeast(0.45f)
+    val lum = (0.2126f * rRaw + 0.7152f * gRaw + 0.0722f * bRaw).coerceAtLeast(0.01f)
+    return Triple(rRaw / lum, gRaw / lum, bRaw / lum)
+}
+
+internal fun computeSplitWheelTint(hueDeg: Float, sat: Float): Triple<Float, Float, Float> {
+    if (sat <= 0.001f) return Triple(0f, 0f, 0f)
+    val h = ((hueDeg % 360f) + 360f) % 360f
+    val c = AndroidColor.HSVToColor(floatArrayOf(h, 1f, 1f))
+    val r = ((c ushr 16) and 0xFF) / 255f
+    val g = ((c ushr 8) and 0xFF) / 255f
+    val b = (c and 0xFF) / 255f
+    val l = 0.2126f * r + 0.7152f * g + 0.0722f * b
+    return Triple((r - l) * sat, (g - l) * sat, (b - l) * sat)
+}
+
 internal data class CameraPreset(
     val name: String,
     val kelvin: Float,
@@ -515,6 +602,7 @@ internal data class CameraPreset(
     val saturation: Float = DEFAULT_SATURATION,
     val channelSwap: Boolean = false,
     val colorBands: ColorBandsConfig = ColorBandsConfig(),
+    val lookGrade: LookGradeParams = LookGradeParams(),
     val accentHex: Long = 0xFFF5A623L,
     val isBuiltIn: Boolean = false
 )
@@ -545,6 +633,8 @@ internal fun scaleColorBands(bands: ColorBandsConfig, strength: Float): ColorBan
     )
 }
 
+// Calibrated from MIT-licensed Lightroom XMP film & portrait recipes (peva3/EmulsionPresets)
+// with crisp anchored blacks, edge-guarded optical clarity, 3-way split toning & skin-safe HSL.
 internal val AESTHETIC_PRESETS: List<CameraPreset> = listOf(
     CameraPreset(
         name = "Natural",
@@ -554,141 +644,389 @@ internal val AESTHETIC_PRESETS: List<CameraPreset> = listOf(
         saturation = 1.00f,
         channelSwap = false,
         colorBands = ColorBandsConfig(),
+        lookGrade = LookGradeParams(),
         accentHex = 0xFF94A3B8L,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Soft Peach",
-        kelvin = 6050f,
-        tint = 10f,
-        contrast = 0.95f,
-        saturation = 1.04f,
+        name = "Natural Skin",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.RED to BandHslAdjustment(deltaHue = 8f, deltaSat = 0.12f, deltaLum = 0.14f),
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.10f, deltaLum = 0.16f),
-            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -14f, deltaSat = -0.10f, deltaLum = 0.08f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = 12f, deltaSat = -0.25f, deltaLum = 0.05f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -10f, deltaSat = -0.12f, deltaLum = 0.08f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = 2f, deltaSat = -0.08f, deltaLum = 0.06f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.10f, deltaLum = 0.14f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 4f, deltaSat = -0.12f, deltaLum = 0.0f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = 0.03f,
+            tintShift = 0.03f,
+            exposureEv = 0.10f,
+            contrast = 0.08f,
+            highlights = -0.25f,
+            shadows = 0.24f,
+            whites = 0.10f,
+            blacks = -0.03f,
+            vibrance = 0.08f,
+            saturation = 0.0f,
+            sharpness = 0.28f,
+            highlightHue = 40f,
+            highlightSat = 0.04f
+        ),
+        accentHex = 0xFFFDA4AFL,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Portra 400",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -3f, deltaSat = -0.05f, deltaLum = 0.15f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -8f, deltaSat = -0.04f, deltaLum = 0.04f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.22f, deltaLum = 0.0f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.10f, deltaLum = 0.0f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -5f, deltaSat = -0.15f, deltaLum = -0.10f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = 0.07f,
+            tintShift = 0.03f,
+            exposureEv = 0.16f,
+            contrast = 0.05f,
+            highlights = -0.45f,
+            shadows = 0.28f,
+            whites = 0.05f,
+            blacks = -0.02f,
+            vibrance = 0.07f,
+            saturation = 0.0f,
+            sharpness = 0.26f,
+            shadowHue = 210f,
+            shadowSat = 0.09f,
+            highlightHue = 45f,
+            highlightSat = 0.13f
         ),
         accentHex = 0xFFFB923CL,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Paris Pastel",
-        kelvin = 5750f,
-        tint = 18f,
-        contrast = 0.93f,
-        saturation = 0.94f,
+        name = "Kodak Gold",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.RED to BandHslAdjustment(deltaHue = -12f, deltaSat = 0.10f, deltaLum = 0.12f),
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -6f, deltaSat = -0.05f, deltaLum = 0.14f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = 22f, deltaSat = -0.35f, deltaLum = 0.10f),
-            ColorBand.CYAN to BandHslAdjustment(deltaHue = -8f, deltaSat = -0.15f, deltaLum = 0.12f),
-            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = 6f, deltaSat = 0.18f, deltaLum = 0.12f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = 7f, deltaSat = 0.10f, deltaLum = 0.02f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = 0.12f, deltaLum = 0.14f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -12f, deltaSat = 0.18f, deltaLum = 0.09f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -22f, deltaSat = -0.16f, deltaLum = -0.07f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = -12f, deltaSat = -0.05f, deltaLum = 0.0f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -10f, deltaSat = -0.15f, deltaLum = -0.10f),
+            ColorBand.PURPLE to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.20f, deltaLum = 0.0f),
+            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.20f, deltaLum = 0.0f)
         ),
-        accentHex = 0xFFF472B6L,
-        isBuiltIn = true
-    ),
-    CameraPreset(
-        name = "Golden Glow",
-        kelvin = 6700f,
-        tint = 6f,
-        contrast = 1.05f,
-        saturation = 1.12f,
-        channelSwap = false,
-        colorBands = buildBandPreset(
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 4f, deltaSat = 0.22f, deltaLum = 0.12f),
-            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -14f, deltaSat = 0.20f, deltaLum = 0.08f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = -28f, deltaSat = -0.18f, deltaLum = -0.04f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -12f, deltaSat = -0.14f, deltaLum = -0.05f)
+        lookGrade = LookGradeParams(
+            tempShift = 0.14f,
+            tintShift = 0.03f,
+            exposureEv = 0.09f,
+            contrast = 0.09f,
+            highlights = -0.42f,
+            shadows = 0.22f,
+            whites = -0.03f,
+            blacks = -0.04f,
+            vibrance = 0.10f,
+            saturation = 0.02f,
+            sharpness = 0.28f,
+            shadowHue = 208f,
+            shadowSat = 0.15f,
+            highlightHue = 50f,
+            highlightSat = 0.16f
         ),
         accentHex = 0xFFFBBF24L,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Old Money 90's",
-        kelvin = 5900f,
-        tint = -6f,
-        contrast = 0.94f,
-        saturation = 0.86f,
+        name = "Beige Cream",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.06f, deltaLum = 0.05f),
-            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -18f, deltaSat = -0.22f, deltaLum = -0.04f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = -18f, deltaSat = -0.45f, deltaLum = -0.14f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.35f, deltaLum = -0.08f)
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = -0.06f, deltaLum = 0.10f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -10f, deltaSat = -0.18f, deltaLum = 0.04f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.28f, deltaLum = -0.04f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = -0.18f, deltaLum = -0.04f)
         ),
-        accentHex = 0xFFA3A380L,
+        lookGrade = LookGradeParams(
+            tempShift = 0.08f,
+            tintShift = 0.01f,
+            exposureEv = 0.11f,
+            contrast = 0.15f,
+            highlights = -0.22f,
+            shadows = 0.19f,
+            whites = 0.11f,
+            blacks = -0.04f,
+            vibrance = 0.06f,
+            saturation = -0.05f,
+            sharpness = 0.34f,
+            shadowHue = 220f,
+            shadowSat = 0.08f,
+            highlightHue = 42f,
+            highlightSat = 0.10f
+        ),
+        accentHex = 0xFFD6C5B3L,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Clean Girl",
-        kelvin = 5350f,
-        tint = 4f,
-        contrast = 1.04f,
-        saturation = 1.06f,
+        name = "Rose Gold",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 2f, deltaSat = -0.06f, deltaLum = 0.14f),
-            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -6f, deltaSat = -0.15f, deltaLum = 0.10f),
-            ColorBand.CYAN to BandHslAdjustment(deltaHue = 0f, deltaSat = 0.15f, deltaLum = 0.06f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.12f, deltaLum = 0.05f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.06f, deltaLum = 0.06f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -3f, deltaSat = -0.08f, deltaLum = 0.12f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 10f, deltaSat = -0.25f, deltaLum = 0.0f),
+            ColorBand.PURPLE to BandHslAdjustment(deltaHue = 0f, deltaSat = 0.10f, deltaLum = 0.04f),
+            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = 0f, deltaSat = 0.16f, deltaLum = 0.08f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = 0.04f,
+            tintShift = 0.15f,
+            exposureEv = 0.14f,
+            contrast = 0.08f,
+            highlights = -0.35f,
+            shadows = 0.24f,
+            whites = 0.12f,
+            blacks = -0.03f,
+            vibrance = 0.08f,
+            saturation = -0.02f,
+            sharpness = 0.28f,
+            shadowHue = 215f,
+            shadowSat = 0.06f,
+            highlightHue = 338f,
+            highlightSat = 0.11f
+        ),
+        accentHex = 0xFFF472B6L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Riviera",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(deltaHue = 2f, deltaSat = 0.10f, deltaLum = 0.05f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = 0.10f, deltaLum = 0.10f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.10f, deltaLum = 0.04f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 15f, deltaSat = -0.15f, deltaLum = 0.0f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 0f, deltaSat = 0.15f, deltaLum = 0.08f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -4f, deltaSat = 0.16f, deltaLum = 0.04f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = 0.11f,
+            tintShift = 0.02f,
+            exposureEv = 0.12f,
+            contrast = 0.15f,
+            highlights = -0.40f,
+            shadows = 0.24f,
+            whites = 0.14f,
+            blacks = -0.05f,
+            vibrance = 0.12f,
+            saturation = 0.05f,
+            sharpness = 0.32f,
+            shadowHue = 35f,
+            shadowSat = 0.08f,
+            highlightHue = 40f,
+            highlightSat = 0.12f
         ),
         accentHex = 0xFF38BDF8L,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Noir Chic",
+        name = "Classic Cuban",
         kelvin = 5500f,
         tint = 0f,
-        contrast = 1.18f,
-        saturation = 0.50f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.RED to BandHslAdjustment(0f, -1.0f, 0.14f),
-            ColorBand.ORANGE to BandHslAdjustment(0f, -1.0f, 0.22f),
-            ColorBand.YELLOW to BandHslAdjustment(0f, -1.0f, 0.10f),
-            ColorBand.GREEN to BandHslAdjustment(0f, -1.0f, -0.05f),
-            ColorBand.CYAN to BandHslAdjustment(0f, -1.0f, -0.18f),
-            ColorBand.BLUE to BandHslAdjustment(0f, -1.0f, -0.30f),
-            ColorBand.PURPLE to BandHslAdjustment(0f, -1.0f, -0.10f),
-            ColorBand.MAGENTA to BandHslAdjustment(0f, -1.0f, 0.08f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = 5f, deltaSat = 0.10f, deltaLum = -0.12f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -5f, deltaSat = 0.05f, deltaLum = 0.06f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -10f, deltaSat = 0.15f, deltaLum = 0.10f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = 25f, deltaSat = -0.40f, deltaLum = -0.14f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = -15f, deltaSat = 0.10f, deltaLum = -0.10f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -20f, deltaSat = 0.05f, deltaLum = -0.22f),
+            ColorBand.PURPLE to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.15f, deltaLum = 0.0f),
+            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.15f, deltaLum = 0.0f)
         ),
-        accentHex = 0xFFE2E8F0L,
+        lookGrade = LookGradeParams(
+            tempShift = 0.10f,
+            tintShift = -0.02f,
+            exposureEv = 0.10f,
+            contrast = 0.16f,
+            highlights = -0.45f,
+            shadows = -0.06f,
+            whites = -0.05f,
+            blacks = -0.08f,
+            vibrance = 0.28f,
+            saturation = 0.04f,
+            sharpness = 0.32f,
+            shadowHue = 210f,
+            shadowSat = 0.11f,
+            midtoneHue = 45f,
+            midtoneSat = 0.10f,
+            highlightHue = 45f,
+            highlightSat = 0.15f
+        ),
+        accentHex = 0xFFEA580CL,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Dreamy Teal",
-        kelvin = 5250f,
-        tint = -6f,
-        contrast = 1.04f,
-        saturation = 1.08f,
+        name = "K-Drama",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = 0.15f, deltaLum = 0.10f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = 38f, deltaSat = -0.15f, deltaLum = 0.04f),
-            ColorBand.CYAN to BandHslAdjustment(deltaHue = 4f, deltaSat = 0.30f, deltaLum = 0.04f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -22f, deltaSat = 0.22f, deltaLum = -0.04f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.04f, deltaLum = 0.05f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.06f, deltaLum = 0.12f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -42f, deltaSat = -0.35f, deltaLum = 0.0f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -5f, deltaSat = -0.15f, deltaLum = -0.04f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = -0.02f,
+            tintShift = 0.02f,
+            exposureEv = 0.06f,
+            contrast = 0.18f,
+            highlights = -0.38f,
+            shadows = 0.22f,
+            whites = 0.10f,
+            blacks = -0.08f,
+            vibrance = 0.06f,
+            saturation = 0.0f,
+            sharpness = 0.34f,
+            shadowHue = 210f,
+            shadowSat = 0.12f,
+            midtoneHue = 35f,
+            midtoneSat = 0.05f,
+            highlightHue = 40f,
+            highlightSat = 0.10f
         ),
         accentHex = 0xFF2DD4BFL,
         isBuiltIn = true
     ),
     CameraPreset(
-        name = "Pink Aerochrome",
-        kelvin = 5400f,
-        tint = 16f,
-        contrast = 1.08f,
-        saturation = 1.15f,
+        name = "Fuji Chrome",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
         channelSwap = false,
         colorBands = buildBandPreset(
-            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -75f, deltaSat = 0.35f, deltaLum = 0.12f),
-            ColorBand.GREEN to BandHslAdjustment(deltaHue = -155f, deltaSat = 0.50f, deltaLum = 0.18f),
-            ColorBand.CYAN to BandHslAdjustment(deltaHue = 14f, deltaSat = 0.20f, deltaLum = -0.06f),
-            ColorBand.BLUE to BandHslAdjustment(deltaHue = -6f, deltaSat = 0.28f, deltaLum = -0.12f)
+            ColorBand.RED to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.20f, deltaLum = -0.12f),
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = 3f, deltaSat = -0.14f, deltaLum = -0.06f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.08f, deltaLum = -0.06f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -20f, deltaSat = -0.30f, deltaLum = -0.18f),
+            ColorBand.CYAN to BandHslAdjustment(deltaHue = 10f, deltaSat = -0.20f, deltaLum = -0.10f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -8f, deltaSat = -0.24f, deltaLum = -0.16f),
+            ColorBand.PURPLE to BandHslAdjustment(deltaHue = -15f, deltaSat = -0.22f, deltaLum = -0.08f),
+            ColorBand.MAGENTA to BandHslAdjustment(deltaHue = 0f, deltaSat = -0.20f, deltaLum = -0.12f)
         ),
-        accentHex = 0xFFE84393L,
+        lookGrade = LookGradeParams(
+            tempShift = 0.02f,
+            tintShift = 0.0f,
+            exposureEv = 0.04f,
+            contrast = 0.20f,
+            highlights = -0.45f,
+            shadows = -0.12f,
+            whites = 0.06f,
+            blacks = -0.12f,
+            vibrance = -0.04f,
+            saturation = -0.08f,
+            sharpness = 0.34f,
+            shadowHue = 212f,
+            shadowSat = 0.09f,
+            highlightHue = 50f,
+            highlightSat = 0.06f
+        ),
+        accentHex = 0xFF60A5FAL,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Espresso",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.ORANGE to BandHslAdjustment(deltaHue = -2f, deltaSat = 0.06f, deltaLum = 0.10f),
+            ColorBand.YELLOW to BandHslAdjustment(deltaHue = -16f, deltaSat = -0.16f, deltaLum = 0.02f),
+            ColorBand.GREEN to BandHslAdjustment(deltaHue = -25f, deltaSat = -0.35f, deltaLum = -0.10f),
+            ColorBand.BLUE to BandHslAdjustment(deltaHue = -8f, deltaSat = -0.30f, deltaLum = -0.06f)
+        ),
+        lookGrade = LookGradeParams(
+            tempShift = 0.12f,
+            tintShift = 0.04f,
+            exposureEv = 0.06f,
+            contrast = 0.15f,
+            highlights = -0.24f,
+            shadows = 0.16f,
+            whites = 0.08f,
+            blacks = -0.05f,
+            vibrance = -0.05f,
+            saturation = -0.08f,
+            sharpness = 0.30f,
+            shadowHue = 35f,
+            shadowSat = 0.13f,
+            midtoneHue = 38f,
+            midtoneSat = 0.07f,
+            highlightHue = 42f,
+            highlightSat = 0.11f
+        ),
+        accentHex = 0xFFA16207L,
+        isBuiltIn = true
+    ),
+    CameraPreset(
+        name = "Acros B&W",
+        kelvin = 5500f,
+        tint = 0f,
+        contrast = 1.00f,
+        saturation = 1.00f,
+        channelSwap = false,
+        colorBands = buildBandPreset(
+            ColorBand.RED to BandHslAdjustment(0f, 0f, 0.20f),
+            ColorBand.ORANGE to BandHslAdjustment(0f, 0f, 0.14f),
+            ColorBand.YELLOW to BandHslAdjustment(0f, 0f, 0.06f),
+            ColorBand.GREEN to BandHslAdjustment(0f, 0f, 0.10f),
+            ColorBand.CYAN to BandHslAdjustment(0f, 0f, -0.06f),
+            ColorBand.BLUE to BandHslAdjustment(0f, 0f, -0.18f),
+            ColorBand.MAGENTA to BandHslAdjustment(0f, 0f, -0.05f)
+        ),
+        lookGrade = LookGradeParams(
+            exposureEv = 0.06f,
+            contrast = 0.20f,
+            highlights = -0.28f,
+            shadows = 0.18f,
+            whites = 0.14f,
+            blacks = -0.16f,
+            sharpness = 0.36f,
+            monochromeMix = 1.0f,
+            bwWeightR = 0.34f,
+            bwWeightG = 0.54f,
+            bwWeightB = 0.12f
+        ),
+        accentHex = 0xFFE2E8F0L,
         isBuiltIn = true
     )
 )
@@ -1266,26 +1604,107 @@ internal fun getHueName(context: Context, hue: Float): String {
     return context.getString(resId)
 }
 
+private fun smoothstep01(edge0: Float, edge1: Float, x: Float): Float {
+    val t = ((x - edge0) / (edge1 - edge0)).coerceIn(0f, 1f)
+    return t * t * (3f - 2f * t)
+}
+
+private fun rgbToHsl01(r: Float, g: Float, b: Float, out: FloatArray) {
+    val cMin = minOf(r, g, b)
+    val cMax = maxOf(r, g, b)
+    val delta = cMax - cMin
+    val l = (cMax + cMin) * 0.5f
+    var s = 0f
+    var h = 0f
+    if (delta > 0.001f) {
+        s = if (l < 0.5f) delta / (cMax + cMin) else delta / (2.0f - cMax - cMin)
+        h = when {
+            r >= cMax -> (g - b) / delta + (if (g < b) 6.0f else 0.0f)
+            g >= cMax -> (b - r) / delta + 2.0f
+            else -> (r - g) / delta + 4.0f
+        } * 60.0f
+    }
+    out[0] = h
+    out[1] = s
+    out[2] = l
+}
+
+private fun hue2Rgb01(p: Float, q: Float, tIn: Float): Float {
+    var t = tIn
+    if (t < 0f) t += 1f
+    if (t > 1f) t -= 1f
+    return when {
+        t < 0.1666667f -> p + (q - p) * 6.0f * t
+        t < 0.5f -> q
+        t < 0.6666667f -> p + (q - p) * (0.6666667f - t) * 6.0f
+        else -> p
+    }
+}
+
+private fun hslToRgb01(hDeg: Float, s: Float, l: Float, out: FloatArray) {
+    if (s <= 0.001f) {
+        out[0] = l
+        out[1] = l
+        out[2] = l
+        return
+    }
+    val h = hDeg / 360.0f
+    val q = if (l < 0.5f) l * (1.0f + s) else l + s - l * s
+    val p = 2.0f * l - q
+    out[0] = hue2Rgb01(p, q, h + 0.3333333f)
+    out[1] = hue2Rgb01(p, q, h)
+    out[2] = hue2Rgb01(p, q, h - 0.3333333f)
+}
+
 /**
- * Lightroom / Darkroom tarzı R↔B Kanal Takası + 8-Bantlı Renk Mikseri + Noktasal Renk Pipeti işlemcisi.
- * Tam 360° ton dönüşümlerinde kenar halesi (rainbow halo) oluşturmamak için RGB uzayında yumuşak karıştırma uygular.
+ * Unified Pro Color-Grading Engine (CPU bit-exact mirror of AGSL GPU Shader):
+ * Edge-Guarded Unsharp Mask + WB/Soft-Shoulder Exposure + Photographic Tone Zones +
+ * Skin-Safe Smart Vibrance + Lightroom 3-Way Split Toning + R↔B Channel Swap +
+ * Bell-Curve 8-Band HSL + Point Pipette + True B&W Channel Mixer.
  */
 internal fun applyTargetedHslToBitmap(
     bitmap: Bitmap,
     config: TargetedColorConfig,
     colorBands: ColorBandsConfig = ColorBandsConfig(),
-    channelSwap: Boolean = false
+    channelSwap: Boolean = false,
+    lookGrade: LookGradeParams = LookGradeParams()
 ): Bitmap {
     val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
     val hasBands = colorBands.hasAnyModification
-    if (!channelSwap && !hasPoint && !hasBands) {
+    val hasLook = lookGrade.isActive
+    if (!hasLook && !channelSwap && !hasPoint && !hasBands) {
         return bitmap
     }
     val work = if (bitmap.isMutable) bitmap else bitmap.copy(Bitmap.Config.ARGB_8888, true)
     val w = work.width
     val h = work.height
-    val stripHeight = 256.coerceAtMost(h)
-    val rowBuf = IntArray(w * stripHeight)
+    if (w <= 0 || h <= 0) return work
+
+    val doSharp = hasLook && lookGrade.sharpness > 0.004f && w >= 3 && h >= 3
+    val sharpAmt = lookGrade.sharpness * 1.35f
+    val (wbR, wbG, wbB) = if (hasLook) computeLookWbGains(lookGrade.tempShift, lookGrade.tintShift) else Triple(1f, 1f, 1f)
+    val expScale = if (hasLook) 2.0f.pow(lookGrade.exposureEv) else 1f
+    val mulR = wbR * expScale
+    val mulG = wbG * expScale
+    val mulB = wbB * expScale
+    val doWbExp = hasLook && (abs(mulR - 1f) > 0.003f || abs(mulG - 1f) > 0.003f || abs(mulB - 1f) > 0.003f)
+    val doZones = hasLook && (
+        abs(lookGrade.shadows) > 0.003f || abs(lookGrade.highlights) > 0.003f ||
+            abs(lookGrade.blacks) > 0.003f || abs(lookGrade.whites) > 0.003f ||
+            abs(lookGrade.contrast) > 0.004f
+        )
+    val contrastK = (1.0f + lookGrade.contrast * 0.85f).coerceIn(0.70f, 1.55f)
+    val doContrastK = hasLook && abs(lookGrade.contrast) > 0.004f
+    val doVibSat = hasLook && (abs(lookGrade.vibrance) > 0.004f || abs(lookGrade.saturation) > 0.004f)
+    val hasSplit = hasLook && lookGrade.hasSplitToning
+    val (shR, shG, shB) = if (hasSplit) computeSplitWheelTint(lookGrade.shadowHue, lookGrade.shadowSat) else Triple(0f, 0f, 0f)
+    val (midR, midG, midB) = if (hasSplit) computeSplitWheelTint(lookGrade.midtoneHue, lookGrade.midtoneSat) else Triple(0f, 0f, 0f)
+    val (hiR, hiG, hiB) = if (hasSplit) computeSplitWheelTint(lookGrade.highlightHue, lookGrade.highlightSat) else Triple(0f, 0f, 0f)
+    val doMono = hasLook && lookGrade.monochromeMix > 0.004f
+    val monoMix = lookGrade.monochromeMix.coerceIn(0f, 1f)
+    val bwR = lookGrade.bwWeightR
+    val bwG = lookGrade.bwWeightG
+    val bwB = lookGrade.bwWeightB
 
     val targetHue = config.targetHue
     val hueWidth = config.hueWidth.coerceAtLeast(4f)
@@ -1300,144 +1719,265 @@ internal fun applyTargetedHslToBitmap(
     val bandDL = FloatArray(8) { colorBands.bands.getOrNull(it)?.deltaLum ?: 0f }
     val bandActive = BooleanArray(8) { colorBands.bands.getOrNull(it)?.isModified == true }
 
-    val hsv = FloatArray(3)
+    val stripHeight = 128.coerceAtMost(h)
+    val padBuf = IntArray(w * (stripHeight + 2))
+    val outBuf = IntArray(w * stripHeight)
+    val lumaPad = if (doSharp) FloatArray(w * (stripHeight + 2)) else FloatArray(0)
+    val hsl = FloatArray(3)
+    val rgbTmp = FloatArray(3)
+    val inv255 = 1.0f / 255.0f
+
     var y = 0
     while (y < h) {
         val rows = minOf(stripHeight, h - y)
-        work.getPixels(rowBuf, 0, w, 0, y, w, rows)
-        val count = w * rows
-        for (i in 0 until count) {
-            val px = rowBuf[i]
-            val a = px and -0x1000000
-            var r = (px ushr 16) and 0xFF
-            var g = (px ushr 8) and 0xFF
-            var b = px and 0xFF
+        val topPad = if (doSharp && y > 0) 1 else 0
+        val botPad = if (doSharp && y + rows < h) 1 else 0
+        val totalPadRows = rows + topPad + botPad
+        work.getPixels(padBuf, 0, w, 0, y - topPad, w, totalPadRows)
 
-            // 0) Gerçek Kızılötesi R↔B Kanal Takası (Channel Swap)
-            if (channelSwap) {
-                val tmp = r
-                r = b
-                b = tmp
+        if (doSharp) {
+            val totalPx = w * totalPadRows
+            for (k in 0 until totalPx) {
+                val px = padBuf[k]
+                val pr = ((px ushr 16) and 0xFF) * inv255
+                val pg = ((px ushr 8) and 0xFF) * inv255
+                val pb = (px and 0xFF) * inv255
+                lumaPad[k] = 0.2126f * pr + 0.7152f * pg + 0.0722f * pb
             }
+        }
 
-            // 1) 8-Bantlı Renk Histogramı Mikseri (pürüzsüz komşu bant geçişi)
-            if (hasBands) {
-                AndroidColor.RGBToHSV(r, g, b, hsv)
-                val hVal = hsv[0]
-                val sVal = hsv[1]
-                val vVal = hsv[2]
+        for (ry in 0 until rows) {
+            val padRow = ry + topPad
+            val padRowOff = padRow * w
+            val outRowOff = ry * w
+            val rowN = (padRow - 1).coerceAtLeast(0) * w
+            val rowS = (padRow + 1).coerceAtMost(totalPadRows - 1) * w
 
-                val satW = ((sVal - 0.05f) / 0.14f).coerceIn(0f, 1f)
-                val wS = satW * satW * (3f - 2f * satW)
-                val lumLow = ((vVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
-                val lumHigh = 1.0f - ((vVal - 0.93f) / 0.06f).coerceIn(0f, 1f)
-                val mask = wS * lumLow * lumHigh
+            for (rx in 0 until w) {
+                val pIdx = padRowOff + rx
+                val px = padBuf[pIdx]
+                val a = px and -0x1000000
+                var rf = ((px ushr 16) and 0xFF) * inv255
+                var gf = ((px ushr 8) and 0xFF) * inv255
+                var bf = (px and 0xFF) * inv255
 
-                if (mask > 0.001f) {
-                    var idxA = 7
-                    var idxB = 0
-                    var t = 0f
-                    if (hVal >= 320f) {
-                        idxA = 7
-                        idxB = 0
-                        t = ((hVal - 320f) / 40f).coerceIn(0f, 1f)
-                    } else {
-                        for (k in 0 until 7) {
-                            if (hVal >= bandCenters[k] && hVal < bandCenters[k + 1]) {
-                                idxA = k
-                                idxB = k + 1
-                                t = ((hVal - bandCenters[k]) / (bandCenters[k + 1] - bandCenters[k])).coerceIn(0f, 1f)
-                                break
+                // Stage A: Edge-guarded luminance-only unsharp mask (keeps skin smooth & eyes/details crisp)
+                if (doSharp) {
+                    val xW = if (rx > 0) rx - 1 else 0
+                    val xE = if (rx + 1 < w) rx + 1 else w - 1
+                    val lumC = lumaPad[pIdx]
+                    val lumAvg = (lumaPad[rowN + rx] + lumaPad[rowS + rx] + lumaPad[padRowOff + xW] + lumaPad[padRowOff + xE]) * 0.25f
+                    val detail = lumC - lumAvg
+                    val absD = abs(detail)
+                    if (absD > 0.006f) {
+                        val noiseGate = smoothstep01(0.006f, 0.025f, absD)
+                        val haloGuard = 1.0f - smoothstep01(0.18f, 0.45f, absD)
+                        val boost = detail * sharpAmt * noiseGate * haloGuard
+                        rf = (rf + boost).coerceIn(0f, 1f)
+                        gf = (gf + boost).coerceIn(0f, 1f)
+                        bf = (bf + boost).coerceIn(0f, 1f)
+                    }
+                }
+
+                // Stage B: Relative White Balance + Filmic Soft-Shoulder Exposure
+                if (doWbExp) {
+                    rf *= mulR
+                    gf *= mulG
+                    bf *= mulB
+                    if (rf > 0.88f) rf /= (1.0f + (rf - 0.88f) * 0.55f)
+                    if (gf > 0.88f) gf /= (1.0f + (gf - 0.88f) * 0.55f)
+                    if (bf > 0.88f) bf /= (1.0f + (bf - 0.88f) * 0.55f)
+                    rf = rf.coerceIn(0f, 1f)
+                    gf = gf.coerceIn(0f, 1f)
+                    bf = bf.coerceIn(0f, 1f)
+                }
+
+                // Stage C: Photographic Tone Zones (anchored above true black!) + Midpoint S-Curve
+                if (doZones) {
+                    val l = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf
+                    val oml = 1.0f - l
+                    val shMask = oml * oml * smoothstep01(0.0f, 0.08f, l)
+                    val hiMask = l * l * (1.0f - smoothstep01(0.96f, 1.0f, l) * 0.25f)
+                    val blkMask = oml * oml * oml
+                    val whtMask = l * l * l
+                    var targetL = (
+                        l +
+                            lookGrade.shadows * 0.24f * shMask +
+                            lookGrade.highlights * 0.22f * hiMask +
+                            lookGrade.blacks * 0.10f * blkMask +
+                            lookGrade.whites * 0.12f * whtMask
+                        ).coerceIn(0f, 1f)
+                    if (doContrastK) {
+                        targetL = if (targetL <= 0.5f) {
+                            0.5f * (2.0f * targetL).coerceAtLeast(0.00001f).pow(contrastK)
+                        } else {
+                            1.0f - 0.5f * (2.0f * (1.0f - targetL)).coerceAtLeast(0.00001f).pow(contrastK)
+                        }
+                    }
+                    val lRatio = targetL / l.coerceAtLeast(0.001f)
+                    val scale = 1.0f + (lRatio - 1.0f) * 0.92f
+                    val lift = (targetL - l) * 0.08f
+                    rf = (rf * scale + lift).coerceIn(0f, 1f)
+                    gf = (gf * scale + lift).coerceIn(0f, 1f)
+                    bf = (bf * scale + lift).coerceIn(0f, 1f)
+                }
+
+                // Stage D: Skin-Protecting Smart Vibrance + Global Saturation
+                if (doVibSat) {
+                    val luma = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf
+                    val maxC = maxOf(rf, gf, bf)
+                    val minC = minOf(rf, gf, bf)
+                    val curSat = maxC - minC
+                    val skinMask = ((rf - gf) * 3.0f).coerceIn(0f, 1f) * ((gf - bf) * 3.0f).coerceIn(0f, 1f)
+                    val vibBoost = lookGrade.vibrance * (1.0f - curSat) * (1.0f - skinMask * 0.65f)
+                    val satFactor = (1.0f + lookGrade.saturation + vibBoost).coerceIn(0f, 2.0f)
+                    rf = (luma + (rf - luma) * satFactor).coerceIn(0f, 1f)
+                    gf = (luma + (gf - luma) * satFactor).coerceIn(0f, 1f)
+                    bf = (luma + (bf - luma) * satFactor).coerceIn(0f, 1f)
+                }
+
+                // Stage E: Lightroom 3-Way Color Grading (Shadows / Midtones / Highlights Split Toning)
+                if (hasSplit) {
+                    val l = 0.2126f * rf + 0.7152f * gf + 0.0722f * bf
+                    val oml = 1.0f - l
+                    val wSh = oml * oml * smoothstep01(0.0f, 0.10f, l)
+                    val wHi = l * l * (1.0f - smoothstep01(0.92f, 1.0f, l) * 0.70f)
+                    val wMid = 4.0f * l * oml
+                    rf = (rf + (shR * wSh + midR * wMid + hiR * wHi) * 0.42f).coerceIn(0f, 1f)
+                    gf = (gf + (shG * wSh + midG * wMid + hiG * wHi) * 0.42f).coerceIn(0f, 1f)
+                    bf = (bf + (shB * wSh + midB * wMid + hiB * wHi) * 0.42f).coerceIn(0f, 1f)
+                }
+
+                // 0) Gerçek Kızılötesi R↔B Kanal Takası (Channel Swap)
+                if (channelSwap) {
+                    val tmp = rf
+                    rf = bf
+                    bf = tmp
+                }
+
+                // 1) 8-Bantlı Renk Histogramı Mikseri (çan-eğrisi parlaklık korumasıyla pürüzsüz geçiş)
+                if (hasBands) {
+                    rgbToHsl01(rf, gf, bf, hsl)
+                    val hVal = hsl[0]
+                    val sVal = hsl[1]
+                    val lVal = hsl[2]
+
+                    val satW = ((sVal - 0.05f) / 0.14f).coerceIn(0f, 1f)
+                    val wS = satW * satW * (3f - 2f * satW)
+                    val lumLow = ((lVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
+                    val lumHigh = 1.0f - ((lVal - 0.93f) / 0.06f).coerceIn(0f, 1f)
+                    val mask = wS * lumLow * lumHigh
+
+                    if (mask > 0.001f) {
+                        var idxA = 7
+                        var idxB = 0
+                        var t = 0f
+                        if (hVal >= 320f) {
+                            idxA = 7
+                            idxB = 0
+                            t = ((hVal - 320f) / 40f).coerceIn(0f, 1f)
+                        } else {
+                            for (k in 0 until 7) {
+                                if (hVal >= bandCenters[k] && hVal < bandCenters[k + 1]) {
+                                    idxA = k
+                                    idxB = k + 1
+                                    t = ((hVal - bandCenters[k]) / (bandCenters[k + 1] - bandCenters[k])).coerceIn(0f, 1f)
+                                    break
+                                }
                             }
                         }
-                    }
-                    val s = t * t * (3f - 2f * t)
-                    val wA = if (bandActive[idxA]) (1f - s) * mask else 0f
-                    val wB = if (bandActive[idxB]) s * mask else 0f
-                    val wTotal = (wA + wB).coerceIn(0f, 1f)
-                    if (wTotal > 0.001f) {
-                        var accR = r * (1f - wTotal)
-                        var accG = g * (1f - wTotal)
-                        var accB = b * (1f - wTotal)
-                        if (wA > 0.001f) {
-                            var nh = (hVal + bandDH[idxA]) % 360f
-                            if (nh < 0f) nh += 360f
-                            hsv[0] = nh
-                            hsv[1] = (sVal * (1f + bandDS[idxA])).coerceIn(0f, 1f)
-                            hsv[2] = (vVal + bandDL[idxA] * 0.45f).coerceIn(0f, 1f)
-                            val cA = AndroidColor.HSVToColor(a, hsv)
-                            accR += ((cA ushr 16) and 0xFF) * wA
-                            accG += ((cA ushr 8) and 0xFF) * wA
-                            accB += (cA and 0xFF) * wA
+                        val s = t * t * (3f - 2f * t)
+                        val wA = if (bandActive[idxA]) (1f - s) * mask else 0f
+                        val wB = if (bandActive[idxB]) s * mask else 0f
+                        val wTotal = (wA + wB).coerceIn(0f, 1f)
+                        if (wTotal > 0.001f) {
+                            val lumBell = 4.0f * lVal * (1.0f - lVal)
+                            var accR = rf * (1f - wTotal)
+                            var accG = gf * (1f - wTotal)
+                            var accB = bf * (1f - wTotal)
+                            if (wA > 0.001f) {
+                                var nh = (hVal + bandDH[idxA]) % 360f
+                                if (nh < 0f) nh += 360f
+                                val ns = (sVal * (1f + bandDS[idxA])).coerceIn(0f, 1f)
+                                val nl = (lVal + bandDL[idxA] * 0.42f * lumBell).coerceIn(0f, 1f)
+                                hslToRgb01(nh, ns, nl, rgbTmp)
+                                accR += rgbTmp[0] * wA
+                                accG += rgbTmp[1] * wA
+                                accB += rgbTmp[2] * wA
+                            }
+                            if (wB > 0.001f) {
+                                var nh = (hVal + bandDH[idxB]) % 360f
+                                if (nh < 0f) nh += 360f
+                                val ns = (sVal * (1f + bandDS[idxB])).coerceIn(0f, 1f)
+                                val nl = (lVal + bandDL[idxB] * 0.42f * lumBell).coerceIn(0f, 1f)
+                                hslToRgb01(nh, ns, nl, rgbTmp)
+                                accR += rgbTmp[0] * wB
+                                accG += rgbTmp[1] * wB
+                                accB += rgbTmp[2] * wB
+                            }
+                            rf = accR.coerceIn(0f, 1f)
+                            gf = accG.coerceIn(0f, 1f)
+                            bf = accB.coerceIn(0f, 1f)
                         }
-                        if (wB > 0.001f) {
-                            var nh = (hVal + bandDH[idxB]) % 360f
-                            if (nh < 0f) nh += 360f
-                            hsv[0] = nh
-                            hsv[1] = (sVal * (1f + bandDS[idxB])).coerceIn(0f, 1f)
-                            hsv[2] = (vVal + bandDL[idxB] * 0.45f).coerceIn(0f, 1f)
-                            val cB = AndroidColor.HSVToColor(a, hsv)
-                            accR += ((cB ushr 16) and 0xFF) * wB
-                            accG += ((cB ushr 8) and 0xFF) * wB
-                            accB += (cB and 0xFF) * wB
+                    }
+                }
+
+                // 2) Noktasal Renk Pipeti (isteğe bağlı ek katman)
+                if (hasPoint) {
+                    rgbToHsl01(rf, gf, bf, hsl)
+                    val hVal = hsl[0]
+                    val sVal = hsl[1]
+                    val lVal = hsl[2]
+
+                    var diffH = abs(hVal - targetHue)
+                    if (diffH > 180f) diffH = 360f - diffH
+
+                    val wH = when {
+                        diffH <= hueWidth -> 1.0f
+                        diffH <= hueWidth + hueFeather -> {
+                            val t = (diffH - hueWidth) / hueFeather
+                            1.0f - t * t * (3.0f - 2.0f * t)
                         }
-                        r = accR.roundToInt().coerceIn(0, 255)
-                        g = accG.roundToInt().coerceIn(0, 255)
-                        b = accB.roundToInt().coerceIn(0, 255)
+                        else -> 0.0f
+                    }
+
+                    if (wH > 0.001f) {
+                        val satWeight = ((sVal - 0.06f) / 0.14f).coerceIn(0f, 1f)
+                        val wS = satWeight * satWeight * (3f - 2f * satWeight)
+                        val lumLow = ((lVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
+                        val lumHigh = 1.0f - ((lVal - 0.92f) / 0.07f).coerceIn(0f, 1f)
+                        val wL = lumLow * lumHigh
+
+                        val weight = wH * wS * wL
+                        if (weight > 0.001f) {
+                            var newH = (hVal + dH) % 360f
+                            if (newH < 0f) newH += 360f
+                            val newS = (sVal * (1.0f + dS)).coerceIn(0f, 1f)
+                            val lumBell = 4.0f * lVal * (1.0f - lVal)
+                            val newL = (lVal + dL * 0.42f * lumBell).coerceIn(0f, 1f)
+                            hslToRgb01(newH, newS, newL, rgbTmp)
+                            rf = (rf + (rgbTmp[0] - rf) * weight).coerceIn(0f, 1f)
+                            gf = (gf + (rgbTmp[1] - gf) * weight).coerceIn(0f, 1f)
+                            bf = (bf + (rgbTmp[2] - bf) * weight).coerceIn(0f, 1f)
+                        }
                     }
                 }
+
+                // Stage F: True Channel-Mixed Monochrome (e.g. Fujifilm Acros B&W)
+                if (doMono) {
+                    val mono = (rf * bwR + gf * bwG + bf * bwB).coerceIn(0f, 1f)
+                    rf += (mono - rf) * monoMix
+                    gf += (mono - gf) * monoMix
+                    bf += (mono - bf) * monoMix
+                }
+
+                val ri = (rf * 255.0f).roundToInt().coerceIn(0, 255)
+                val gi = (gf * 255.0f).roundToInt().coerceIn(0, 255)
+                val bi = (bf * 255.0f).roundToInt().coerceIn(0, 255)
+                outBuf[outRowOff + rx] = a or (ri shl 16) or (gi shl 8) or bi
             }
-
-            // 2) Noktasal Renk Pipeti (isteğe bağlı ek katman)
-            if (hasPoint) {
-                AndroidColor.RGBToHSV(r, g, b, hsv)
-                val hVal = hsv[0]
-                val sVal = hsv[1]
-                val vVal = hsv[2]
-
-                var diffH = abs(hVal - targetHue)
-                if (diffH > 180f) diffH = 360f - diffH
-
-                val wH = when {
-                    diffH <= hueWidth -> 1.0f
-                    diffH <= hueWidth + hueFeather -> {
-                        val t = (diffH - hueWidth) / hueFeather
-                        1.0f - t * t * (3.0f - 2.0f * t)
-                    }
-                    else -> 0.0f
-                }
-
-                if (wH > 0.001f) {
-                    val satWeight = ((sVal - 0.06f) / 0.14f).coerceIn(0f, 1f)
-                    val wS = satWeight * satWeight * (3f - 2f * satWeight)
-                    val lumLow = ((vVal - 0.04f) / 0.10f).coerceIn(0f, 1f)
-                    val lumHigh = 1.0f - ((vVal - 0.92f) / 0.07f).coerceIn(0f, 1f)
-                    val wL = lumLow * lumHigh
-
-                    val weight = wH * wS * wL
-                    if (weight > 0.001f) {
-                        var newH = (hVal + dH) % 360f
-                        if (newH < 0f) newH += 360f
-                        val newS = (sVal * (1.0f + dS)).coerceIn(0f, 1f)
-                        val newV = (vVal + dL * 0.45f).coerceIn(0f, 1f)
-
-                        hsv[0] = newH
-                        hsv[1] = newS
-                        hsv[2] = newV
-                        val shiftedRgb = AndroidColor.HSVToColor(a, hsv)
-                        val sr = (shiftedRgb ushr 16) and 0xFF
-                        val sg = (shiftedRgb ushr 8) and 0xFF
-                        val sb = shiftedRgb and 0xFF
-                        r = (r + (sr - r) * weight).roundToInt().coerceIn(0, 255)
-                        g = (g + (sg - g) * weight).roundToInt().coerceIn(0, 255)
-                        b = (b + (sb - b) * weight).roundToInt().coerceIn(0, 255)
-                    }
-                }
-            }
-
-            rowBuf[i] = a or (r shl 16) or (g shl 8) or b
         }
-        work.setPixels(rowBuf, 0, w, 0, y, w, rows)
+        work.setPixels(outBuf, 0, w, 0, y, w, rows)
         y += rows
     }
     return work
@@ -1518,6 +2058,23 @@ private fun calculateAutoContrastFromPreview(
 
 private const val HSL_SKSL = """
     uniform shader uContent;
+    uniform float uLookActive;
+    uniform float uLookSharpness;
+    uniform vec3 uLookWbGains;
+    uniform float uLookExpScale;
+    uniform float uLookContrast;
+    uniform float uLookHighlights;
+    uniform float uLookShadows;
+    uniform float uLookWhites;
+    uniform float uLookBlacks;
+    uniform float uLookVibrance;
+    uniform float uLookSat;
+    uniform float uSplitActive;
+    uniform vec3 uSplitShadow;
+    uniform vec3 uSplitMid;
+    uniform vec3 uSplitHigh;
+    uniform float uMonoMix;
+    uniform vec3 uBwWeights;
     uniform float uChannelSwap;
     uniform float uTargetHue;
     uniform float uHueWidth;
@@ -1591,15 +2148,82 @@ private const val HSL_SKSL = """
 
     vec4 main(vec2 fragCoord) {
         vec4 color = uContent.eval(fragCoord);
+        vec3 rgb = color.rgb;
+
+        // A) Edge-guarded luminance-only optical unsharp mask (keeps skin smooth & eyes razor-sharp)
+        if (uLookSharpness > 0.004) {
+            vec3 cN = uContent.eval(fragCoord + vec2(0.0, -1.0)).rgb;
+            vec3 cS = uContent.eval(fragCoord + vec2(0.0,  1.0)).rgb;
+            vec3 cW = uContent.eval(fragCoord + vec2(-1.0, 0.0)).rgb;
+            vec3 cE = uContent.eval(fragCoord + vec2( 1.0, 0.0)).rgb;
+            vec3 avg = (cN + cS + cW + cE) * 0.25;
+            float lumC = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lumAvg = dot(avg, vec3(0.2126, 0.7152, 0.0722));
+            float detail = lumC - lumAvg;
+            float absD = abs(detail);
+            float noiseGate = smoothstep(0.006, 0.025, absD);
+            float haloGuard = 1.0 - smoothstep(0.18, 0.45, absD);
+            float boost = detail * uLookSharpness * 1.35 * noiseGate * haloGuard;
+            rgb = clamp(rgb + vec3(boost), 0.0, 1.0);
+        }
+
+        // B-E) Pro Lightroom Look Grade (WB + Soft-Shoulder Exposure + Tone Zones + Vibrance + 3-Way Split Toning)
+        if (uLookActive > 0.5) {
+            rgb = rgb * uLookWbGains * uLookExpScale;
+            rgb = rgb / (1.0 + max(rgb - vec3(0.88), vec3(0.0)) * 0.55);
+            rgb = clamp(rgb, 0.0, 1.0);
+
+            float l = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+            float oml = 1.0 - l;
+            float shMask = oml * oml * smoothstep(0.0, 0.08, l);
+            float hiMask = l * l * (1.0 - smoothstep(0.96, 1.0, l) * 0.25);
+            float blkMask = oml * oml * oml;
+            float whtMask = l * l * l;
+            float targetL = clamp(
+                l + uLookShadows * 0.24 * shMask
+                  + uLookHighlights * 0.22 * hiMask
+                  + uLookBlacks * 0.10 * blkMask
+                  + uLookWhites * 0.12 * whtMask,
+                0.0, 1.0
+            );
+            if (abs(uLookContrast) > 0.004) {
+                float k = clamp(1.0 + uLookContrast * 0.85, 0.70, 1.55);
+                targetL = targetL <= 0.5
+                    ? 0.5 * pow(max(2.0 * targetL, 0.00001), k)
+                    : 1.0 - 0.5 * pow(max(2.0 * (1.0 - targetL), 0.00001), k);
+            }
+            float lRatio = targetL / max(l, 0.001);
+            rgb = clamp(rgb * mix(1.0, lRatio, 0.92) + vec3((targetL - l) * 0.08), 0.0, 1.0);
+
+            if (abs(uLookVibrance) > 0.004 || abs(uLookSat) > 0.004) {
+                float luma = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+                float maxC = max(max(rgb.r, rgb.g), rgb.b);
+                float minC = min(min(rgb.r, rgb.g), rgb.b);
+                float curSat = maxC - minC;
+                float skinMask = clamp((rgb.r - rgb.g) * 3.0, 0.0, 1.0) * clamp((rgb.g - rgb.b) * 3.0, 0.0, 1.0);
+                float vibBoost = uLookVibrance * (1.0 - curSat) * (1.0 - skinMask * 0.65);
+                float satFactor = clamp(1.0 + uLookSat + vibBoost, 0.0, 2.0);
+                rgb = clamp(mix(vec3(luma), rgb, satFactor), 0.0, 1.0);
+            }
+
+            if (uSplitActive > 0.5) {
+                float ls = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+                float omls = 1.0 - ls;
+                float wSh = omls * omls * smoothstep(0.0, 0.10, ls);
+                float wHi = ls * ls * (1.0 - smoothstep(0.92, 1.0, ls) * 0.70);
+                float wMid = 4.0 * ls * omls;
+                rgb = clamp(rgb + (uSplitShadow * wSh + uSplitMid * wMid + uSplitHigh * wHi) * 0.42, 0.0, 1.0);
+            }
+        }
 
         // 0) Kızılötesi R↔B Kanal Takası
         if (uChannelSwap > 0.5) {
-            color.rgb = color.bgr;
+            rgb = rgb.bgr;
         }
 
-        // 1) 8-Bantlı Renk Histogramı Mikseri (Lightroom / Darkroom)
+        // 1) 8-Bantlı Renk Histogramı Mikseri (çan-eğrisi parlaklık korumasıyla net portre tonu)
         if (uBandsActive > 0.5) {
-            vec3 hsl = rgb2hsl(color.rgb);
+            vec3 hsl = rgb2hsl(rgb);
             float satClamp = clamp((hsl.y - 0.05) / 0.14, 0.0, 1.0);
             float wS = satClamp * satClamp * (3.0 - 2.0 * satClamp);
             float lumLow = clamp((hsl.z - 0.04) / 0.10, 0.0, 1.0);
@@ -1637,12 +2261,13 @@ private const val HSL_SKSL = """
                 float wB = actB ? s * mask : 0.0;
                 float wTot = clamp(wA + wB, 0.0, 1.0);
                 if (wTot > 0.001) {
-                    vec3 acc = color.rgb * (1.0 - wTot);
+                    float lumBell = 4.0 * hsl.z * (1.0 - hsl.z);
+                    vec3 acc = rgb * (1.0 - wTot);
                     if (wA > 0.001) {
                         vec3 shA = vec3(
                             mod(hsl.x + dA.x + 360.0, 360.0),
                             clamp(hsl.y * (1.0 + dA.y), 0.0, 1.0),
-                            clamp(hsl.z + dA.z * 0.45, 0.0, 1.0)
+                            clamp(hsl.z + dA.z * 0.42 * lumBell, 0.0, 1.0)
                         );
                         acc += hsl2rgb(shA) * wA;
                     }
@@ -1650,18 +2275,18 @@ private const val HSL_SKSL = """
                         vec3 shB = vec3(
                             mod(hsl.x + dB.x + 360.0, 360.0),
                             clamp(hsl.y * (1.0 + dB.y), 0.0, 1.0),
-                            clamp(hsl.z + dB.z * 0.45, 0.0, 1.0)
+                            clamp(hsl.z + dB.z * 0.42 * lumBell, 0.0, 1.0)
                         );
                         acc += hsl2rgb(shB) * wB;
                     }
-                    color.rgb = acc;
+                    rgb = acc;
                 }
             }
         }
 
         // 2) Noktasal Renk Pipeti katmanı
         if (uActive > 0.5) {
-            vec3 hsl = rgb2hsl(color.rgb);
+            vec3 hsl = rgb2hsl(rgb);
             float dH = abs(hsl.x - uTargetHue);
             dH = min(dH, 360.0 - dH);
 
@@ -1681,14 +2306,22 @@ private const val HSL_SKSL = """
 
             float weight = wH * wS * wL;
             if (weight > 0.001) {
+                float lumBell = 4.0 * hsl.z * (1.0 - hsl.z);
                 vec3 shifted = hsl;
                 shifted.x = mod(hsl.x + uDeltaHue + 360.0, 360.0);
                 shifted.y = clamp(hsl.y * (1.0 + uDeltaSat), 0.0, 1.0);
-                shifted.z = clamp(hsl.z + uDeltaLum * 0.45, 0.0, 1.0);
-                color.rgb = mix(color.rgb, hsl2rgb(shifted), weight);
+                shifted.z = clamp(hsl.z + uDeltaLum * 0.42 * lumBell, 0.0, 1.0);
+                rgb = mix(rgb, hsl2rgb(shifted), weight);
             }
         }
-        return color;
+
+        // F) True Channel-Mixed Monochrome (e.g. Fujifilm Acros B&W)
+        if (uMonoMix > 0.004) {
+            float mono = clamp(dot(rgb, uBwWeights), 0.0, 1.0);
+            rgb = mix(rgb, vec3(mono), clamp(uMonoMix, 0.0, 1.0));
+        }
+
+        return vec4(clamp(rgb, 0.0, 1.0), color.a);
     }
 """
 
@@ -1697,6 +2330,7 @@ private fun updateTextureViewShader(
     config: TargetedColorConfig,
     colorBands: ColorBandsConfig,
     channelSwap: Boolean = false,
+    lookGrade: LookGradeParams = LookGradeParams(),
     bypass: Boolean = false
 ) {
     if (view == null) return
@@ -1704,11 +2338,36 @@ private fun updateTextureViewShader(
         try {
             val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
             val hasBands = colorBands.hasAnyModification
-            if (bypass || (!channelSwap && !hasPoint && !hasBands)) {
+            val hasLook = lookGrade.isActive
+            if (bypass || (!hasLook && !channelSwap && !hasPoint && !hasBands)) {
                 view.setRenderEffect(null)
                 return
             }
             val shader = RuntimeShader(HSL_SKSL)
+            val (wbR, wbG, wbB) = if (hasLook) computeLookWbGains(lookGrade.tempShift, lookGrade.tintShift) else Triple(1f, 1f, 1f)
+            val hasSplit = hasLook && lookGrade.hasSplitToning
+            val (shR, shG, shB) = if (hasSplit) computeSplitWheelTint(lookGrade.shadowHue, lookGrade.shadowSat) else Triple(0f, 0f, 0f)
+            val (midR, midG, midB) = if (hasSplit) computeSplitWheelTint(lookGrade.midtoneHue, lookGrade.midtoneSat) else Triple(0f, 0f, 0f)
+            val (hiR, hiG, hiB) = if (hasSplit) computeSplitWheelTint(lookGrade.highlightHue, lookGrade.highlightSat) else Triple(0f, 0f, 0f)
+
+            shader.setFloatUniform("uLookActive", if (hasLook) 1.0f else 0.0f)
+            shader.setFloatUniform("uLookSharpness", if (hasLook) lookGrade.sharpness else 0.0f)
+            shader.setFloatUniform("uLookWbGains", wbR, wbG, wbB)
+            shader.setFloatUniform("uLookExpScale", if (hasLook) 2.0f.pow(lookGrade.exposureEv) else 1.0f)
+            shader.setFloatUniform("uLookContrast", if (hasLook) lookGrade.contrast else 0.0f)
+            shader.setFloatUniform("uLookHighlights", if (hasLook) lookGrade.highlights else 0.0f)
+            shader.setFloatUniform("uLookShadows", if (hasLook) lookGrade.shadows else 0.0f)
+            shader.setFloatUniform("uLookWhites", if (hasLook) lookGrade.whites else 0.0f)
+            shader.setFloatUniform("uLookBlacks", if (hasLook) lookGrade.blacks else 0.0f)
+            shader.setFloatUniform("uLookVibrance", if (hasLook) lookGrade.vibrance else 0.0f)
+            shader.setFloatUniform("uLookSat", if (hasLook) lookGrade.saturation else 0.0f)
+            shader.setFloatUniform("uSplitActive", if (hasSplit) 1.0f else 0.0f)
+            shader.setFloatUniform("uSplitShadow", shR, shG, shB)
+            shader.setFloatUniform("uSplitMid", midR, midG, midB)
+            shader.setFloatUniform("uSplitHigh", hiR, hiG, hiB)
+            shader.setFloatUniform("uMonoMix", if (hasLook) lookGrade.monochromeMix else 0.0f)
+            shader.setFloatUniform("uBwWeights", lookGrade.bwWeightR, lookGrade.bwWeightG, lookGrade.bwWeightB)
+
             shader.setFloatUniform("uChannelSwap", if (channelSwap) 1.0f else 0.0f)
             shader.setFloatUniform("uTargetHue", config.targetHue)
             shader.setFloatUniform("uHueWidth", config.hueWidth)
@@ -2461,6 +3120,7 @@ fun CameraScreen(
     }
     var showSettingsDialog by remember { mutableStateOf(false) }
     var selectedAestheticPreset by remember { mutableStateOf(AESTHETIC_PRESETS.first()) }
+    var activeLookGrade by remember { mutableStateOf(LookGradeParams()) }
     var aestheticFilterStrength by remember { mutableFloatStateOf(1.0f) }
     var aestheticSubSlider by remember { mutableStateOf(AestheticSubSlider.STRENGTH) }
     var irProTuneExpanded by remember { mutableStateOf(false) }
@@ -2539,19 +3199,33 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(targetedColorConfig, colorBandsConfig, channelSwapEnabled, isAutoMode, isComparingAuto, textureViewInstance) {
+    LaunchedEffect(
+        targetedColorConfig,
+        colorBandsConfig,
+        channelSwapEnabled,
+        activeLookGrade,
+        experienceMode,
+        isAutoMode,
+        isComparingAuto,
+        textureViewInstance
+    ) {
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
         holder.currentChannelSwap = channelSwapEnabled
+        holder.currentLookGrade = activeLookGrade
+        holder.currentExperienceMode = experienceMode
+        val applyShaderInAuto = (experienceMode == ExperienceMode.AESTHETIC) || activeLookGrade.isActive
+        val bypassShader = isComparingAuto || (isAutoMode && !applyShaderInAuto)
         updateTextureViewShader(
             view = textureViewInstance,
             config = targetedColorConfig,
             colorBands = colorBandsConfig,
             channelSwap = channelSwapEnabled,
-            bypass = isAutoMode || isComparingAuto
+            lookGrade = activeLookGrade,
+            bypass = bypassShader
         )
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !shownPreTiramisuHslNotice && !isAutoMode) {
-            val hasGrading = channelSwapEnabled || colorBandsConfig.hasAnyModification ||
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !shownPreTiramisuHslNotice && (!isAutoMode || applyShaderInAuto)) {
+            val hasGrading = activeLookGrade.isActive || channelSwapEnabled || colorBandsConfig.hasAnyModification ||
                 (targetedColorConfig.isActive && (targetedColorConfig.deltaHue != 0f || targetedColorConfig.deltaSat != 0f || targetedColorConfig.deltaLum != 0f))
             if (hasGrading) {
                 shownPreTiramisuHslNotice = true
@@ -2639,6 +3313,8 @@ fun CameraScreen(
         holder.currentExposureBoxSizeNorm = exposureBoxSizeNorm
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
+        holder.currentLookGrade = activeLookGrade
+        holder.currentExperienceMode = experienceMode
         holder.currentChannelSwap = channelSwapEnabled
         holder.currentAeLock = aeLockEnabled
         holder.currentZoomRatio = zoomRatio
@@ -2710,6 +3386,20 @@ fun CameraScreen(
         }
         try {
             builder.set(CaptureRequest.CONTROL_AE_LOCK, holder.currentAeLock)
+        } catch (_: Exception) {
+        }
+        // Keep optical ISP edge clarity & noise reduction active on both preview & still capture
+        try {
+            builder.set(
+                CaptureRequest.EDGE_MODE,
+                if (isStillCapture) CaptureRequest.EDGE_MODE_HIGH_QUALITY
+                else CaptureRequest.EDGE_MODE_FAST
+            )
+            builder.set(
+                CaptureRequest.NOISE_REDUCTION_MODE,
+                if (isStillCapture) CaptureRequest.NOISE_REDUCTION_MODE_HIGH_QUALITY
+                else CaptureRequest.NOISE_REDUCTION_MODE_FAST
+            )
         } catch (_: Exception) {
         }
         if (holder.maxAeRegions > 0 && !compatibilityFallback) {
@@ -3452,10 +4142,13 @@ fun CameraScreen(
             val snapTargetedColor = holder.currentTargetedColor
             val snapColorBands = holder.currentColorBands
             val snapChannelSwap = holder.currentChannelSwap
-            val snapApplyColorGrading = !snapAuto
+            val snapLookGrade = holder.currentLookGrade
+            val snapExpMode = holder.currentExperienceMode
+            val snapApplyColorGrading = !snapAuto || snapLookGrade.isActive || snapExpMode == ExperienceMode.AESTHETIC
             coroutineScope.launch(Dispatchers.Default) {
                 val hasSelectiveHsl = snapApplyColorGrading && (
-                    snapChannelSwap ||
+                    snapLookGrade.isActive ||
+                        snapChannelSwap ||
                         (snapTargetedColor.isActive &&
                             (snapTargetedColor.deltaHue != 0f || snapTargetedColor.deltaSat != 0f || snapTargetedColor.deltaLum != 0f)) ||
                         snapColorBands.hasAnyModification
@@ -3466,7 +4159,12 @@ fun CameraScreen(
                 }
                 val thumbBmp = decodeThumbnailFromBytes(bytes, context.cacheDir)
                 if (thumbBmp != null) {
-                    val imgBmp = thumbBmp.asImageBitmap()
+                    val displayThumb = if (hasSelectiveHsl) {
+                        applyTargetedHslToBitmap(thumbBmp, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
+                    } else {
+                        thumbBmp
+                    }
+                    val imgBmp = displayThumb.asImageBitmap()
                     withContext(Dispatchers.Main) { lastCapturedThumb = imgBmp }
                 }
 
@@ -3482,7 +4180,7 @@ fun CameraScreen(
                             }
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
-                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap)
+                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
                                 saveOutputToGallery(context, null, graded, orientation, onSaved)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
@@ -3817,40 +4515,44 @@ fun CameraScreen(
         isPickerActive = false
         isColorPipetteActive = false
         isExposureBoxPicking = false
+        // ALWAYS keep Camera2 in hardware Auto-HDR + AWB_AUTO so preview & photos stay razor-sharp!
+        // All aesthetic color grading runs at 60fps in our AGSL GPU shader + identical full-res JPEG processor.
+        isAutoMode = true
+        kelvinValue = 5500f
+        tintValue = 0f
+        contrastValue = DEFAULT_CONTRAST
+        saturationValue = DEFAULT_SATURATION
         if (preset.name == "Natural" || s <= 0.01f) {
-            isAutoMode = true
+            activeLookGrade = LookGradeParams()
             channelSwapEnabled = false
             colorBandsConfig = ColorBandsConfig()
             targetedColorConfig = TargetedColorConfig()
-            contrastValue = DEFAULT_CONTRAST
-            saturationValue = DEFAULT_SATURATION
-            updatePreviewSettings()
         } else {
-            val baseK = liveAutoKelvin.coerceIn(2600f, 8200f)
-            val baseT = liveAutoTint.coerceIn(-40f, 40f)
-            isAutoMode = false
-            kelvinValue = (baseK + (preset.kelvin - 5500f) * s).coerceIn(KELVIN_MIN, KELVIN_MAX)
-            tintValue = (baseT + preset.tint * s).coerceIn(-100f, 100f)
-            contrastValue = DEFAULT_CONTRAST + (preset.contrast - DEFAULT_CONTRAST) * s
-            saturationValue = DEFAULT_SATURATION + (preset.saturation - DEFAULT_SATURATION) * s
+            activeLookGrade = scaleLookGrade(preset.lookGrade, s)
             channelSwapEnabled = preset.channelSwap && s >= 0.5f
             colorBandsConfig = scaleColorBands(preset.colorBands, s)
             targetedColorConfig = TargetedColorConfig()
-            updatePreviewSettings()
         }
+        updatePreviewSettings()
     }
 
     fun applyPresetDirect(preset: CameraPreset, announce: Boolean = true) {
         isPickerActive = false
         isColorPipetteActive = false
         isExposureBoxPicking = false
-        isAutoMode = false
+        val isPureShaderLook = preset.lookGrade.isActive &&
+            abs(preset.kelvin - 5500f) < 1f &&
+            abs(preset.tint) < 0.5f &&
+            abs(preset.contrast - DEFAULT_CONTRAST) < 0.01f &&
+            abs(preset.saturation - DEFAULT_SATURATION) < 0.01f
+        isAutoMode = isPureShaderLook
         kelvinValue = preset.kelvin
         tintValue = preset.tint
         contrastValue = preset.contrast
         saturationValue = preset.saturation
         channelSwapEnabled = preset.channelSwap
         colorBandsConfig = preset.colorBands
+        activeLookGrade = preset.lookGrade
         targetedColorConfig = TargetedColorConfig()
         updatePreviewSettings()
         if (announce) {
@@ -3877,12 +4579,17 @@ fun CameraScreen(
             }
             ExperienceMode.IR_LAB -> {
                 irProTuneExpanded = false
+                activeLookGrade = LookGradeParams()
                 if (isAutoMode && !colorBandsConfig.hasAnyModification && !channelSwapEnabled) {
                     applyPresetDirect(IR_LAB_PRESETS.first(), announce = false)
+                } else {
+                    updatePreviewSettings()
                 }
             }
             ExperienceMode.PRO -> {
                 irProTuneExpanded = false
+                activeLookGrade = LookGradeParams()
+                updatePreviewSettings()
             }
         }
         if (announce) {
@@ -3986,6 +4693,7 @@ fun CameraScreen(
                             isPickerActive = false
                             isColorPipetteActive = false
                             isExposureBoxPicking = false
+                            activeLookGrade = LookGradeParams()
                             isAutoMode = true
                             updatePreviewSettings()
                         }
@@ -4238,7 +4946,8 @@ fun CameraScreen(
                                                     config = targetedColorConfig,
                                                     colorBands = colorBandsConfig,
                                                     channelSwap = channelSwapEnabled,
-                                                    bypass = isAutoMode || isComparingAuto
+                                                    lookGrade = activeLookGrade,
+                                                    bypass = isComparingAuto || (isAutoMode && experienceMode != ExperienceMode.AESTHETIC && !activeLookGrade.isActive)
                                                 )
                                                 showStatus(context.getString(R.string.status_color_picked, getHueName(context, hsv[0])))
                                             } finally {
@@ -4721,18 +5430,19 @@ fun CameraScreen(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.CenterStart
                         ) {
-                            if (!isAutoMode) {
+                            val canCompare = !isAutoMode || activeLookGrade.isActive || colorBandsConfig.hasAnyModification || channelSwapEnabled
+                            if (canCompare) {
                                 Box(
                                     modifier = Modifier
                                         .sizeIn(minWidth = 40.dp, minHeight = 36.dp)
-                                        .pointerInput(cameraReady) {
+                                        .pointerInput(cameraReady, isAutoMode) {
                                             detectTapGestures(
                                                 onPress = {
                                                     isComparingAuto = true
-                                                    updatePreviewSettings()
+                                                    if (!isAutoMode) updatePreviewSettings()
                                                     tryAwaitRelease()
                                                     isComparingAuto = false
-                                                    updatePreviewSettings()
+                                                    if (!isAutoMode) updatePreviewSettings()
                                                 }
                                             )
                                         },
@@ -6612,6 +7322,7 @@ fun CameraScreen(
                         channelSwapEnabled = false
                         aeLockEnabled = false
                         selectedAestheticPreset = AESTHETIC_PRESETS.first()
+                        activeLookGrade = LookGradeParams()
                         aestheticFilterStrength = 1.0f
                         targetedColorConfig = TargetedColorConfig()
                         colorBandsConfig = ColorBandsConfig()

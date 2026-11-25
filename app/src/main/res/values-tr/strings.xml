@@ -223,8 +223,8 @@
     <string name="welcome_start">Başla</string>
 
     <string name="exp_aesthetic_title">Estetik &amp; Filtre</string>
-    <string name="exp_aesthetic_desc">Sade vizör, canlı portre, pastel ve sinematik film filtreleri ile tek dokunuşta yoğunluk ayarı</string>
-    <string name="exp_aesthetic_tags">Portre · Pastel · Film · Sade Arayüz</string>
+    <string name="exp_aesthetic_desc">Net Auto-HDR vizör, Portra 400, Kodak Gold, Rose Gold, Classic Cuban ve editoryal cilt filtreleri</string>
+    <string name="exp_aesthetic_tags">Portra 400 · Rose Gold · Classic Cuban · Net Cilt</string>
 
     <string name="exp_ir_title">Kızılötesi (IR Lab)</string>
     <string name="exp_ir_desc">Kızılötesi fotoğrafçılığa özel tek tuş R↔B takas, 590–850nm profilleri ve yaprak beyaz dengesi</string>

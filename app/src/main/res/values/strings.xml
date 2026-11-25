@@ -223,8 +223,8 @@
     <string name="welcome_start">Continue</string>
 
     <string name="exp_aesthetic_title">Aesthetic &amp; Filters</string>
-    <string name="exp_aesthetic_desc">Clean viewfinder with live portrait, pastel &amp; film filters and intensity control</string>
-    <string name="exp_aesthetic_tags">Portrait · Pastel · Film · Clean UI</string>
+    <string name="exp_aesthetic_desc">Crisp Auto-HDR viewfinder with Portra 400, Kodak Gold, Rose Gold, Classic Cuban &amp; editorial looks</string>
+    <string name="exp_aesthetic_tags">Portra 400 · Rose Gold · Classic Cuban · Crisp Skin</string>
 
     <string name="exp_ir_title">Infrared (IR Lab)</string>
     <string name="exp_ir_desc">Dedicated infrared workflow with 1-tap R↔B Swap, 590–850nm looks &amp; foliage WB</string>

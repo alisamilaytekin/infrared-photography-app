@@ -97,9 +97,9 @@ android {
 gradle.taskGraph.whenReady {
     val bundlingPlayStore = allTasks.any { it.name.contains("bundleRelease", ignoreCase = true) }
     if (bundlingPlayStore) {
-        val releaseStore = signingConfigs.getByName("spectrasRelease").storeFile
+        val releaseStore = android.signingConfigs.getByName("spectrasRelease").storeFile
         if (releaseStore == null || !releaseStore.exists() || releaseStore.name == "kameras-release.jks") {
-            throw GradleException(
+            throw org.gradle.api.GradleException(
                 "bundleRelease requires a private upload keystore (set PLAY_KEYSTORE_PATH / PLAY_KEYSTORE_PASSWORD). " +
                     "Refusing to sign Play Store AAB with public kameras-release.jks."
             )

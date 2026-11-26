@@ -2450,7 +2450,8 @@ private fun updateTextureViewShader(
     colorBands: ColorBandsConfig,
     channelSwap: Boolean = false,
     lookGrade: LookGradeParams = LookGradeParams(),
-    bypass: Boolean = false
+    bypass: Boolean = false,
+    preTiramisuGlRenderer: PreTiramisuGlPreviewRenderer? = null
 ) {
     if (view == null) return
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -2512,6 +2513,14 @@ private fun updateTextureViewShader(
         } catch (e: Throwable) {
             Log.e("CameraScreen", "RenderEffect not supported on this GPU/HAL", e)
         }
+    } else {
+        preTiramisuGlRenderer?.updateUniforms(
+            config = config,
+            colorBands = colorBands,
+            channelSwap = channelSwap,
+            lookGrade = lookGrade,
+            bypass = bypass
+        )
     }
 }
 
@@ -3320,6 +3329,9 @@ fun CameraScreen(
         }
     }
     var textureViewInstance by remember { mutableStateOf<TextureView?>(null) }
+    val preTiramisuGlRenderer = remember {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) PreTiramisuGlPreviewRenderer() else null
+    }
     var previewAspectRatio by remember { mutableFloatStateOf(initialRatio) }
     var surfaceGeneration by remember { mutableIntStateOf(0) }
 
@@ -3379,9 +3391,10 @@ fun CameraScreen(
             colorBands = colorBandsConfig,
             channelSwap = channelSwapEnabled,
             lookGrade = activeLookGrade,
-            bypass = bypassShader
+            bypass = bypassShader,
+            preTiramisuGlRenderer = preTiramisuGlRenderer
         )
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && !shownPreTiramisuHslNotice && (!isAutoMode || applyShaderInAuto)) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && (preTiramisuGlRenderer == null || preTiramisuGlRenderer.isFailed) && !shownPreTiramisuHslNotice && (!isAutoMode || applyShaderInAuto)) {
             val hasGrading = activeLookGrade.isActive || channelSwapEnabled || colorBandsConfig.hasAnyModification ||
                 (targetedColorConfig.isActive && (targetedColorConfig.deltaHue != 0f || targetedColorConfig.deltaSat != 0f || targetedColorConfig.deltaLum != 0f))
             if (hasGrading) {
@@ -4144,7 +4157,9 @@ fun CameraScreen(
                 }
             }
 
-            val surface = Surface(surfaceTexture)
+            val surfaceTargetSt = preTiramisuGlRenderer?.getOrAttachInputSurface(surfaceTexture) ?: surfaceTexture
+            surfaceTargetSt.setDefaultBufferSize(chosenPreview.width, chosenPreview.height)
+            val surface = Surface(surfaceTargetSt)
 
             holder.supportedTonemapModes =
                 chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
@@ -4870,6 +4885,7 @@ fun CameraScreen(
             lifecycleOwner.lifecycle.removeObserver(observer)
             cameraHandler.post {
                 closeCameraInternal(releaseReader = true)
+                preTiramisuGlRenderer?.release()
                 cameraThread.quitSafely()
             }
             try { shutterSound?.release() } catch (_: Throwable) {}
@@ -5432,7 +5448,8 @@ fun CameraScreen(
                                                     colorBands = colorBandsConfig,
                                                     channelSwap = channelSwapEnabled,
                                                     lookGrade = activeLookGrade,
-                                                    bypass = isComparingAuto || (isAutoMode && experienceMode != ExperienceMode.AESTHETIC && !activeLookGrade.isActive)
+                                                    bypass = isComparingAuto || (isAutoMode && experienceMode != ExperienceMode.AESTHETIC && !activeLookGrade.isActive),
+                                                    preTiramisuGlRenderer = preTiramisuGlRenderer
                                                 )
                                                 showStatus(context.getString(R.string.status_color_picked, getHueName(context, hsv[0])))
                                             } finally {
@@ -5524,6 +5541,7 @@ fun CameraScreen(
                                     }
 
                                     override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                        preTiramisuGlRenderer?.detachOutputSurface(st)
                                         if (textureViewInstance?.surfaceTexture === st) {
                                             textureViewInstance = null
                                         }

@@ -5,6 +5,8 @@ package com.alisamilaytekin.spectras
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -27,6 +29,7 @@ import android.hardware.camera2.*
 import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.RggbChannelVector
+import android.hardware.camera2.params.StreamConfigurationMap
 import android.hardware.camera2.params.TonemapCurve
 import android.media.ExifInterface
 import android.media.ImageReader
@@ -46,6 +49,7 @@ import android.util.Range
 import android.util.Rational
 import android.util.Size
 import android.view.KeyEvent
+import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.TextureView
 import android.view.WindowManager
@@ -478,6 +482,11 @@ private class CameraHolder {
     @Volatile var pendingTorchFallbackActive: Boolean = false
 
     @Volatile var selectedResolution: Size? = null
+    @Volatile var sortedJpegSizes: List<Size> = emptyList()
+    @Volatile var hardwareLevel: Int = CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+    @Volatile var preferredFpsRange: Range<Int>? = null
+    @Volatile var deviceOrientationDegrees: Int = -1
+    @Volatile var cameraErrorRetryCount: Int = 0
     @Volatile var activePreviewSize: Size? = null
     @Volatile var activeSensorOrientation: Int = 90
     @Volatile var activeSensorArray: Rect? = null
@@ -557,6 +566,20 @@ private fun formatAspectRatioTag(size: Size): String {
             if (rw <= 25 && rh <= 25) "$rw:$rh" else "${"%.2f".format(Locale.US, r)}:1"
         }
     }
+}
+
+private fun collectJpegOutputSizes(map: StreamConfigurationMap): List<Size> {
+    val standard = try {
+        map.getOutputSizes(ImageFormat.JPEG)?.toList().orEmpty()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+    val highRes = try {
+        map.getHighResolutionOutputSizes(ImageFormat.JPEG)?.toList().orEmpty()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+    return (standard + highRes).distinctBy { it.width to it.height }
 }
 
 private fun choosePreviewSize(
@@ -2899,12 +2922,69 @@ private fun jpegDegreesToExifOrientation(degrees: Int): Int {
     }
 }
 
+@Suppress("DEPRECATION")
+private val PRESERVED_EXIF_TAGS = arrayOf(
+    ExifInterface.TAG_MAKE,
+    ExifInterface.TAG_MODEL,
+    ExifInterface.TAG_DATETIME,
+    ExifInterface.TAG_DATETIME_ORIGINAL,
+    ExifInterface.TAG_DATETIME_DIGITIZED,
+    ExifInterface.TAG_EXPOSURE_TIME,
+    ExifInterface.TAG_F_NUMBER,
+    ExifInterface.TAG_ISO_SPEED_RATINGS,
+    ExifInterface.TAG_FOCAL_LENGTH,
+    ExifInterface.TAG_WHITE_BALANCE,
+    ExifInterface.TAG_FLASH,
+    ExifInterface.TAG_APERTURE_VALUE,
+    ExifInterface.TAG_SHUTTER_SPEED_VALUE,
+    ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
+    ExifInterface.TAG_GPS_LATITUDE,
+    ExifInterface.TAG_GPS_LATITUDE_REF,
+    ExifInterface.TAG_GPS_LONGITUDE,
+    ExifInterface.TAG_GPS_LONGITUDE_REF,
+    ExifInterface.TAG_GPS_ALTITUDE,
+    ExifInterface.TAG_GPS_ALTITUDE_REF,
+    ExifInterface.TAG_GPS_TIMESTAMP,
+    ExifInterface.TAG_GPS_DATESTAMP
+)
+
+private fun writeExifToFile(
+    destFile: File,
+    exifOrientation: Int,
+    sourceExifBytes: ByteArray?
+) {
+    try {
+        val dst = ExifInterface(destFile.absolutePath)
+        var changed = false
+        if (sourceExifBytes != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                val src = ExifInterface(sourceExifBytes.inputStream())
+                for (tag in PRESERVED_EXIF_TAGS) {
+                    val v = src.getAttribute(tag)
+                    if (v != null) {
+                        dst.setAttribute(tag, v)
+                        changed = true
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
+            dst.setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
+            changed = true
+        }
+        if (changed) {
+            dst.saveAttributes()
+        }
+    } catch (_: Exception) {}
+}
+
 internal fun saveOutputToGallery(
     context: Context,
     rawBytes: ByteArray?,
     processedBitmap: Bitmap?,
     exifOrientation: Int,
-    onSavedUri: ((Uri) -> Unit)? = null
+    onSavedUri: ((Uri) -> Unit)? = null,
+    sourceExifBytes: ByteArray? = null
 ): Boolean {
     var tempOut: File? = null
     var uri: Uri? = null
@@ -2930,23 +3010,22 @@ internal fun saveOutputToGallery(
                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     fos.flush()
                 }
-                if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
-                    try {
-                        ExifInterface(tempOut.absolutePath).apply {
-                            setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
-                            saveAttributes()
-                        }
-                    } catch (_: Exception) {}
-                }
-                resolver.openOutputStream(uri)?.use { out ->
+                writeExifToFile(tempOut, exifOrientation, sourceExifBytes)
+                val outStream = resolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("openOutputStream returned null")
+                outStream.use { out ->
                     FileInputStream(tempOut).use { inp -> inp.copyTo(out) }
                     out.flush()
                 }
             } else if (rawBytes != null) {
-                resolver.openOutputStream(uri)?.use { out ->
+                val outStream = resolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("openOutputStream returned null")
+                outStream.use { out ->
                     out.write(rawBytes)
                     out.flush()
                 }
+            } else {
+                throw IllegalStateException("No image data to save")
             }
 
             val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
@@ -2965,14 +3044,7 @@ internal fun saveOutputToGallery(
                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     fos.flush()
                 }
-                if (exifOrientation != ExifInterface.ORIENTATION_NORMAL) {
-                    try {
-                        ExifInterface(outFile.absolutePath).apply {
-                            setAttribute(ExifInterface.TAG_ORIENTATION, exifOrientation.toString())
-                            saveAttributes()
-                        }
-                    } catch (_: Exception) {}
-                }
+                writeExifToFile(outFile, exifOrientation, sourceExifBytes)
             } else if (rawBytes != null) {
                 FileOutputStream(outFile).use { fos ->
                     fos.write(rawBytes)
@@ -3064,9 +3136,11 @@ private fun saveRawDngToGallery(
                 uri = resolver.insert(MediaStore.Files.getContentUri("external"), fileValues)
             }
             val targetUri = uri ?: return false
-            resolver.openOutputStream(targetUri)?.use { out ->
+            val outStream = resolver.openOutputStream(targetUri)
+                ?: throw IllegalStateException("openOutputStream returned null for DNG")
+            outStream.use { out ->
                 writeDngToStream(out)
-            } ?: return false
+            }
             val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
             resolver.update(targetUri, done, null, null)
             true
@@ -3274,6 +3348,7 @@ fun CameraScreen(
 
     val availableResolutions = remember { mutableStateListOf<Size>() }
     var selectedResolution by remember { mutableStateOf<Size?>(null) }
+    var cameraDiagSummary by remember { mutableStateOf("") }
 
     var isPickerActive by remember { mutableStateOf(false) }
     var isColorPipetteActive by remember { mutableStateOf(false) }
@@ -3653,6 +3728,17 @@ fun CameraScreen(
             }
         }
 
+        if (!isStillCapture) {
+            holder.preferredFpsRange?.let { fps ->
+                try {
+                    builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fps)
+                } catch (_: Exception) {
+                }
+            }
+        }
+        val effectiveCompatFallback = compatibilityFallback ||
+            (holder.hardwareLevel == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY)
+
         if (auto) {
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO)
             builder.set(
@@ -3665,7 +3751,7 @@ fun CameraScreen(
                 if (isStillCapture) CaptureRequest.TONEMAP_MODE_HIGH_QUALITY
                 else CaptureRequest.TONEMAP_MODE_FAST
             )
-        } else if (compatibilityFallback) {
+        } else if (effectiveCompatFallback) {
             // Safe legacy/LIMITED fallback if a HAL rejects manual transform matrix or tonemap curve
             builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
             builder.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_FAST)
@@ -4083,14 +4169,49 @@ fun CameraScreen(
             } else {
                 CameraCharacteristics.LENS_FACING_BACK
             }
-            val cameraId = cameraIdList.firstOrNull { id ->
+            val preferredId = if (desiredFacing == CameraCharacteristics.LENS_FACING_BACK) "0" else "1"
+            val matchingIds = cameraIdList.filter { id ->
                 try {
-                    cameraManager.getCameraCharacteristics(id)
-                        .get(CameraCharacteristics.LENS_FACING) == desiredFacing
+                    val c = cameraManager.getCameraCharacteristics(id)
+                    if (c.get(CameraCharacteristics.LENS_FACING) != desiredFacing) return@filter false
+                    val cCaps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                    val backwardCompatible = cCaps == null || cCaps.contains(
+                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE
+                    )
+                    val cMap = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    backwardCompatible && cMap != null && collectJpegOutputSizes(cMap).isNotEmpty()
                 } catch (_: Exception) {
                     false
                 }
-            } ?: cameraIdList[0]
+            }
+            val cameraId = if (matchingIds.size <= 1) {
+                matchingIds.firstOrNull() ?: cameraIdList.firstOrNull { id ->
+                    try {
+                        cameraManager.getCameraCharacteristics(id)
+                            .get(CameraCharacteristics.LENS_FACING) == desiredFacing
+                    } catch (_: Exception) {
+                        false
+                    }
+                } ?: cameraIdList[0]
+            } else {
+                val scored = matchingIds.map { id ->
+                    val c = cameraManager.getCameraCharacteristics(id)
+                    val cMap = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                    val maxPx = cMap?.let { m ->
+                        collectJpegOutputSizes(m).maxOfOrNull { it.width.toLong() * it.height.toLong() }
+                    } ?: 0L
+                    val hasFlashCam = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                    Triple(id, maxPx, hasFlashCam)
+                }
+                val bestPx = scored.maxOf { it.second }
+                scored.filter { it.second >= (bestPx * 95L) / 100L }
+                    .sortedWith(
+                        compareByDescending<Triple<String, Long, Boolean>> { it.first == preferredId }
+                            .thenByDescending { it.third }
+                            .thenByDescending { it.second }
+                    )
+                    .first().first
+            }
             holder.activeCameraId = cameraId
 
             val chars = cameraManager.getCameraCharacteristics(cameraId)
@@ -4111,14 +4232,14 @@ fun CameraScreen(
                 return
             }
 
-            val rawOutputSizes = map.getOutputSizes(ImageFormat.JPEG)
-            if (rawOutputSizes.isNullOrEmpty()) {
+            val rawOutputSizes = collectJpegOutputSizes(map)
+            if (rawOutputSizes.isEmpty()) {
                 synchronized(holder) { holder.isOpening = false }
                 return
             }
 
             val filteredRes = rawOutputSizes.filter { it.width >= 640 && it.height >= 480 }
-            val sortedSizes = (filteredRes.ifEmpty { rawOutputSizes.toList() })
+            val sortedSizes = (filteredRes.ifEmpty { rawOutputSizes })
                 .distinctBy { it.width to it.height }
                 .sortedByDescending { it.width.toLong() * it.height.toLong() }
 
@@ -4129,11 +4250,37 @@ fun CameraScreen(
             } ?: sortedSizes.firstOrNull { it.width == savedW && it.height == savedH }
                 ?: sortedSizes.first()
 
+            holder.sortedJpegSizes = sortedSizes
             holder.selectedResolution = chosenJpeg
+            val hwLevel = chars.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
+                ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
+            holder.hardwareLevel = hwLevel
+            val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+            holder.preferredFpsRange = fpsRanges
+                .filter { it.upper == 30 && it.lower in 5..24 }
+                .minByOrNull { it.lower }
+            val hwLabel = when (hwLevel) {
+                CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "LEVEL_3"
+                CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "FULL"
+                CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED -> "LIMITED"
+                CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY -> "LEGACY"
+                else -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+                    hwLevel == CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_EXTERNAL
+                ) "EXTERNAL" else "LVL_$hwLevel"
+            }
+            val renderLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                "AGSL"
+            } else if (preTiramisuGlRenderer?.isFailed == true) {
+                "CPU-fallback"
+            } else {
+                "GLES2"
+            }
+            val diagText = "Cam:$cameraId | $hwLabel | ${formatMegapixels(chosenJpeg)} (${chosenJpeg.width}x${chosenJpeg.height}, ${sortedSizes.size} modes) | API ${Build.VERSION.SDK_INT} | $renderLabel"
             mainHandler.post {
                 availableResolutions.clear()
                 availableResolutions.addAll(sortedSizes)
                 selectedResolution = chosenJpeg
+                cameraDiagSummary = diagText
             }
 
             val previewSizes = map.getOutputSizes(SurfaceTexture::class.java) ?: arrayOf(chosenJpeg)
@@ -4220,10 +4367,10 @@ fun CameraScreen(
 
             synchronized(holder) {
                 holder.imageReader?.close()
-                holder.imageReader = ImageReader.newInstance(chosenJpeg.width, chosenJpeg.height, ImageFormat.JPEG, 4)
+                holder.imageReader = ImageReader.newInstance(chosenJpeg.width, chosenJpeg.height, ImageFormat.JPEG, 2)
                 holder.rawImageReader?.close()
                 holder.rawImageReader = if (holder.rawCaptureEnabled && chosenRaw != null) {
-                    ImageReader.newInstance(chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 4)
+                    ImageReader.newInstance(chosenRaw.width, chosenRaw.height, ImageFormat.RAW_SENSOR, 2)
                 } else {
                     null
                 }
@@ -4292,6 +4439,7 @@ fun CameraScreen(
                                         return
                                     }
                                     holder.session = session
+                                    holder.cameraErrorRetryCount = 0
                                     val started = submitRepeatingRequest(session, builder)
                                     mainHandler.post {
                                         cameraReady = started
@@ -4322,10 +4470,27 @@ fun CameraScreen(
                                             cameraHandler.post { startCameraInternal(surfaceTexture) }
                                         }
                                     } else {
-                                        closeCameraInternal(releaseReader = true)
-                                        mainHandler.post {
-                                            cameraReady = false
-                                            showStatus(context.getString(R.string.status_res_unsupported))
+                                        val currentPx = chosenJpeg.width.toLong() * chosenJpeg.height.toLong()
+                                        val nextSmaller = holder.sortedJpegSizes.firstOrNull {
+                                            it.width.toLong() * it.height.toLong() < currentPx
+                                        }
+                                        if (!holder.isDisposed && nextSmaller != null) {
+                                            Log.w("CameraScreen", "Stepping down JPEG resolution from ${chosenJpeg.width}x${chosenJpeg.height} to ${nextSmaller.width}x${nextSmaller.height}")
+                                            holder.selectedResolution = nextSmaller
+                                            holder.previewFallbackLevel = 0
+                                            mainHandler.post {
+                                                selectedResolution = nextSmaller
+                                                showStatus("${formatMegapixels(nextSmaller)} (${formatAspectRatioTag(nextSmaller)})")
+                                            }
+                                            if (closeCameraInternal(releaseReader = true, pendingReopen = surfaceTexture)) {
+                                                cameraHandler.post { startCameraInternal(surfaceTexture) }
+                                            }
+                                        } else {
+                                            closeCameraInternal(releaseReader = true)
+                                            mainHandler.post {
+                                                cameraReady = false
+                                                showStatus(context.getString(R.string.status_res_unsupported))
+                                            }
                                         }
                                     }
                                 }
@@ -4344,8 +4509,27 @@ fun CameraScreen(
                 }
 
                 override fun onError(c: CameraDevice, e: Int) {
+                    Log.e("CameraScreen", "CameraDevice.onError code=$e retry=${holder.cameraErrorRetryCount}")
                     closeCameraInternal(releaseReader = true)
                     try { c.close() } catch (_: Exception) {}
+                    if (!holder.isDisposed && !currentIsStudioMode && holder.cameraErrorRetryCount < 2) {
+                        holder.cameraErrorRetryCount += 1
+                        cameraHandler.postDelayed({
+                            if (!holder.isDisposed && !currentIsStudioMode && holder.device == null) {
+                                val tv = textureViewInstance
+                                val st = tv?.surfaceTexture
+                                val valid = tv != null && tv.isAvailable && st != null &&
+                                    (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !st.isReleased)
+                                if (valid && st != null) {
+                                    synchronized(holder) {
+                                        holder.isOpening = false
+                                        holder.isClosingDevice = false
+                                    }
+                                    startCameraInternal(st)
+                                }
+                            }
+                        }, 650L)
+                    }
                 }
 
                 override fun onClosed(c: CameraDevice) {
@@ -4409,10 +4593,19 @@ fun CameraScreen(
             else -> 0
         }
         val lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING) ?: CameraCharacteristics.LENS_FACING_BACK
-        val jpegOrientation = if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
-            (sensorOrientation + rotationCompensation) % 360
+        val physicalDeg = holder.deviceOrientationDegrees
+        val jpegOrientation = if (physicalDeg >= 0) {
+            if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+                (sensorOrientation - physicalDeg + 360) % 360
+            } else {
+                (sensorOrientation + physicalDeg) % 360
+            }
         } else {
-            (sensorOrientation - rotationCompensation + 360) % 360
+            if (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+                (sensorOrientation + rotationCompensation) % 360
+            } else {
+                (sensorOrientation - rotationCompensation + 360) % 360
+            }
         }
 
         val snapAuto = holder.currentAutoMode
@@ -4499,11 +4692,11 @@ fun CameraScreen(
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
                                 graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
-                                saveOutputToGallery(context, null, graded, orientation, onSaved)
+                                saveOutputToGallery(context, null, graded, orientation, onSaved, sourceExifBytes = bytes)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                             }
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
                             saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                         } finally {
@@ -4854,6 +5047,32 @@ fun CameraScreen(
                     }
                 }
             }
+        }
+    }
+
+    DisposableEffect(context) {
+        val orientationListener = object : OrientationEventListener(context) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val snapped = when {
+                    orientation >= 330 || orientation < 30 -> 0
+                    orientation in 60..120 -> 90
+                    orientation in 150..210 -> 180
+                    orientation in 240..300 -> 270
+                    else -> holder.deviceOrientationDegrees
+                }
+                if (snapped >= 0) {
+                    holder.deviceOrientationDegrees = snapped
+                }
+            }
+        }
+        try {
+            if (orientationListener.canDetectOrientation()) {
+                orientationListener.enable()
+            }
+        } catch (_: Throwable) {}
+        onDispose {
+            try { orientationListener.disable() } catch (_: Throwable) {}
         }
     }
 
@@ -8627,6 +8846,39 @@ fun CameraScreen(
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.SemiBold
                             )
+                        }
+                    }
+                    if (cameraDiagSummary.isNotBlank()) {
+                        item(key = "tool_camera_diag") {
+                            val fullDiag = "${Build.MANUFACTURER} ${Build.MODEL} | $cameraDiagSummary"
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.04f))
+                                    .clickable {
+                                        try {
+                                            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                            cm?.setPrimaryClip(ClipData.newPlainText("SpectraS Camera Info", fullDiag))
+                                            showStatus("Copied: $cameraDiagSummary")
+                                        } catch (_: Exception) {}
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Camera HAL Info (tap to copy)",
+                                    color = IrPalette.TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = fullDiag,
+                                    color = IrPalette.IrCyan.copy(alpha = 0.85f),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
                     }
                 }

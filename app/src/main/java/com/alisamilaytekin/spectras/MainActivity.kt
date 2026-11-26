@@ -2987,8 +2987,23 @@ internal fun saveOutputToGallery(
     rawBytes: ByteArray?,
     processedBitmap: Bitmap?,
     exifOrientation: Int,
-    onSavedUri: ((Uri) -> Unit)? = null,
-    sourceExifBytes: ByteArray? = null
+    onSavedUri: ((Uri) -> Unit)? = null
+): Boolean = saveOutputToGalleryWithExif(
+    context = context,
+    rawBytes = rawBytes,
+    processedBitmap = processedBitmap,
+    exifOrientation = exifOrientation,
+    sourceExifBytes = null,
+    onSavedUri = onSavedUri
+)
+
+private fun saveOutputToGalleryWithExif(
+    context: Context,
+    rawBytes: ByteArray?,
+    processedBitmap: Bitmap?,
+    exifOrientation: Int,
+    sourceExifBytes: ByteArray? = null,
+    onSavedUri: ((Uri) -> Unit)? = null
 ): Boolean {
     var tempOut: File? = null
     var uri: Uri? = null
@@ -4751,7 +4766,7 @@ fun CameraScreen(
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
                                 graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
-                                saveOutputToGallery(context, null, graded, orientation, onSaved, sourceExifBytes = bytes)
+                                saveOutputToGalleryWithExif(context, null, graded, orientation, sourceExifBytes = bytes, onSavedUri = onSaved)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                             }

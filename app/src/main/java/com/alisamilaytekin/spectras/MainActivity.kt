@@ -526,9 +526,14 @@ private class CameraHolder {
     @Volatile var currentChannelSwap: Boolean = false
     @Volatile var currentAeLock: Boolean = false
 
-    // Mercek / yakınlaştırma ve RAW/DNG durumu
+    // Mercek / yakınlaştırma, manuel odak ve RAW/DNG durumu
     @Volatile var zoomRange: Range<Float> = Range(1f, 1f)
     @Volatile var currentZoomRatio: Float = 1f
+    @Volatile var supportsManualFocus: Boolean = false
+    @Volatile var minFocusDistance: Float = 0f
+    @Volatile var focusDistanceCalibrated: Boolean = false
+    @Volatile var manualFocusActive: Boolean = false
+    @Volatile var manualFocusDiopters: Float = 0f
     @Volatile var supportsRaw: Boolean = false
     @Volatile var rawSize: Size? = null
     @Volatile var rawCaptureEnabled: Boolean = false
@@ -3349,6 +3354,14 @@ fun CameraScreen(
     val availableResolutions = remember { mutableStateListOf<Size>() }
     var selectedResolution by remember { mutableStateOf<Size?>(null) }
     var cameraDiagSummary by remember { mutableStateOf("") }
+    var supportsManualFocus by remember { mutableStateOf(false) }
+    var minFocusDistance by remember { mutableFloatStateOf(0f) }
+    var focusDistanceCalibrated by remember { mutableStateOf(false) }
+    var manualFocusUiEnabled by remember {
+        mutableStateOf(sharedPrefs.getBoolean("manual_focus_ui_enabled", false))
+    }
+    var manualFocusActive by remember { mutableStateOf(false) }
+    var manualFocusSlider by remember { mutableFloatStateOf(1f) } // 0f = Macro, 1f = Infinity
 
     var isPickerActive by remember { mutableStateOf(false) }
     var isColorPipetteActive by remember { mutableStateOf(false) }
@@ -3595,6 +3608,11 @@ fun CameraScreen(
         holder.currentChannelSwap = channelSwapEnabled
         holder.currentAeLock = aeLockEnabled
         holder.currentZoomRatio = zoomRatio
+        holder.manualFocusActive = manualFocusUiEnabled && supportsManualFocus && manualFocusActive
+        holder.manualFocusDiopters = if (minFocusDistance > 0f) {
+            (minFocusDistance * (1f - manualFocusSlider).coerceIn(0f, 1f).pow(2f))
+                .coerceIn(0f, minFocusDistance)
+        } else 0f
         holder.rawCaptureEnabled = rawEnabled
         holder.flashMode = flashMode
         holder.useFrontCamera = useFrontCamera
@@ -3659,12 +3677,31 @@ fun CameraScreen(
             } catch (_: Exception) {
             }
         }
-        when {
-            holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) -> {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+        if (holder.manualFocusActive && holder.supportsManualFocus && !compatibilityFallback) {
+            try {
+                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                builder.set(
+                    CaptureRequest.LENS_FOCUS_DISTANCE,
+                    holder.manualFocusDiopters.coerceIn(0f, holder.minFocusDistance)
+                )
+            } catch (_: Exception) {
+                when {
+                    holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) -> {
+                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                    }
+                    holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) -> {
+                        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                    }
+                }
             }
-            holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) -> {
-                builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+        } else {
+            when {
+                holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE) -> {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                }
+                holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO) -> {
+                    builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                }
             }
         }
         if (holder.aeCompensationRange.upper > holder.aeCompensationRange.lower) {
@@ -4312,6 +4349,18 @@ fun CameraScreen(
                 chars.get(CameraCharacteristics.TONEMAP_AVAILABLE_TONE_MAP_MODES) ?: intArrayOf()
             holder.availableAfModes =
                 chars.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+            val minFocusDist = chars.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+            val focusCalib = chars.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)
+                ?: CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED
+            val canManualFocus = minFocusDist > 0.01f &&
+                holder.availableAfModes.contains(CaptureRequest.CONTROL_AF_MODE_OFF) &&
+                hwLevel != CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY
+            holder.supportsManualFocus = canManualFocus
+            holder.minFocusDistance = if (canManualFocus) minFocusDist else 0f
+            holder.focusDistanceCalibrated = focusCalib != CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED
+            if (!canManualFocus) {
+                holder.manualFocusActive = false
+            }
             holder.maxTonemapCurvePoints =
                 chars.get(CameraCharacteristics.TONEMAP_MAX_CURVE_POINTS) ?: 33
             val range = chars.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)
@@ -4359,6 +4408,12 @@ fun CameraScreen(
                 aeStep = step
                 availableZoomOptions = zoomOpts
                 supportsRaw = chosenRaw != null
+                supportsManualFocus = canManualFocus
+                minFocusDistance = if (canManualFocus) minFocusDist else 0f
+                focusDistanceCalibrated = holder.focusDistanceCalibrated
+                if (!canManualFocus && manualFocusActive) {
+                    manualFocusActive = false
+                }
                 if (chosenRaw == null && rawEnabled) {
                     rawEnabled = false
                     holder.rawCaptureEnabled = false
@@ -4933,7 +4988,7 @@ fun CameraScreen(
                             CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER,
                             CaptureRequest.CONTROL_AE_PRECAPTURE_TRIGGER_START
                         )
-                        if (holder.availableAfModes.isNotEmpty()) {
+                        if (holder.availableAfModes.isNotEmpty() && !holder.manualFocusActive) {
                             set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
                         }
                     }.build()
@@ -6346,6 +6401,129 @@ fun CameraScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+
+                // 0) MANUEL ODAK ÇUBUĞU (Yalnızca destekleyen cihazda ve Ayarlardan aktif edildiğinde görünür)
+                AnimatedVisibility(
+                    visible = manualFocusUiEnabled && supportsManualFocus && !isPickerActive && !isColorPipetteActive,
+                    enter = fadeIn(tween(150)) + slideInVertically(tween(170)) { it / 3 },
+                    exit = fadeOut(tween(130)) + slideOutVertically(tween(150)) { it / 3 }
+                ) {
+                    val currentDiopters = (minFocusDistance * (1f - manualFocusSlider).coerceIn(0f, 1f).pow(2f))
+                        .coerceIn(0f, minFocusDistance)
+                    val macroShort = stringResource(R.string.focus_macro_short)
+                    val focusBadge = when {
+                        !manualFocusActive -> "AF"
+                        currentDiopters <= 0.05f || manualFocusSlider >= 0.985f -> "∞"
+                        manualFocusSlider <= 0.02f -> macroShort
+                        focusDistanceCalibrated -> {
+                            val meters = 1f / currentDiopters.coerceAtLeast(0.05f)
+                            if (meters >= 1.0f) String.format(appLocale, "%.1fm", meters)
+                            else "${(meters * 100f).roundToInt()}cm"
+                        }
+                        else -> "${(manualFocusSlider * 100f).roundToInt()}%"
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(IrPalette.HudGlass.copy(alpha = deckBgAlpha))
+                            .border(
+                                0.8.dp,
+                                if (manualFocusActive) IrPalette.IrCyan.copy(alpha = 0.55f) else IrPalette.BorderSubtle.copy(alpha = 0.25f),
+                                RoundedCornerShape(14.dp)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (manualFocusActive) IrPalette.IrCyan.copy(alpha = 0.22f)
+                                    else Color.White.copy(alpha = 0.08f)
+                                )
+                                .border(
+                                    0.8.dp,
+                                    if (manualFocusActive) IrPalette.IrCyan else IrPalette.BorderSubtle,
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable(enabled = cameraReady) {
+                                    manualFocusActive = !manualFocusActive
+                                    updatePreviewSettings()
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (manualFocusActive) "MF" else "AF",
+                                color = if (manualFocusActive) IrPalette.IrCyan else IrPalette.TextPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+
+                        Text(
+                            text = macroShort,
+                            color = IrPalette.TextSecondary,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        Slider(
+                            value = manualFocusSlider,
+                            onValueChange = { next ->
+                                manualFocusSlider = next.coerceIn(0f, 1f)
+                                if (!manualFocusActive) {
+                                    manualFocusActive = true
+                                }
+                                updatePreviewSettings()
+                            },
+                            enabled = cameraReady,
+                            valueRange = 0f..1f,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(30.dp),
+                            colors = SliderDefaults.colors(
+                                thumbColor = if (manualFocusActive) IrPalette.IrCyan else IrPalette.TextSecondary,
+                                activeTrackColor = if (manualFocusActive) IrPalette.IrCyan else Color.White.copy(alpha = 0.35f),
+                                inactiveTrackColor = Color.White.copy(alpha = 0.14f)
+                            )
+                        )
+
+                        Text(
+                            text = "∞",
+                            color = IrPalette.TextSecondary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .sizeIn(minWidth = 44.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .clickable(enabled = cameraReady && manualFocusActive) {
+                                    manualFocusActive = false
+                                    updatePreviewSettings()
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = focusBadge,
+                                color = if (manualFocusActive) IrPalette.IrCyan else IrPalette.TextSecondary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                maxLines = 1
+                            )
                         }
                     }
                 }
@@ -7767,6 +7945,8 @@ fun CameraScreen(
                                 .clickable(enabled = cameraReady) {
                                     useFrontCamera = !useFrontCamera
                                     holder.useFrontCamera = useFrontCamera
+                                    manualFocusActive = false
+                                    holder.manualFocusActive = false
                                     holder.selectedResolution = null
                                     holder.previewFallbackLevel = 0
                                     zoomRatio = 1f
@@ -8739,6 +8919,30 @@ fun CameraScreen(
                                     showStatus(if (rawEnabled) strRawOn else strRawOff)
                                     cameraHandler.post { closeCameraInternal(releaseReader = true) }
                                     surfaceGeneration += 1
+                                }
+                            )
+                        }
+                    }
+                    if (supportsManualFocus) {
+                        item(key = "tool_manual_focus") {
+                            SettingsToggleRow(
+                                label = stringResource(R.string.settings_manual_focus),
+                                checked = manualFocusUiEnabled,
+                                accentColor = IrPalette.IrCyan,
+                                onToggle = {
+                                    manualFocusUiEnabled = !manualFocusUiEnabled
+                                    sharedPrefs.edit { putBoolean("manual_focus_ui_enabled", manualFocusUiEnabled) }
+                                    if (!manualFocusUiEnabled && manualFocusActive) {
+                                        manualFocusActive = false
+                                        holder.manualFocusActive = false
+                                        updatePreviewSettings()
+                                    }
+                                    showStatus(
+                                        context.getString(
+                                            if (manualFocusUiEnabled) R.string.status_manual_focus_on
+                                            else R.string.status_manual_focus_off
+                                        )
+                                    )
                                 }
                             )
                         }

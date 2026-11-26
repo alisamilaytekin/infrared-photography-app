@@ -252,6 +252,10 @@
     <string name="settings_level">Su Terazisi</string>
     <string name="settings_timer">Zamanlayıcı</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Manuel Odak Kontrolü (MF)</string>
+    <string name="status_manual_focus_on">Manuel odak çubuğu açıldı</string>
+    <string name="status_manual_focus_off">Manuel odak gizlendi (Otomatik Odak)</string>
+    <string name="focus_macro_short">Makro</string>
     <string name="settings_resolution">Fotoğraf Çözünürlüğü</string>
     <string name="status_exp_mode_changed">Mod: %1$s</string>
 

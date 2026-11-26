@@ -252,6 +252,10 @@
     <string name="settings_level">Horizon Level</string>
     <string name="settings_timer">Self-Timer</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Manual Focus Control (MF)</string>
+    <string name="status_manual_focus_on">Manual focus control enabled</string>
+    <string name="status_manual_focus_off">Manual focus hidden (Auto Focus)</string>
+    <string name="focus_macro_short">Macro</string>
     <string name="settings_resolution">Photo Resolution</string>
     <string name="status_exp_mode_changed">Mode: %1$s</string>
 

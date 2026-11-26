@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.alisamilaytekin.spectras"
-        minSdk = 21
+        minSdk = 24
         targetSdk = 36
         versionCode = explicitVersionCode ?: (200 + ciRunNumber)
         versionName = "5.0.$ciRunNumber"

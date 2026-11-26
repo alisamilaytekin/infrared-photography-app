@@ -501,6 +501,7 @@ private class CameraHolder {
     @Volatile var hasRealHardwareGains: Boolean = false
     @Volatile var lastAwbState: Int = CaptureResult.CONTROL_AWB_STATE_INACTIVE
     @Volatile var lastAutoColorTransform: ColorSpaceTransform? = null
+    @Volatile var hasRealAutoTransform: Boolean = false
     @Volatile var lastNativeTonemapCurve: TonemapCurve? = null
     @Volatile var lastTelemetryUpdateMs: Long = 0L
     @Volatile var supportedTonemapModes: IntArray = intArrayOf()
@@ -3304,7 +3305,8 @@ fun CameraScreen(
     val currentIsStudioMode by rememberUpdatedState(isStudioMode)
     var studioPhotoUri by remember { mutableStateOf<Uri?>(incomingEditUri) }
     var studioPhotoNonce by remember { mutableIntStateOf(incomingEditNonce) }
-    var isAutoMode by remember { mutableStateOf(experienceMode != ExperienceMode.IR_LAB) }
+    var isAutoMode by remember { mutableStateOf(true) }
+    var pendingIrLabAutoSeed by remember { mutableStateOf(experienceMode == ExperienceMode.IR_LAB) }
     var useFrontCamera by remember { mutableStateOf(false) }
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(FlashMode.OFF) }
@@ -3921,7 +3923,12 @@ fun CameraScreen(
                         }
                     }
                 }
-                if (holder.currentAutoMode || holder.lastAutoColorTransform == null) {
+                if (holder.currentAutoMode) {
+                    result[CaptureResult.COLOR_CORRECTION_TRANSFORM]?.let { transform ->
+                        holder.lastAutoColorTransform = transform
+                        holder.hasRealAutoTransform = true
+                    }
+                } else if (holder.lastAutoColorTransform == null) {
                     result[CaptureResult.COLOR_CORRECTION_TRANSFORM]?.let { transform ->
                         holder.lastAutoColorTransform = transform
                     }
@@ -5185,6 +5192,41 @@ fun CameraScreen(
         }
     }
 
+    LaunchedEffect(cameraReady, pendingIrLabAutoSeed, isStudioMode, experienceMode) {
+        if (!pendingIrLabAutoSeed || isStudioMode || !cameraReady || experienceMode != ExperienceMode.IR_LAB) {
+            return@LaunchedEffect
+        }
+        val startMs = System.currentTimeMillis()
+        while (pendingIrLabAutoSeed && experienceMode == ExperienceMode.IR_LAB && !currentIsStudioMode && cameraReady) {
+            if (!isAutoMode) {
+                pendingIrLabAutoSeed = false
+                return@LaunchedEffect
+            }
+            val elapsed = System.currentTimeMillis() - startMs
+            val awbSettled = holder.lastAwbState == CaptureResult.CONTROL_AWB_STATE_CONVERGED ||
+                holder.lastAwbState == CaptureResult.CONTROL_AWB_STATE_LOCKED
+            val readyWithRealWb = holder.hasRealHardwareGains &&
+                holder.hasRealAutoTransform &&
+                (awbSettled || elapsed >= 450L)
+            if (readyWithRealWb || elapsed >= 1200L) {
+                if (holder.hasRealHardwareGains) {
+                    val (seedK, seedT) = gainsToKelvinTint(holder.lastHardwareGains)
+                    val clampedK = seedK.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                    val clampedT = seedT.coerceIn(-100f, 100f)
+                    liveAutoKelvin = clampedK
+                    liveAutoTint = clampedT
+                    kelvinValue = clampedK
+                    tintValue = clampedT
+                }
+                pendingIrLabAutoSeed = false
+                isAutoMode = false
+                updatePreviewSettings()
+                return@LaunchedEffect
+            }
+            delay(65)
+        }
+    }
+
     LaunchedEffect(cameraReady, isStudioMode, meteringMode, exposureBoxNorm, exposureBoxSizeNorm, surfaceGeneration) {
         while (cameraReady && !isStudioMode) {
             if (!holder.isTakingPhoto) {
@@ -5360,6 +5402,7 @@ fun CameraScreen(
         isDeckCollapsed = false
         when (newMode) {
             ExperienceMode.AESTHETIC -> {
+                pendingIrLabAutoSeed = false
                 showZebra = false
                 aeLockEnabled = false
                 applyAestheticPreset(selectedAestheticPreset, aestheticFilterStrength)
@@ -5367,9 +5410,6 @@ fun CameraScreen(
             ExperienceMode.IR_LAB -> {
                 // Kızılötesi modu kırmızı Aerochrome filtresiyle değil normal renklerle ve
                 // kompakt White Balance · Exposure · Color · Metering sekme şeridi küçültülmüş şekilde başlar.
-                isAutoMode = false
-                kelvinValue = liveAutoKelvin.coerceIn(KELVIN_MIN, KELVIN_MAX)
-                tintValue = liveAutoTint.coerceIn(-100f, 100f)
                 contrastValue = DEFAULT_CONTRAST
                 saturationValue = DEFAULT_SATURATION
                 channelSwapEnabled = false
@@ -5378,9 +5418,24 @@ fun CameraScreen(
                 activeLookGrade = LookGradeParams()
                 activeTab = ControlTab.BD
                 isDeckCollapsed = true
+                if (holder.hasRealHardwareGains && holder.hasRealAutoTransform) {
+                    val (seedK, seedT) = gainsToKelvinTint(holder.lastHardwareGains)
+                    val clampedK = seedK.coerceIn(KELVIN_MIN, KELVIN_MAX)
+                    val clampedT = seedT.coerceIn(-100f, 100f)
+                    liveAutoKelvin = clampedK
+                    liveAutoTint = clampedT
+                    kelvinValue = clampedK
+                    tintValue = clampedT
+                    pendingIrLabAutoSeed = false
+                    isAutoMode = false
+                } else {
+                    isAutoMode = true
+                    pendingIrLabAutoSeed = true
+                }
                 updatePreviewSettings()
             }
             ExperienceMode.PRO -> {
+                pendingIrLabAutoSeed = false
                 activeLookGrade = LookGradeParams()
                 updatePreviewSettings()
             }
@@ -7964,6 +8019,14 @@ fun CameraScreen(
                                 .clickable(enabled = cameraReady) {
                                     useFrontCamera = !useFrontCamera
                                     holder.useFrontCamera = useFrontCamera
+                                    holder.hasRealAutoTransform = false
+                                    holder.lastAutoColorTransform = null
+                                    holder.hasRealHardwareGains = false
+                                    holder.lastAwbState = CaptureResult.CONTROL_AWB_STATE_INACTIVE
+                                    if (experienceMode == ExperienceMode.IR_LAB && !isAutoMode) {
+                                        isAutoMode = true
+                                        pendingIrLabAutoSeed = true
+                                    }
                                     manualFocusActive = false
                                     holder.manualFocusActive = false
                                     holder.selectedResolution = null

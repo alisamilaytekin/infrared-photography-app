@@ -252,6 +252,10 @@
     <string name="settings_level">수평계</string>
     <string name="settings_timer">셀프 타이머</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">수동 초점 제어 (MF)</string>
+    <string name="status_manual_focus_on">수동 초점 활성화됨</string>
+    <string name="status_manual_focus_off">수동 초점 숨김 (자동 초점)</string>
+    <string name="focus_macro_short">접사</string>
     <string name="settings_resolution">사진 해상도</string>
     <string name="status_exp_mode_changed">모드: %1$s</string>
 

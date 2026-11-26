@@ -252,6 +252,10 @@
     <string name="settings_level">ميزان الأفق</string>
     <string name="settings_timer">المؤقت الذاتي</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">التحكم اليدوي في التركيز (MF)</string>
+    <string name="status_manual_focus_on">تم تفعيل التركيز اليدوي</string>
+    <string name="status_manual_focus_off">تم إخفاء التركيز اليدوي (تلقائي)</string>
+    <string name="focus_macro_short">ماكرو</string>
     <string name="settings_resolution">دقة الصورة</string>
     <string name="status_exp_mode_changed">الوضع: %1$s</string>
 

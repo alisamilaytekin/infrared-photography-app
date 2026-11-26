@@ -252,6 +252,10 @@
     <string name="settings_level">Уровень Горизонта</string>
     <string name="settings_timer">Таймер</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Ручной фокус (MF)</string>
+    <string name="status_manual_focus_on">Ручной фокус включён</string>
+    <string name="status_manual_focus_off">Ручной фокус скрыт (Автофокус)</string>
+    <string name="focus_macro_short">Макро</string>
     <string name="settings_resolution">Разрешение Фото</string>
     <string name="status_exp_mode_changed">Режим: %1$s</string>
 

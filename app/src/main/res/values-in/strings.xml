@@ -252,6 +252,10 @@
     <string name="settings_level">Level Cakrawala</string>
     <string name="settings_timer">Timer</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Kontrol Fokus Manual (MF)</string>
+    <string name="status_manual_focus_on">Fokus manual diaktifkan</string>
+    <string name="status_manual_focus_off">Fokus manual disembunyikan (Fokus Otomatis)</string>
+    <string name="focus_macro_short">Makro</string>
     <string name="settings_resolution">Resolusi Foto</string>
     <string name="status_exp_mode_changed">Mode: %1$s</string>
 

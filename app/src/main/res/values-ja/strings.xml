@@ -252,6 +252,10 @@
     <string name="settings_level">水準器</string>
     <string name="settings_timer">セルフタイマー</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">マニュアルフォーカス (MF)</string>
+    <string name="status_manual_focus_on">マニュアルフォーカスを有効にしました</string>
+    <string name="status_manual_focus_off">マニュアルフォーカスを非表示 (AF)</string>
+    <string name="focus_macro_short">マクロ</string>
     <string name="settings_resolution">写真解像度</string>
     <string name="status_exp_mode_changed">モード: %1$s</string>
 

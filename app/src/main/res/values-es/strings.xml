@@ -252,6 +252,10 @@
     <string name="settings_level">Nivel de Horizonte</string>
     <string name="settings_timer">Temporizador</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Control de enfoque manual (MF)</string>
+    <string name="status_manual_focus_on">Enfoque manual activado</string>
+    <string name="status_manual_focus_off">Enfoque manual oculto (Autoenfoque)</string>
+    <string name="focus_macro_short">Macro</string>
     <string name="settings_resolution">Resolución de Foto</string>
     <string name="status_exp_mode_changed">Modo: %1$s</string>
 

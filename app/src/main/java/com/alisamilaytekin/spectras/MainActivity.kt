@@ -2927,30 +2927,29 @@ private fun jpegDegreesToExifOrientation(degrees: Int): Int {
     }
 }
 
-@Suppress("DEPRECATION")
 private val PRESERVED_EXIF_TAGS = arrayOf(
-    ExifInterface.TAG_MAKE,
-    ExifInterface.TAG_MODEL,
-    ExifInterface.TAG_DATETIME,
-    ExifInterface.TAG_DATETIME_ORIGINAL,
-    ExifInterface.TAG_DATETIME_DIGITIZED,
-    ExifInterface.TAG_EXPOSURE_TIME,
-    ExifInterface.TAG_F_NUMBER,
-    ExifInterface.TAG_ISO_SPEED_RATINGS,
-    ExifInterface.TAG_FOCAL_LENGTH,
-    ExifInterface.TAG_WHITE_BALANCE,
-    ExifInterface.TAG_FLASH,
-    ExifInterface.TAG_APERTURE_VALUE,
-    ExifInterface.TAG_SHUTTER_SPEED_VALUE,
-    ExifInterface.TAG_EXPOSURE_BIAS_VALUE,
-    ExifInterface.TAG_GPS_LATITUDE,
-    ExifInterface.TAG_GPS_LATITUDE_REF,
-    ExifInterface.TAG_GPS_LONGITUDE,
-    ExifInterface.TAG_GPS_LONGITUDE_REF,
-    ExifInterface.TAG_GPS_ALTITUDE,
-    ExifInterface.TAG_GPS_ALTITUDE_REF,
-    ExifInterface.TAG_GPS_TIMESTAMP,
-    ExifInterface.TAG_GPS_DATESTAMP
+    "Make",
+    "Model",
+    "DateTime",
+    "DateTimeOriginal",
+    "DateTimeDigitized",
+    "ExposureTime",
+    "FNumber",
+    "ISOSpeedRatings",
+    "FocalLength",
+    "WhiteBalance",
+    "Flash",
+    "ApertureValue",
+    "ShutterSpeedValue",
+    "ExposureBiasValue",
+    "GPSLatitude",
+    "GPSLatitudeRef",
+    "GPSLongitude",
+    "GPSLongitudeRef",
+    "GPSAltitude",
+    "GPSAltitudeRef",
+    "GPSTimeStamp",
+    "GPSDateStamp"
 )
 
 private fun writeExifToFile(

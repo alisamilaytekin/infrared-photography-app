@@ -252,6 +252,10 @@
     <string name="settings_level">Niveau d’Horizon</string>
     <string name="settings_timer">Retardateur</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Mise au point manuelle (MF)</string>
+    <string name="status_manual_focus_on">Mise au point manuelle activée</string>
+    <string name="status_manual_focus_off">Mise au point manuelle masquée (AF)</string>
+    <string name="focus_macro_short">Macro</string>
     <string name="settings_resolution">Résolution Photo</string>
     <string name="status_exp_mode_changed">Mode : %1$s</string>
 

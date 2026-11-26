@@ -252,6 +252,10 @@
     <string name="settings_level">Wasserwaage</string>
     <string name="settings_timer">Selbstauslöser</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">Manueller Fokus (MF)</string>
+    <string name="status_manual_focus_on">Manueller Fokus aktiviert</string>
+    <string name="status_manual_focus_off">Manueller Fokus ausgeblendet (Autofokus)</string>
+    <string name="focus_macro_short">Makro</string>
     <string name="settings_resolution">Fotoauflösung</string>
     <string name="status_exp_mode_changed">Modus: %1$s</string>
 

@@ -252,6 +252,10 @@
     <string name="settings_level">होराइज़न लेवल</string>
     <string name="settings_timer">सेल्फ़-टाइमर</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">मैन्युअल फ़ोकस नियंत्रण (MF)</string>
+    <string name="status_manual_focus_on">मैन्युअल फ़ोकस चालू</string>
+    <string name="status_manual_focus_off">मैन्युअल फ़ोकस बंद (ऑटो फ़ोकस)</string>
+    <string name="focus_macro_short">मैक्रो</string>
     <string name="settings_resolution">फ़ोटो रेज़ोल्यूशन</string>
     <string name="status_exp_mode_changed">मोड: %1$s</string>
 

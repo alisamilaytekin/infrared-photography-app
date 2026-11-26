@@ -252,6 +252,10 @@
     <string name="settings_level">水平仪</string>
     <string name="settings_timer">定时拍摄</string>
     <string name="settings_raw">RAW (DNG) + JPEG</string>
+    <string name="settings_manual_focus">手动对焦控制 (MF)</string>
+    <string name="status_manual_focus_on">已启用手动对焦</string>
+    <string name="status_manual_focus_off">已隐藏手动对焦（自动对焦）</string>
+    <string name="focus_macro_short">微距</string>
     <string name="settings_resolution">照片分辨率</string>
     <string name="status_exp_mode_changed">模式：%1$s</string>
 

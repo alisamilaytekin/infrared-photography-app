@@ -3005,24 +3005,26 @@ internal fun saveOutputToGallery(
                 put(MediaStore.Images.Media.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+            val targetUri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
                 ?: return false
+            uri = targetUri
 
             if (processedBitmap != null) {
-                tempOut = File.createTempFile("spectras_out_", ".jpg", context.cacheDir)
-                FileOutputStream(tempOut).use { fos ->
+                val outTemp = File.createTempFile("spectras_out_", ".jpg", context.cacheDir)
+                tempOut = outTemp
+                FileOutputStream(outTemp).use { fos ->
                     processedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, fos)
                     fos.flush()
                 }
-                writeExifToFile(tempOut, exifOrientation, sourceExifBytes)
-                val outStream = resolver.openOutputStream(uri)
+                writeExifToFile(outTemp, exifOrientation, sourceExifBytes)
+                val outStream = resolver.openOutputStream(targetUri)
                     ?: throw IllegalStateException("openOutputStream returned null")
                 outStream.use { out ->
-                    FileInputStream(tempOut).use { inp -> inp.copyTo(out) }
+                    FileInputStream(outTemp).use { inp -> inp.copyTo(out) }
                     out.flush()
                 }
             } else if (rawBytes != null) {
-                val outStream = resolver.openOutputStream(uri)
+                val outStream = resolver.openOutputStream(targetUri)
                     ?: throw IllegalStateException("openOutputStream returned null")
                 outStream.use { out ->
                     out.write(rawBytes)
@@ -3033,8 +3035,8 @@ internal fun saveOutputToGallery(
             }
 
             val done = ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }
-            resolver.update(uri, done, null, null)
-            onSavedUri?.invoke(uri)
+            resolver.update(targetUri, done, null, null)
+            onSavedUri?.invoke(targetUri)
             true
         } else {
             // Android 5–9 (API 21–28): DCIM/SpectraS klasörüne doğrudan yazıp MediaScanner ile galeriye anında kaydet
@@ -4209,13 +4211,16 @@ fun CameraScreen(
             val matchingIds = cameraIdList.filter { id ->
                 try {
                     val c = cameraManager.getCameraCharacteristics(id)
-                    if (c.get(CameraCharacteristics.LENS_FACING) != desiredFacing) return@filter false
-                    val cCaps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
-                    val backwardCompatible = cCaps == null || cCaps.contains(
-                        CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE
-                    )
-                    val cMap = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    backwardCompatible && cMap != null && collectJpegOutputSizes(cMap).isNotEmpty()
+                    if (c.get(CameraCharacteristics.LENS_FACING) != desiredFacing) {
+                        false
+                    } else {
+                        val cCaps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)
+                        val backwardCompatible = cCaps == null || cCaps.contains(
+                            CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE
+                        )
+                        val cMap = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                        backwardCompatible && cMap != null && collectJpegOutputSizes(cMap).isNotEmpty()
+                    }
                 } catch (_: Exception) {
                     false
                 }
@@ -4291,10 +4296,10 @@ fun CameraScreen(
             val hwLevel = chars.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL)
                 ?: CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED
             holder.hardwareLevel = hwLevel
-            val fpsRanges = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES) ?: emptyArray()
+            val fpsRanges: Array<Range<Int>>? = chars.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
             holder.preferredFpsRange = fpsRanges
-                .filter { it.upper == 30 && it.lower in 5..24 }
-                .minByOrNull { it.lower }
+                ?.filter { r -> r.upper == 30 && r.lower in 5..24 }
+                ?.minByOrNull { r -> r.lower }
             val hwLabel = when (hwLevel) {
                 CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_3 -> "LEVEL_3"
                 CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL_FULL -> "FULL"

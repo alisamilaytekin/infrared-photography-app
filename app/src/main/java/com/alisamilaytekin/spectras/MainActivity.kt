@@ -44,6 +44,7 @@ import android.os.HandlerThread
 import android.os.Looper
 import android.provider.MediaStore
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import android.util.Range
 import android.util.Rational
@@ -471,6 +472,97 @@ internal enum class HistogramDisplayMode(val prefKey: String) {
     companion object {
         fun fromKey(key: String?): HistogramDisplayMode =
             entries.firstOrNull { it.prefKey == key } ?: RGB_NORMAL
+    }
+}
+
+internal enum class GridGuideMode(val prefKey: String, val badgeLabel: String) {
+    OFF("off", "Off"),
+    THIRDS("thirds", "3×3"),
+    GOLDEN("golden", "Phi"),
+    DIAGONAL("diagonal", "Diag"),
+    CINEMA_239("cinema", "2.39:1");
+
+    fun next(): GridGuideMode = when (this) {
+        OFF -> THIRDS
+        THIRDS -> GOLDEN
+        GOLDEN -> DIAGONAL
+        DIAGONAL -> CINEMA_239
+        CINEMA_239 -> OFF
+    }
+
+    companion object {
+        fun fromKey(key: String?): GridGuideMode =
+            entries.firstOrNull { it.prefKey == key } ?: OFF
+    }
+}
+
+private fun encodePresetShareCode(preset: CameraPreset): String {
+    val obj = JSONObject().apply {
+        put("n", preset.name)
+        put("k", preset.kelvin.toDouble())
+        put("t", preset.tint.toDouble())
+        put("c", preset.contrast.toDouble())
+        put("s", preset.saturation.toDouble())
+        put("sw", preset.channelSwap)
+        if (preset.colorBands.hasAnyModification) {
+            val arr = JSONArray()
+            preset.colorBands.bands.forEach { b ->
+                arr.put(JSONObject().apply {
+                    put("h", b.deltaHue.toDouble())
+                    put("s", b.deltaSat.toDouble())
+                    put("l", b.deltaLum.toDouble())
+                })
+            }
+            put("b", arr)
+        }
+    }
+    val b64 = Base64.encodeToString(obj.toString().toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+    return "SPECTRAS1:$b64"
+}
+
+private fun decodePresetShareCode(raw: String): CameraPreset? {
+    return try {
+        val trimmed = raw.trim()
+        val jsonStr = if (trimmed.startsWith("SPECTRAS1:", ignoreCase = true)) {
+            String(Base64.decode(trimmed.substring(10).trim(), Base64.DEFAULT), Charsets.UTF_8)
+        } else if (trimmed.startsWith("{")) {
+            trimmed
+        } else {
+            return null
+        }
+        val obj = JSONObject(jsonStr)
+        val name = (obj.optString("n").ifBlank { obj.optString("name") }).trim().ifBlank { "Imported" }.take(24)
+        val kelvin = (if (obj.has("k")) obj.optDouble("k", 5500.0) else obj.optDouble("kelvin", 5500.0)).toFloat().coerceIn(KELVIN_MIN, KELVIN_MAX)
+        val tint = (if (obj.has("t")) obj.optDouble("t", 0.0) else obj.optDouble("tint", 0.0)).toFloat().coerceIn(-100f, 100f)
+        val contrast = (if (obj.has("c")) obj.optDouble("c", DEFAULT_CONTRAST.toDouble()) else obj.optDouble("contrast", DEFAULT_CONTRAST.toDouble())).toFloat().coerceIn(0.6f, 2.0f)
+        val sat = (if (obj.has("s")) obj.optDouble("s", DEFAULT_SATURATION.toDouble()) else obj.optDouble("saturation", DEFAULT_SATURATION.toDouble())).toFloat().coerceIn(0f, 2.2f)
+        val swap = if (obj.has("sw")) obj.optBoolean("sw", false) else obj.optBoolean("channelSwap", false)
+        val bandsArr = obj.optJSONArray("b") ?: obj.optJSONArray("colorBands")
+        val bands = if (bandsArr != null && bandsArr.length() == 12) {
+            ColorBandsConfig(
+                List(12) { idx ->
+                    val bObj = bandsArr.optJSONObject(idx)
+                    BandHslAdjustment(
+                        deltaHue = (bObj?.optDouble("h", 0.0) ?: 0.0).toFloat().coerceIn(-180f, 180f),
+                        deltaSat = (bObj?.optDouble("s", 0.0) ?: 0.0).toFloat().coerceIn(-1f, 1f),
+                        deltaLum = (bObj?.optDouble("l", 0.0) ?: 0.0).toFloat().coerceIn(-1f, 1f)
+                    )
+                }
+            )
+        } else {
+            ColorBandsConfig()
+        }
+        CameraPreset(
+            name = name,
+            kelvin = kelvin,
+            tint = tint,
+            contrast = contrast,
+            saturation = sat,
+            channelSwap = swap,
+            colorBands = bands
+        )
+    } catch (_: Throwable) {
+        null
     }
 }
 
@@ -2272,6 +2364,7 @@ private const val HSL_SKSL = """
     uniform vec4 uBandLumA;
     uniform vec4 uBandLumB;
     uniform vec4 uBandLumC;
+    uniform float uFocusPeaking;
 
     vec3 rgb2hsl(vec3 c) {
         float cMin = min(min(c.r, c.g), c.b);
@@ -2493,6 +2586,17 @@ private const val HSL_SKSL = """
             rgb = mix(rgb, vec3(mono), clamp(uMonoMix, 0.0, 1.0));
         }
 
+        // G) Live Viewfinder Focus Peaking (manual focus sharpness highlight, never baked into JPEG)
+        if (uFocusPeaking > 0.5) {
+            float lN = dot(uContent.eval(fragCoord + vec2(0.0, -2.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lS = dot(uContent.eval(fragCoord + vec2(0.0,  2.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lW = dot(uContent.eval(fragCoord + vec2(-2.0, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+            float lE = dot(uContent.eval(fragCoord + vec2( 2.0, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+            float edgeMag = abs(lN - lS) + abs(lW - lE);
+            float peakMask = smoothstep(0.16, 0.34, edgeMag);
+            rgb = mix(rgb, vec3(0.22, 0.88, 1.0), peakMask * 0.88);
+        }
+
         return vec4(clamp(rgb, 0.0, 1.0), color.a);
     }
 """
@@ -2504,15 +2608,17 @@ private fun updateTextureViewShader(
     channelSwap: Boolean = false,
     lookGrade: LookGradeParams = LookGradeParams(),
     bypass: Boolean = false,
-    preTiramisuGlRenderer: PreTiramisuGlPreviewRenderer? = null
+    preTiramisuGlRenderer: PreTiramisuGlPreviewRenderer? = null,
+    focusPeaking: Boolean = false
 ) {
     if (view == null) return
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         try {
-            val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
-            val hasBands = colorBands.hasAnyModification
-            val hasLook = lookGrade.isActive
-            if (bypass || (!hasLook && !channelSwap && !hasPoint && !hasBands)) {
+            val hasPoint = !bypass && config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
+            val hasBands = !bypass && colorBands.hasAnyModification
+            val hasLook = !bypass && lookGrade.isActive
+            val activeSwap = !bypass && channelSwap
+            if (!hasLook && !activeSwap && !hasPoint && !hasBands && !focusPeaking) {
                 view.setRenderEffect(null)
                 return
             }
@@ -2541,7 +2647,7 @@ private fun updateTextureViewShader(
             shader.setFloatUniform("uMonoMix", if (hasLook) lookGrade.monochromeMix else 0.0f)
             shader.setFloatUniform("uBwWeights", lookGrade.bwWeightR, lookGrade.bwWeightG, lookGrade.bwWeightB)
 
-            shader.setFloatUniform("uChannelSwap", if (channelSwap) 1.0f else 0.0f)
+            shader.setFloatUniform("uChannelSwap", if (activeSwap) 1.0f else 0.0f)
             shader.setFloatUniform("uTargetHue", config.targetHue)
             shader.setFloatUniform("uHueWidth", config.hueWidth)
             shader.setFloatUniform("uHueFeather", config.hueFeather)
@@ -2561,6 +2667,7 @@ private fun updateTextureViewShader(
             shader.setFloatUniform("uBandLumA", bd(0).deltaLum, bd(1).deltaLum, bd(2).deltaLum, bd(3).deltaLum)
             shader.setFloatUniform("uBandLumB", bd(4).deltaLum, bd(5).deltaLum, bd(6).deltaLum, bd(7).deltaLum)
             shader.setFloatUniform("uBandLumC", bd(8).deltaLum, bd(9).deltaLum, bd(10).deltaLum, bd(11).deltaLum)
+            shader.setFloatUniform("uFocusPeaking", if (focusPeaking) 1.0f else 0.0f)
             val effect = RenderEffect.createRuntimeShaderEffect(shader, "uContent")
             view.setRenderEffect(effect)
         } catch (e: Throwable) {
@@ -2572,7 +2679,8 @@ private fun updateTextureViewShader(
             colorBands = colorBands,
             channelSwap = channelSwap,
             lookGrade = lookGrade,
-            bypass = bypass
+            bypass = bypass,
+            focusPeaking = focusPeaking
         )
     }
 }
@@ -3468,7 +3576,10 @@ fun CameraScreen(
     var colorBandsConfig by remember { mutableStateOf(ColorBandsConfig()) }
     var isDeckCollapsed by remember { mutableStateOf(experienceMode == ExperienceMode.IR_LAB) }
     var isAnySliderDragging by remember { mutableStateOf(false) }
-    var showGrid by remember { mutableStateOf(false) }
+    var gridGuideMode by remember {
+        mutableStateOf(GridGuideMode.fromKey(sharedPrefs.getString("grid_guide_mode", null)))
+    }
+    var focusPeakingEnabled by remember { mutableStateOf(true) }
     var showSaveDialog by remember { mutableStateOf(false) }
     var showPresetsListDialog by remember { mutableStateOf(false) }
     var showResolutionDialog by remember { mutableStateOf(false) }
@@ -3619,7 +3730,11 @@ fun CameraScreen(
         experienceMode,
         isAutoMode,
         isComparingAuto,
-        textureViewInstance
+        textureViewInstance,
+        manualFocusUiEnabled,
+        supportsManualFocus,
+        manualFocusActive,
+        focusPeakingEnabled
     ) {
         holder.currentTargetedColor = targetedColorConfig
         holder.currentColorBands = colorBandsConfig
@@ -3628,6 +3743,7 @@ fun CameraScreen(
         holder.currentExperienceMode = experienceMode
         val applyShaderInAuto = (experienceMode == ExperienceMode.AESTHETIC) || activeLookGrade.isActive
         val bypassShader = isComparingAuto || (isAutoMode && !applyShaderInAuto)
+        val livePeaking = manualFocusUiEnabled && supportsManualFocus && manualFocusActive && focusPeakingEnabled
         updateTextureViewShader(
             view = textureViewInstance,
             config = targetedColorConfig,
@@ -3635,7 +3751,8 @@ fun CameraScreen(
             channelSwap = channelSwapEnabled,
             lookGrade = activeLookGrade,
             bypass = bypassShader,
-            preTiramisuGlRenderer = preTiramisuGlRenderer
+            preTiramisuGlRenderer = preTiramisuGlRenderer,
+            focusPeaking = livePeaking
         )
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU && (preTiramisuGlRenderer == null || preTiramisuGlRenderer.isFailed) && !shownPreTiramisuHslNotice && (!isAutoMode || applyShaderInAuto)) {
             val hasGrading = activeLookGrade.isActive || channelSwapEnabled || colorBandsConfig.hasAnyModification ||
@@ -5778,10 +5895,15 @@ fun CameraScreen(
 
                 if (experienceMode == ExperienceMode.AESTHETIC) {
                     TopIconButton(
-                        active = showGrid,
+                        active = gridGuideMode != GridGuideMode.OFF,
                         accentColor = IrPalette.IrMagenta,
                         contentDesc = strGridCd,
-                        onClick = { showGrid = !showGrid }
+                        onClick = {
+                            val next = gridGuideMode.next()
+                            gridGuideMode = next
+                            sharedPrefs.edit { putString("grid_guide_mode", next.prefKey) }
+                            showStatus("${context.getString(R.string.settings_grid)}: ${next.badgeLabel}")
+                        }
                     ) { tint ->
                         GridIcon(tint = tint, modifier = Modifier.size(13.dp))
                     }
@@ -6070,17 +6192,59 @@ fun CameraScreen(
                     )
                 }
 
-                // Izgara, zebra, su terazisi, ölçüm kutusu ve seçici işareti
+                // Izgara / kompozisyon kılavuzu, zebra, su terazisi, ölçüm kutusu ve seçici işareti
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    if (showGrid) {
-                        val gridColor = Color.White.copy(alpha = 0.24f)
-                        val stroke = 1.dp.toPx()
-                        val thirdW = size.width / 3f
-                        val thirdH = size.height / 3f
-                        drawLine(gridColor, Offset(thirdW, 0f), Offset(thirdW, size.height), strokeWidth = stroke)
-                        drawLine(gridColor, Offset(thirdW * 2f, 0f), Offset(thirdW * 2f, size.height), strokeWidth = stroke)
-                        drawLine(gridColor, Offset(0f, thirdH), Offset(size.width, thirdH), strokeWidth = stroke)
-                        drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
+                    val gridColor = Color.White.copy(alpha = 0.24f)
+                    val stroke = 1.dp.toPx()
+                    when (gridGuideMode) {
+                        GridGuideMode.OFF -> Unit
+                        GridGuideMode.THIRDS -> {
+                            val thirdW = size.width / 3f
+                            val thirdH = size.height / 3f
+                            drawLine(gridColor, Offset(thirdW, 0f), Offset(thirdW, size.height), strokeWidth = stroke)
+                            drawLine(gridColor, Offset(thirdW * 2f, 0f), Offset(thirdW * 2f, size.height), strokeWidth = stroke)
+                            drawLine(gridColor, Offset(0f, thirdH), Offset(size.width, thirdH), strokeWidth = stroke)
+                            drawLine(gridColor, Offset(0f, thirdH * 2f), Offset(size.width, thirdH * 2f), strokeWidth = stroke)
+                        }
+                        GridGuideMode.GOLDEN -> {
+                            // Altın Oran (Phi Grid: 0.382 / 0.618)
+                            val x1 = size.width * 0.381966f
+                            val x2 = size.width * 0.618034f
+                            val y1 = size.height * 0.381966f
+                            val y2 = size.height * 0.618034f
+                            val phiColor = IrPalette.IrAmber.copy(alpha = 0.34f)
+                            drawLine(phiColor, Offset(x1, 0f), Offset(x1, size.height), strokeWidth = stroke)
+                            drawLine(phiColor, Offset(x2, 0f), Offset(x2, size.height), strokeWidth = stroke)
+                            drawLine(phiColor, Offset(0f, y1), Offset(size.width, y1), strokeWidth = stroke)
+                            drawLine(phiColor, Offset(0f, y2), Offset(size.width, y2), strokeWidth = stroke)
+                        }
+                        GridGuideMode.DIAGONAL -> {
+                            val diagColor = Color.White.copy(alpha = 0.22f)
+                            drawLine(diagColor, Offset(0f, 0f), Offset(size.width, size.height), strokeWidth = stroke)
+                            drawLine(diagColor, Offset(size.width, 0f), Offset(0f, size.height), strokeWidth = stroke)
+                            val cx = size.width * 0.5f
+                            val cy = size.height * 0.5f
+                            val arm = 12.dp.toPx()
+                            drawLine(Color.White.copy(alpha = 0.48f), Offset(cx - arm, cy), Offset(cx + arm, cy), strokeWidth = 1.2.dp.toPx())
+                            drawLine(Color.White.copy(alpha = 0.48f), Offset(cx, cy - arm), Offset(cx, cy + arm), strokeWidth = 1.2.dp.toPx())
+                        }
+                        GridGuideMode.CINEMA_239 -> {
+                            // Sinematik 2.39:1 anamorfik çerçeve maskesi (dikey vizörde yatay sinema bandı)
+                            val targetH = (size.width / 2.39f).coerceAtMost(size.height * 0.9f)
+                            val barH = ((size.height - targetH) * 0.5f).coerceAtLeast(0f)
+                            val maskColor = Color.Black.copy(alpha = 0.50f)
+                            if (barH > 1f) {
+                                drawRect(maskColor, topLeft = Offset.Zero, size = androidx.compose.ui.geometry.Size(size.width, barH))
+                                drawRect(maskColor, topLeft = Offset(0f, size.height - barH), size = androidx.compose.ui.geometry.Size(size.width, barH))
+                                drawLine(Color.White.copy(alpha = 0.35f), Offset(0f, barH), Offset(size.width, barH), strokeWidth = 0.9.dp.toPx())
+                                drawLine(Color.White.copy(alpha = 0.35f), Offset(0f, size.height - barH), Offset(size.width, size.height - barH), strokeWidth = 0.9.dp.toPx())
+                            }
+                            val cx = size.width * 0.5f
+                            val cy = size.height * 0.5f
+                            val arm = 8.dp.toPx()
+                            drawLine(Color.White.copy(alpha = 0.35f), Offset(cx - arm, cy), Offset(cx + arm, cy), strokeWidth = 1.dp.toPx())
+                            drawLine(Color.White.copy(alpha = 0.35f), Offset(cx, cy - arm), Offset(cx, cy + arm), strokeWidth = 1.dp.toPx())
+                        }
                     }
 
                     // Parlak alan uyarısı (zebra çizgileri)
@@ -6686,6 +6850,36 @@ fun CameraScreen(
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace
                             )
+                        }
+
+                        if (manualFocusActive) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(
+                                        if (focusPeakingEnabled) IrPalette.IrAmber.copy(alpha = 0.22f)
+                                        else Color.White.copy(alpha = 0.06f)
+                                    )
+                                    .border(
+                                        0.8.dp,
+                                        if (focusPeakingEnabled) IrPalette.IrAmber else IrPalette.BorderSubtle,
+                                        RoundedCornerShape(8.dp)
+                                    )
+                                    .clickable(enabled = cameraReady) {
+                                        focusPeakingEnabled = !focusPeakingEnabled
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    }
+                                    .padding(horizontal = 6.dp, vertical = 5.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "PK",
+                                    color = if (focusPeakingEnabled) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
                         }
 
                         Text(
@@ -8692,20 +8886,52 @@ fun CameraScreen(
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Text(
-                        text = stringResource(R.string.dialog_presets_new),
-                        color = IrPalette.IrAmber,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(IrPalette.IrAmber.copy(alpha = 0.14f))
-                            .clickable {
-                                showPresetsListDialog = false
-                                showSaveDialog = true
-                            }
-                            .padding(horizontal = 9.dp, vertical = 5.dp)
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Import",
+                            color = IrPalette.IrCyan,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(IrPalette.IrCyan.copy(alpha = 0.14f))
+                                .clickable {
+                                    try {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                        val clipText = cm?.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                                        val imported = decodePresetShareCode(clipText)
+                                        if (imported != null) {
+                                            savedPresets.removeAll { it.name == imported.name }
+                                            savedPresets.add(0, imported)
+                                            savePresetsToStorage()
+                                            applyPresetToCamera(imported)
+                                        } else {
+                                            showStatus("Copy a SPECTRAS1:... code first")
+                                        }
+                                    } catch (_: Exception) {
+                                        showStatus("Copy a SPECTRAS1:... code first")
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 5.dp)
+                        )
+                        Text(
+                            text = stringResource(R.string.dialog_presets_new),
+                            color = IrPalette.IrAmber,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(IrPalette.IrAmber.copy(alpha = 0.14f))
+                                .clickable {
+                                    showPresetsListDialog = false
+                                    showSaveDialog = true
+                                }
+                                .padding(horizontal = 9.dp, vertical = 5.dp)
+                        )
+                    }
                 }
             },
             text = {
@@ -8853,7 +9079,28 @@ fun CameraScreen(
                                 }
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .clickable {
+                                            try {
+                                                val code = encodePresetShareCode(preset)
+                                                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                                cm?.setPrimaryClip(ClipData.newPlainText("SpectraS Preset", code))
+                                                showStatus("Copied preset: ${preset.name}")
+                                            } catch (_: Exception) {}
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "⤴",
+                                        color = IrPalette.IrCyan,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
                                         .clip(CircleShape)
                                         .clickable {
                                             savedPresets.remove(preset)
@@ -9117,12 +9364,34 @@ fun CameraScreen(
                         )
                     }
                     item(key = "tool_grid") {
-                        SettingsToggleRow(
-                            label = stringResource(R.string.settings_grid),
-                            checked = showGrid,
-                            accentColor = IrPalette.IrAmber,
-                            onToggle = { showGrid = !showGrid }
-                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable {
+                                    val next = gridGuideMode.next()
+                                    gridGuideMode = next
+                                    sharedPrefs.edit { putString("grid_guide_mode", next.prefKey) }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 11.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_grid),
+                                color = IrPalette.TextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = gridGuideMode.badgeLabel,
+                                color = if (gridGuideMode != GridGuideMode.OFF) IrPalette.IrAmber else IrPalette.TextSecondary,
+                                fontSize = 12.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                     item(key = "tool_level") {
                         SettingsToggleRow(

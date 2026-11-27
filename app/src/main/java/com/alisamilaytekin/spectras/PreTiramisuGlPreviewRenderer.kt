@@ -70,7 +70,8 @@ internal class PreTiramisuGlPreviewRenderer {
         val hasBands: Boolean = false,
         val bandHue: FloatArray = FloatArray(12),
         val bandSat: FloatArray = FloatArray(12),
-        val bandLum: FloatArray = FloatArray(12)
+        val bandLum: FloatArray = FloatArray(12),
+        val focusPeaking: Boolean = false
     )
 
     private val glThread = HandlerThread("SpectrasGlPreview").apply { start() }
@@ -158,13 +159,15 @@ internal class PreTiramisuGlPreviewRenderer {
     private var uBandLumALoc = -1
     private var uBandLumBLoc = -1
     private var uBandLumCLoc = -1
+    private var uFocusPeakingLoc = -1
 
     fun updateUniforms(
         config: TargetedColorConfig,
         colorBands: ColorBandsConfig,
         channelSwap: Boolean,
         lookGrade: LookGradeParams,
-        bypass: Boolean
+        bypass: Boolean,
+        focusPeaking: Boolean = false
     ) {
         if (isReleased || isFailed) return
         val hasPoint = config.isActive && (config.deltaHue != 0f || config.deltaSat != 0f || config.deltaLum != 0f)
@@ -221,7 +224,8 @@ internal class PreTiramisuGlPreviewRenderer {
             hasBands = hasBands,
             bandHue = bh,
             bandSat = bs,
-            bandLum = bl
+            bandLum = bl,
+            focusPeaking = focusPeaking
         )
 
         glHandler.post {
@@ -451,6 +455,7 @@ internal class PreTiramisuGlPreviewRenderer {
         uBandLumALoc = GLES20.glGetUniformLocation(prog, "uBandLumA")
         uBandLumBLoc = GLES20.glGetUniformLocation(prog, "uBandLumB")
         uBandLumCLoc = GLES20.glGetUniformLocation(prog, "uBandLumC")
+        uFocusPeakingLoc = GLES20.glGetUniformLocation(prog, "uFocusPeaking")
     }
 
     private fun compileShader(type: Int, src: String): Int {
@@ -546,6 +551,7 @@ internal class PreTiramisuGlPreviewRenderer {
             GLES20.glUniform4f(uBandLumALoc, s.bandLum[0], s.bandLum[1], s.bandLum[2], s.bandLum[3])
             GLES20.glUniform4f(uBandLumBLoc, s.bandLum[4], s.bandLum[5], s.bandLum[6], s.bandLum[7])
             GLES20.glUniform4f(uBandLumCLoc, s.bandLum[8], s.bandLum[9], s.bandLum[10], s.bandLum[11])
+            GLES20.glUniform1f(uFocusPeakingLoc, if (s.focusPeaking) 1f else 0f)
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
 
@@ -655,6 +661,7 @@ internal class PreTiramisuGlPreviewRenderer {
             uniform vec4 uBandLumA;
             uniform vec4 uBandLumB;
             uniform vec4 uBandLumC;
+            uniform float uFocusPeaking;
 
             vec3 rgb2hsl(vec3 c) {
                 float cMin = min(min(c.r, c.g), c.b);
@@ -868,6 +875,17 @@ internal class PreTiramisuGlPreviewRenderer {
                 if (uMonoMix > 0.004) {
                     float mono = clamp(dot(rgb, uBwWeights), 0.0, 1.0);
                     rgb = mix(rgb, vec3(mono), clamp(uMonoMix, 0.0, 1.0));
+                }
+
+                if (uFocusPeaking > 0.5) {
+                    vec2 step2 = uTexelSize * 2.0;
+                    float lN = dot(texture2D(uContent, vTexCoord + vec2(0.0, -step2.y)).rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float lS = dot(texture2D(uContent, vTexCoord + vec2(0.0,  step2.y)).rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float lW = dot(texture2D(uContent, vTexCoord + vec2(-step2.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float lE = dot(texture2D(uContent, vTexCoord + vec2( step2.x, 0.0)).rgb, vec3(0.2126, 0.7152, 0.0722));
+                    float edgeMag = abs(lN - lS) + abs(lW - lE);
+                    float peakMask = smoothstep(0.16, 0.34, edgeMag);
+                    rgb = mix(rgb, vec3(0.22, 0.88, 1.0), peakMask * 0.88);
                 }
 
                 gl_FragColor = vec4(clamp(rgb, 0.0, 1.0), color.a);

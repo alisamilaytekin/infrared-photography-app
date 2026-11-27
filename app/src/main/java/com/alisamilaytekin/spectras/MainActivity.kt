@@ -450,6 +450,18 @@ internal class ProHistogramData(
     val highlightClip: Boolean = false
 )
 
+internal enum class HistogramDisplayMode {
+    NORMAL,
+    EXPANDED,
+    ICON;
+
+    fun next(): HistogramDisplayMode = when (this) {
+        NORMAL -> EXPANDED
+        EXPANDED -> ICON
+        ICON -> NORMAL
+    }
+}
+
 // Ölçüm kutusu boyutu için tek seçimli (radio) değerler
 internal enum class MeteringBoxSize(val norm: Float) {
     KUCUK(0.18f),
@@ -3348,6 +3360,7 @@ fun CameraScreen(
     var exposureBoxSizeNorm by remember { mutableFloatStateOf(MeteringBoxSize.ORTA.norm) }
     var measuredRegionBrightness by remember { mutableIntStateOf(128) }
     var liveHistogram by remember { mutableStateOf(ProHistogramData()) }
+    var histogramDisplayMode by remember { mutableStateOf(HistogramDisplayMode.NORMAL) }
 
     // Ek özellik durumları: OTO karşılaştırma, zebra, su terazisi, zamanlayıcı ve ilk açılış rehberi
     var isComparingAuto by remember { mutableStateOf(false) }
@@ -6068,7 +6081,7 @@ fun CameraScreen(
                     if (experienceMode != ExperienceMode.AESTHETIC) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         // Sol: Telemetri okuma kapsülü (dokununca ilgili sekmeye gider)
@@ -6123,13 +6136,14 @@ fun CameraScreen(
                             }
                         }
 
-                        // Sağ üst: Profesyonel 5-bölge RGB + Parlaklık canlı histogramı
+                        // Sağ üst: 3 modlu RGB + Parlaklık canlı histogramı (Normal → Geniş+Dalgaboyu → Simge)
                         if (cameraReady) {
                             LiveHistogramOverlay(
                                 data = liveHistogram,
+                                mode = histogramDisplayMode,
                                 modifier = Modifier.clickable(enabled = cameraReady) {
-                                    openProControl(ControlTab.RENK)
-                                    colorPanelMode = ColorPanelMode.BANTLAR
+                                    histogramDisplayMode = histogramDisplayMode.next()
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                             )
                         }
@@ -9449,6 +9463,7 @@ private fun StatusTelemetryChip(
 @Composable
 internal fun LiveHistogramOverlay(
     data: ProHistogramData,
+    mode: HistogramDisplayMode = HistogramDisplayMode.NORMAL,
     modifier: Modifier = Modifier
 ) {
     val borderColor = when {
@@ -9456,130 +9471,243 @@ internal fun LiveHistogramOverlay(
         data.shadowClip -> IrPalette.IrCyan.copy(alpha = 0.65f)
         else -> Color.White.copy(alpha = 0.16f)
     }
+    val targetWidth by animateDpAsState(
+        targetValue = when (mode) {
+            HistogramDisplayMode.NORMAL -> 114.dp
+            HistogramDisplayMode.EXPANDED -> 158.dp
+            HistogramDisplayMode.ICON -> 36.dp
+        },
+        animationSpec = tween(180),
+        label = "histWidth"
+    )
+    val targetHeight by animateDpAsState(
+        targetValue = when (mode) {
+            HistogramDisplayMode.NORMAL -> 44.dp
+            HistogramDisplayMode.EXPANDED -> 76.dp
+            HistogramDisplayMode.ICON -> 32.dp
+        },
+        animationSpec = tween(180),
+        label = "histHeight"
+    )
+    val microStyle = TextStyle(
+        fontFamily = FontFamily.Monospace,
+        platformStyle = PlatformTextStyle(includeFontPadding = false)
+    )
+
     Box(
         modifier = modifier
-            .width(114.dp)
-            .height(44.dp)
+            .width(targetWidth)
+            .height(targetHeight)
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xD907090D))
             .border(0.9.dp, borderColor, RoundedCornerShape(10.dp))
-            .padding(horizontal = 5.dp, vertical = 4.dp)
-    ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val luma = data.luma
-            if (luma.isEmpty()) return@Canvas
-            val w = size.width
-            val h = size.height
-            val topPad = 3.dp.toPx()
-            val graphH = (h - topPad).coerceAtLeast(1f)
-
-            // 5 pozlama bölgesi dikey referans ızgarası (Siyahlar · Gölgeler · Orta · Vurgular · Beyazlar)
-            val zoneGuide = Color.White.copy(alpha = 0.10f)
-            val midGuide = Color.White.copy(alpha = 0.17f)
-            for (z in 1..4) {
-                val x = w * (z / 5f)
-                drawLine(zoneGuide, Offset(x, 0f), Offset(x, h), strokeWidth = 0.7.dp.toPx())
-            }
-            drawLine(midGuide, Offset(0f, topPad + graphH * 0.5f), Offset(w, topPad + graphH * 0.5f), strokeWidth = 0.6.dp.toPx())
-
-            fun buildSmoothCurvePaths(bins: FloatArray): Pair<Path, Path> {
-                val step = w / (bins.size - 1).coerceAtLeast(1)
-                val fillPath = Path()
-                val strokePath = Path()
-                fillPath.moveTo(0f, h)
-                var prevX = 0f
-                var prevY = h - (bins[0].coerceIn(0f, 1f) * graphH)
-                fillPath.lineTo(prevX, prevY)
-                strokePath.moveTo(prevX, prevY)
-                for (i in 1 until bins.size) {
-                    val cx = i * step
-                    val cy = h - (bins[i].coerceIn(0f, 1f) * graphH)
-                    val midX = (prevX + cx) * 0.5f
-                    val midY = (prevY + cy) * 0.5f
-                    fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
-                    strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
-                    prevX = cx
-                    prevY = cy
-                }
-                fillPath.lineTo(prevX, prevY)
-                fillPath.lineTo(w, h)
-                fillPath.close()
-                strokePath.lineTo(prevX, prevY)
-                return fillPath to strokePath
-            }
-
-            // Üst üste katmanlı RGB kanalları (renk dengesi tek bakışta okunur)
-            val channels = listOf(
-                Triple(data.r, Color(0xFFFF453A), 0.34f),
-                Triple(data.g, Color(0xFF30D158), 0.32f),
-                Triple(data.b, Color(0xFF0A84FF), 0.36f)
+            .padding(
+                horizontal = if (mode == HistogramDisplayMode.ICON) 6.dp else 5.dp,
+                vertical = if (mode == HistogramDisplayMode.ICON) 6.dp else 4.dp
             )
-            channels.forEach { (bins, color, fillAlpha) ->
-                if (bins.isNotEmpty()) {
-                    val (fillP, strokeP) = buildSmoothCurvePaths(bins)
+    ) {
+        if (mode == HistogramDisplayMode.ICON) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val barHeights = floatArrayOf(0.42f, 0.85f, 0.62f, 0.96f, 0.50f)
+                val barColors = listOf(
+                    Color(0xFF0A84FF),
+                    Color(0xFF30D158),
+                    Color.White.copy(alpha = 0.9f),
+                    Color(0xFFFF453A),
+                    Color(0xFFF5A623)
+                )
+                val count = barHeights.size
+                val gap = 2.dp.toPx()
+                val barW = ((w - gap * (count - 1)) / count).coerceAtLeast(1.5f)
+                for (i in 0 until count) {
+                    val bh = (h * barHeights[i]).coerceAtLeast(2f)
+                    val x = i * (barW + gap)
+                    drawRoundRect(
+                        color = barColors[i].copy(alpha = 0.9f),
+                        topLeft = Offset(x, h - bh),
+                        size = androidx.compose.ui.geometry.Size(barW, bh),
+                        cornerRadius = CornerRadius(1.2.dp.toPx(), 1.2.dp.toPx())
+                    )
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                if (mode == HistogramDisplayMode.EXPANDED) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "B 450nm",
+                            color = Color(0xFF38BDF8),
+                            fontSize = 7.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = microStyle,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "G 530nm",
+                            color = Color(0xFF30D158),
+                            fontSize = 7.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = microStyle,
+                            maxLines = 1
+                        )
+                        Text(
+                            text = "R 630nm",
+                            color = Color(0xFFFF5A4F),
+                            fontSize = 7.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            style = microStyle,
+                            maxLines = 1
+                        )
+                    }
+                }
+
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    val luma = data.luma
+                    if (luma.isEmpty()) return@Canvas
+                    val w = size.width
+                    val h = size.height
+                    val topPad = 2.5.dp.toPx()
+                    val graphH = (h - topPad).coerceAtLeast(1f)
+
+                    // 5 pozlama bölgesi dikey referans ızgarası (Siyahlar · Gölgeler · Orta · Vurgular · Beyazlar)
+                    val zoneGuide = Color.White.copy(alpha = 0.10f)
+                    val midGuide = Color.White.copy(alpha = 0.17f)
+                    for (z in 1..4) {
+                        val x = w * (z / 5f)
+                        drawLine(zoneGuide, Offset(x, 0f), Offset(x, h), strokeWidth = 0.7.dp.toPx())
+                    }
+                    drawLine(midGuide, Offset(0f, topPad + graphH * 0.5f), Offset(w, topPad + graphH * 0.5f), strokeWidth = 0.6.dp.toPx())
+
+                    fun buildSmoothCurvePaths(bins: FloatArray): Pair<Path, Path> {
+                        val step = w / (bins.size - 1).coerceAtLeast(1)
+                        val fillPath = Path()
+                        val strokePath = Path()
+                        fillPath.moveTo(0f, h)
+                        var prevX = 0f
+                        var prevY = h - (bins[0].coerceIn(0f, 1f) * graphH)
+                        fillPath.lineTo(prevX, prevY)
+                        strokePath.moveTo(prevX, prevY)
+                        for (i in 1 until bins.size) {
+                            val cx = i * step
+                            val cy = h - (bins[i].coerceIn(0f, 1f) * graphH)
+                            val midX = (prevX + cx) * 0.5f
+                            val midY = (prevY + cy) * 0.5f
+                            fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
+                            strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
+                            prevX = cx
+                            prevY = cy
+                        }
+                        fillPath.lineTo(prevX, prevY)
+                        fillPath.lineTo(w, h)
+                        fillPath.close()
+                        strokePath.lineTo(prevX, prevY)
+                        return fillPath to strokePath
+                    }
+
+                    // Üst üste katmanlı RGB kanalları (renk dengesi tek bakışta okunur)
+                    val channels = listOf(
+                        Triple(data.r, Color(0xFFFF453A), 0.34f),
+                        Triple(data.g, Color(0xFF30D158), 0.32f),
+                        Triple(data.b, Color(0xFF0A84FF), 0.36f)
+                    )
+                    channels.forEach { (bins, color, fillAlpha) ->
+                        if (bins.isNotEmpty()) {
+                            val (fillP, strokeP) = buildSmoothCurvePaths(bins)
+                            drawPath(
+                                path = fillP,
+                                brush = Brush.verticalGradient(
+                                    colors = listOf(color.copy(alpha = fillAlpha), color.copy(alpha = 0.04f))
+                                ),
+                                style = Fill
+                            )
+                            drawPath(
+                                path = strokeP,
+                                color = color.copy(alpha = 0.72f),
+                                style = Stroke(width = 0.9.dp.toPx(), join = StrokeJoin.Round)
+                            )
+                        }
+                    }
+
+                    // Üstte parlak beyaz Luma (genel parlaklık) zarf çizgisi
+                    val (lumaFill, lumaStroke) = buildSmoothCurvePaths(luma)
                     drawPath(
-                        path = fillP,
+                        path = lumaFill,
                         brush = Brush.verticalGradient(
-                            colors = listOf(color.copy(alpha = fillAlpha), color.copy(alpha = 0.04f))
+                            colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))
                         ),
                         style = Fill
                     )
                     drawPath(
-                        path = strokeP,
-                        color = color.copy(alpha = 0.72f),
-                        style = Stroke(width = 0.9.dp.toPx(), join = StrokeJoin.Round)
+                        path = lumaStroke,
+                        color = Color.White.copy(alpha = 0.94f),
+                        style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
+                    )
+
+                    // Alt taban çizgisi
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.22f),
+                        start = Offset(0f, h),
+                        end = Offset(w, h),
+                        strokeWidth = 0.8.dp.toPx()
+                    )
+
+                    // Sol üst gölge taşma (crushed blacks) + sağ üst vurgu yanma (blown highlights) üçgen göstergeleri
+                    val tri = 4.2.dp.toPx()
+                    val shadowTri = Path().apply {
+                        moveTo(0f, 0f)
+                        lineTo(tri, 0f)
+                        lineTo(0f, tri)
+                        close()
+                    }
+                    drawPath(
+                        path = shadowTri,
+                        color = if (data.shadowClip) IrPalette.IrCyan else Color.White.copy(alpha = 0.18f),
+                        style = Fill
+                    )
+
+                    val highlightTri = Path().apply {
+                        moveTo(w, 0f)
+                        lineTo(w - tri, 0f)
+                        lineTo(w, tri)
+                        close()
+                    }
+                    drawPath(
+                        path = highlightTri,
+                        color = if (data.highlightClip) IrPalette.IrCoral else Color.White.copy(alpha = 0.18f),
+                        style = Fill
                     )
                 }
+
+                if (mode == HistogramDisplayMode.EXPANDED) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        listOf("0", "64", "128", "192", "255").forEach { tick ->
+                            Text(
+                                text = tick,
+                                color = Color.White.copy(alpha = 0.56f),
+                                fontSize = 7.sp,
+                                style = microStyle,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
             }
-
-            // Üstte parlak beyaz Luma (genel parlaklık) zarf çizgisi
-            val (lumaFill, lumaStroke) = buildSmoothCurvePaths(luma)
-            drawPath(
-                path = lumaFill,
-                brush = Brush.verticalGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))
-                ),
-                style = Fill
-            )
-            drawPath(
-                path = lumaStroke,
-                color = Color.White.copy(alpha = 0.94f),
-                style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
-            )
-
-            // Alt taban çizgisi
-            drawLine(
-                color = Color.White.copy(alpha = 0.22f),
-                start = Offset(0f, h),
-                end = Offset(w, h),
-                strokeWidth = 0.8.dp.toPx()
-            )
-
-            // Sol üst gölge taşma (crushed blacks) + sağ üst vurgu yanma (blown highlights) üçgen göstergeleri
-            val tri = 4.2.dp.toPx()
-            val shadowTri = Path().apply {
-                moveTo(0f, 0f)
-                lineTo(tri, 0f)
-                lineTo(0f, tri)
-                close()
-            }
-            drawPath(
-                path = shadowTri,
-                color = if (data.shadowClip) IrPalette.IrCyan else Color.White.copy(alpha = 0.18f),
-                style = Fill
-            )
-
-            val highlightTri = Path().apply {
-                moveTo(w, 0f)
-                lineTo(w - tri, 0f)
-                lineTo(w, tri)
-                close()
-            }
-            drawPath(
-                path = highlightTri,
-                color = if (data.highlightClip) IrPalette.IrCoral else Color.White.copy(alpha = 0.18f),
-                style = Fill
-            )
         }
     }
 }

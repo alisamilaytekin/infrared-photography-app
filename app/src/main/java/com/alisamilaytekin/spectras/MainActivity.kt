@@ -453,15 +453,24 @@ internal class ProHistogramData(
     val highlightClip: Boolean = false
 )
 
-internal enum class HistogramDisplayMode {
-    NORMAL,
-    EXPANDED,
-    ICON;
+internal enum class HistogramDisplayMode(val prefKey: String) {
+    RGB_NORMAL("rgb_normal"),
+    RGB_EXPANDED("rgb_expanded"),
+    SPECTRUM_NORMAL("spectrum_normal"),
+    SPECTRUM_EXPANDED("spectrum_expanded"),
+    ICON("icon");
 
     fun next(): HistogramDisplayMode = when (this) {
-        NORMAL -> EXPANDED
-        EXPANDED -> ICON
-        ICON -> NORMAL
+        RGB_NORMAL -> RGB_EXPANDED
+        RGB_EXPANDED -> SPECTRUM_NORMAL
+        SPECTRUM_NORMAL -> SPECTRUM_EXPANDED
+        SPECTRUM_EXPANDED -> ICON
+        ICON -> RGB_NORMAL
+    }
+
+    companion object {
+        fun fromKey(key: String?): HistogramDisplayMode =
+            entries.firstOrNull { it.prefKey == key } ?: RGB_NORMAL
     }
 }
 
@@ -3473,7 +3482,9 @@ fun CameraScreen(
     var exposureBoxSizeNorm by remember { mutableFloatStateOf(MeteringBoxSize.ORTA.norm) }
     var measuredRegionBrightness by remember { mutableIntStateOf(128) }
     var liveHistogram by remember { mutableStateOf(ProHistogramData()) }
-    var histogramDisplayMode by remember { mutableStateOf(HistogramDisplayMode.NORMAL) }
+    var histogramDisplayMode by remember {
+        mutableStateOf(HistogramDisplayMode.fromKey(sharedPrefs.getString("histogram_display_mode", null)))
+    }
 
     // Ek özellik durumları: OTO karşılaştırma, zebra, su terazisi, zamanlayıcı ve ilk açılış rehberi
     var isComparingAuto by remember { mutableStateOf(false) }
@@ -6249,13 +6260,15 @@ fun CameraScreen(
                             }
                         }
 
-                        // Sağ üst: 3 modlu RGB + Parlaklık canlı histogramı (Normal → Geniş+Dalgaboyu → Simge)
+                        // Sağ üst: 5 modlu canlı histogram & spektrum (RGB Normal → RGB Geniş → Spektrum Normal → Spektrum Geniş → Simge)
                         if (cameraReady) {
                             LiveHistogramOverlay(
                                 data = liveHistogram,
                                 mode = histogramDisplayMode,
                                 modifier = Modifier.clickable(enabled = cameraReady) {
-                                    histogramDisplayMode = histogramDisplayMode.next()
+                                    val nextMode = histogramDisplayMode.next()
+                                    histogramDisplayMode = nextMode
+                                    sharedPrefs.edit { putString("histogram_display_mode", nextMode.prefKey) }
                                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                             )
@@ -9576,9 +9589,11 @@ private fun StatusTelemetryChip(
 @Composable
 internal fun LiveHistogramOverlay(
     data: ProHistogramData,
-    mode: HistogramDisplayMode = HistogramDisplayMode.NORMAL,
+    mode: HistogramDisplayMode = HistogramDisplayMode.RGB_NORMAL,
     modifier: Modifier = Modifier
 ) {
+    val isExpanded = mode == HistogramDisplayMode.RGB_EXPANDED || mode == HistogramDisplayMode.SPECTRUM_EXPANDED
+    val isSpectrum = mode == HistogramDisplayMode.SPECTRUM_NORMAL || mode == HistogramDisplayMode.SPECTRUM_EXPANDED
     val borderColor = when {
         data.highlightClip -> IrPalette.IrCoral.copy(alpha = 0.72f)
         data.shadowClip -> IrPalette.IrCyan.copy(alpha = 0.65f)
@@ -9586,8 +9601,8 @@ internal fun LiveHistogramOverlay(
     }
     val targetWidth by animateDpAsState(
         targetValue = when (mode) {
-            HistogramDisplayMode.NORMAL -> 114.dp
-            HistogramDisplayMode.EXPANDED -> 168.dp
+            HistogramDisplayMode.RGB_NORMAL, HistogramDisplayMode.SPECTRUM_NORMAL -> 114.dp
+            HistogramDisplayMode.RGB_EXPANDED, HistogramDisplayMode.SPECTRUM_EXPANDED -> 168.dp
             HistogramDisplayMode.ICON -> 36.dp
         },
         animationSpec = tween(180),
@@ -9595,8 +9610,8 @@ internal fun LiveHistogramOverlay(
     )
     val targetHeight by animateDpAsState(
         targetValue = when (mode) {
-            HistogramDisplayMode.NORMAL -> 44.dp
-            HistogramDisplayMode.EXPANDED -> 78.dp
+            HistogramDisplayMode.RGB_NORMAL, HistogramDisplayMode.SPECTRUM_NORMAL -> 44.dp
+            HistogramDisplayMode.RGB_EXPANDED, HistogramDisplayMode.SPECTRUM_EXPANDED -> 78.dp
             HistogramDisplayMode.ICON -> 32.dp
         },
         animationSpec = tween(180),
@@ -9628,7 +9643,7 @@ internal fun LiveHistogramOverlay(
             .background(Color(0xDE07090D))
             .border(0.9.dp, borderColor, RoundedCornerShape(10.dp))
             .padding(
-                horizontal = if (mode == HistogramDisplayMode.ICON) 6.dp else 6.dp,
+                horizontal = 6.dp,
                 vertical = if (mode == HistogramDisplayMode.ICON) 6.dp else 4.dp
             )
     ) {
@@ -9663,29 +9678,51 @@ internal fun LiveHistogramOverlay(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                if (mode == HistogramDisplayMode.EXPANDED) {
-                    val peakColor = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "λ 360–700nm",
-                            color = Color.White.copy(alpha = 0.72f),
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            style = microStyle,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "Peak ${data.peakWavelengthNm}nm",
-                            color = peakColor,
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            style = microStyle,
-                            maxLines = 1
-                        )
+                if (isExpanded) {
+                    if (isSpectrum) {
+                        val peakColor = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "λ 360–700nm",
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 7.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = microStyle,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "Peak ${data.peakWavelengthNm}nm",
+                                color = peakColor,
+                                fontSize = 7.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                style = microStyle,
+                                maxLines = 1
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "RGB · Luma",
+                                color = Color.White.copy(alpha = 0.75f),
+                                fontSize = 7.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                style = microStyle,
+                                maxLines = 1
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("R", color = Color(0xFFFF5A4F), fontSize = 7.5.sp, fontWeight = FontWeight.Bold, style = microStyle)
+                                Text("G", color = Color(0xFF30D158), fontSize = 7.5.sp, fontWeight = FontWeight.Bold, style = microStyle)
+                                Text("B", color = Color(0xFF38BDF8), fontSize = 7.5.sp, fontWeight = FontWeight.Bold, style = microStyle)
+                            }
+                        }
                     }
                 }
 
@@ -9694,100 +9731,181 @@ internal fun LiveHistogramOverlay(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    val spec = data.spectrum
-                    if (spec.isEmpty()) return@Canvas
                     val w = size.width
                     val h = size.height
-                    val stripH = 2.2.dp.toPx()
-                    val baseY = (h - stripH - 1.dp.toPx()).coerceAtLeast(2f)
-                    val topPad = 2.5.dp.toPx()
-                    val graphH = (baseY - topPad).coerceAtLeast(1f)
 
-                    // Bilimsel dalgaboyu dikey referans çizgileri: 400nm · 500nm · 600nm
-                    val gridColor = Color.White.copy(alpha = 0.11f)
-                    val midGuide = Color.White.copy(alpha = 0.15f)
-                    for (wl in listOf(400f, 500f, 600f)) {
-                        val frac = (wl - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN
-                        val x = w * frac
-                        drawLine(gridColor, Offset(x, 0f), Offset(x, baseY), strokeWidth = 0.7.dp.toPx())
+                    if (isSpectrum) {
+                        val spec = data.spectrum
+                        if (spec.isEmpty()) return@Canvas
+                        val stripH = 2.2.dp.toPx()
+                        val baseY = (h - stripH - 1.dp.toPx()).coerceAtLeast(2f)
+                        val topPad = 2.5.dp.toPx()
+                        val graphH = (baseY - topPad).coerceAtLeast(1f)
+
+                        // Bilimsel dalgaboyu dikey referans çizgileri: 400nm · 500nm · 600nm
+                        val gridColor = Color.White.copy(alpha = 0.11f)
+                        val midGuide = Color.White.copy(alpha = 0.15f)
+                        for (wl in listOf(400f, 500f, 600f)) {
+                            val frac = (wl - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN
+                            val x = w * frac
+                            drawLine(gridColor, Offset(x, 0f), Offset(x, baseY), strokeWidth = 0.7.dp.toPx())
+                        }
+                        drawLine(
+                            midGuide,
+                            Offset(0f, topPad + graphH * 0.5f),
+                            Offset(w, topPad + graphH * 0.5f),
+                            strokeWidth = 0.6.dp.toPx()
+                        )
+
+                        val step = w / (spec.size - 1).coerceAtLeast(1)
+                        val fillPath = Path()
+                        val strokePath = Path()
+                        fillPath.moveTo(0f, baseY)
+                        var prevX = 0f
+                        var prevY = baseY - (spec[0].coerceIn(0f, 1f) * graphH)
+                        fillPath.lineTo(prevX, prevY)
+                        strokePath.moveTo(prevX, prevY)
+                        for (i in 1 until spec.size) {
+                            val cx = i * step
+                            val cy = baseY - (spec[i].coerceIn(0f, 1f) * graphH)
+                            val midX = (prevX + cx) * 0.5f
+                            val midY = (prevY + cy) * 0.5f
+                            fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
+                            strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
+                            prevX = cx
+                            prevY = cy
+                        }
+                        fillPath.lineTo(prevX, prevY)
+                        fillPath.lineTo(w, baseY)
+                        fillPath.close()
+                        strokePath.lineTo(prevX, prevY)
+
+                        drawPath(
+                            path = fillPath,
+                            brush = Brush.horizontalGradient(
+                                colors = spectrumColors.map { it.copy(alpha = 0.56f) }
+                            ),
+                            style = Fill
+                        )
+                        drawPath(
+                            path = strokePath,
+                            brush = Brush.horizontalGradient(colors = spectrumColors),
+                            style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round)
+                        )
+                        drawPath(
+                            path = strokePath,
+                            color = Color.White.copy(alpha = 0.72f),
+                            style = Stroke(width = 0.75.dp.toPx(), join = StrokeJoin.Round)
+                        )
+
+                        val peakFrac = ((data.peakWavelengthNm - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN)
+                            .coerceIn(0f, 1f)
+                        val peakX = w * peakFrac
+                        val peakBin = (peakFrac * (spec.size - 1)).roundToInt().coerceIn(0, spec.size - 1)
+                        val peakY = baseY - (spec[peakBin].coerceIn(0f, 1f) * graphH)
+                        val peakCol = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
+                        drawLine(
+                            color = peakCol.copy(alpha = 0.55f),
+                            start = Offset(peakX, peakY),
+                            end = Offset(peakX, baseY),
+                            strokeWidth = 0.8.dp.toPx()
+                        )
+                        drawCircle(
+                            color = Color.White,
+                            radius = 1.9.dp.toPx(),
+                            center = Offset(peakX, peakY)
+                        )
+
+                        drawRoundRect(
+                            brush = Brush.horizontalGradient(colors = spectrumColors),
+                            topLeft = Offset(0f, h - stripH),
+                            size = androidx.compose.ui.geometry.Size(w, stripH),
+                            cornerRadius = CornerRadius(stripH * 0.5f, stripH * 0.5f)
+                        )
+                    } else {
+                        val luma = data.luma
+                        if (luma.isEmpty()) return@Canvas
+                        val topPad = 2.5.dp.toPx()
+                        val graphH = (h - topPad).coerceAtLeast(1f)
+
+                        // 5 pozlama bölgesi dikey referans ızgarası (Siyahlar · Gölgeler · Orta · Vurgular · Beyazlar)
+                        val zoneGuide = Color.White.copy(alpha = 0.10f)
+                        val midGuide = Color.White.copy(alpha = 0.17f)
+                        for (z in 1..4) {
+                            val x = w * (z / 5f)
+                            drawLine(zoneGuide, Offset(x, 0f), Offset(x, h), strokeWidth = 0.7.dp.toPx())
+                        }
+                        drawLine(midGuide, Offset(0f, topPad + graphH * 0.5f), Offset(w, topPad + graphH * 0.5f), strokeWidth = 0.6.dp.toPx())
+
+                        fun buildSmoothCurvePaths(bins: FloatArray): Pair<Path, Path> {
+                            val step = w / (bins.size - 1).coerceAtLeast(1)
+                            val fillPath = Path()
+                            val strokePath = Path()
+                            fillPath.moveTo(0f, h)
+                            var prevX = 0f
+                            var prevY = h - (bins[0].coerceIn(0f, 1f) * graphH)
+                            fillPath.lineTo(prevX, prevY)
+                            strokePath.moveTo(prevX, prevY)
+                            for (i in 1 until bins.size) {
+                                val cx = i * step
+                                val cy = h - (bins[i].coerceIn(0f, 1f) * graphH)
+                                val midX = (prevX + cx) * 0.5f
+                                val midY = (prevY + cy) * 0.5f
+                                fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
+                                strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
+                                prevX = cx
+                                prevY = cy
+                            }
+                            fillPath.lineTo(prevX, prevY)
+                            fillPath.lineTo(w, h)
+                            fillPath.close()
+                            strokePath.lineTo(prevX, prevY)
+                            return fillPath to strokePath
+                        }
+
+                        val channels = listOf(
+                            Triple(data.r, Color(0xFFFF453A), 0.34f),
+                            Triple(data.g, Color(0xFF30D158), 0.32f),
+                            Triple(data.b, Color(0xFF0A84FF), 0.36f)
+                        )
+                        channels.forEach { (bins, color, fillAlpha) ->
+                            if (bins.isNotEmpty()) {
+                                val (fillP, strokeP) = buildSmoothCurvePaths(bins)
+                                drawPath(
+                                    path = fillP,
+                                    brush = Brush.verticalGradient(
+                                        colors = listOf(color.copy(alpha = fillAlpha), color.copy(alpha = 0.04f))
+                                    ),
+                                    style = Fill
+                                )
+                                drawPath(
+                                    path = strokeP,
+                                    color = color.copy(alpha = 0.72f),
+                                    style = Stroke(width = 0.9.dp.toPx(), join = StrokeJoin.Round)
+                                )
+                            }
+                        }
+
+                        val (lumaFill, lumaStroke) = buildSmoothCurvePaths(luma)
+                        drawPath(
+                            path = lumaFill,
+                            brush = Brush.verticalGradient(
+                                colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))
+                            ),
+                            style = Fill
+                        )
+                        drawPath(
+                            path = lumaStroke,
+                            color = Color.White.copy(alpha = 0.94f),
+                            style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
+                        )
+                        drawLine(
+                            color = Color.White.copy(alpha = 0.22f),
+                            start = Offset(0f, h),
+                            end = Offset(w, h),
+                            strokeWidth = 0.8.dp.toPx()
+                        )
                     }
-                    drawLine(
-                        midGuide,
-                        Offset(0f, topPad + graphH * 0.5f),
-                        Offset(w, topPad + graphH * 0.5f),
-                        strokeWidth = 0.6.dp.toPx()
-                    )
-
-                    // Yumuşatılmış 360–700nm görünür ışık spektrumu eğrisi S(λ)
-                    val step = w / (spec.size - 1).coerceAtLeast(1)
-                    val fillPath = Path()
-                    val strokePath = Path()
-                    fillPath.moveTo(0f, baseY)
-                    var prevX = 0f
-                    var prevY = baseY - (spec[0].coerceIn(0f, 1f) * graphH)
-                    fillPath.lineTo(prevX, prevY)
-                    strokePath.moveTo(prevX, prevY)
-                    for (i in 1 until spec.size) {
-                        val cx = i * step
-                        val cy = baseY - (spec[i].coerceIn(0f, 1f) * graphH)
-                        val midX = (prevX + cx) * 0.5f
-                        val midY = (prevY + cy) * 0.5f
-                        fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
-                        strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
-                        prevX = cx
-                        prevY = cy
-                    }
-                    fillPath.lineTo(prevX, prevY)
-                    fillPath.lineTo(w, baseY)
-                    fillPath.close()
-                    strokePath.lineTo(prevX, prevY)
-
-                    // Eğri altı sürekli CIE görünür spektrum dolgusu (360nm mor → 700nm derin kırmızı)
-                    drawPath(
-                        path = fillPath,
-                        brush = Brush.horizontalGradient(
-                            colors = spectrumColors.map { it.copy(alpha = 0.56f) }
-                        ),
-                        style = Fill
-                    )
-                    // Parlak spektral üst çizgi + ince beyaz parlaklık zarfı
-                    drawPath(
-                        path = strokePath,
-                        brush = Brush.horizontalGradient(colors = spectrumColors),
-                        style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round)
-                    )
-                    drawPath(
-                        path = strokePath,
-                        color = Color.White.copy(alpha = 0.72f),
-                        style = Stroke(width = 0.75.dp.toPx(), join = StrokeJoin.Round)
-                    )
-
-                    // Tepe dalgaboyu (λpeak) dikey referans çizgisi ve noktası
-                    val peakFrac = ((data.peakWavelengthNm - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN)
-                        .coerceIn(0f, 1f)
-                    val peakX = w * peakFrac
-                    val peakBin = (peakFrac * (spec.size - 1)).roundToInt().coerceIn(0, spec.size - 1)
-                    val peakY = baseY - (spec[peakBin].coerceIn(0f, 1f) * graphH)
-                    val peakCol = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
-                    drawLine(
-                        color = peakCol.copy(alpha = 0.55f),
-                        start = Offset(peakX, peakY),
-                        end = Offset(peakX, baseY),
-                        strokeWidth = 0.8.dp.toPx()
-                    )
-                    drawCircle(
-                        color = Color.White,
-                        radius = 1.9.dp.toPx(),
-                        center = Offset(peakX, peakY)
-                    )
-
-                    // Alt 360–700nm sürekli renk referans bandı
-                    drawRoundRect(
-                        brush = Brush.horizontalGradient(colors = spectrumColors),
-                        topLeft = Offset(0f, h - stripH),
-                        size = androidx.compose.ui.geometry.Size(w, stripH),
-                        cornerRadius = CornerRadius(stripH * 0.5f, stripH * 0.5f)
-                    )
 
                     // Sol üst gölge + sağ üst vurgu taşma göstergeleri
                     val tri = 3.8.dp.toPx()
@@ -9816,12 +9934,17 @@ internal fun LiveHistogramOverlay(
                     )
                 }
 
-                if (mode == HistogramDisplayMode.EXPANDED) {
+                if (isExpanded) {
+                    val ticks = if (isSpectrum) {
+                        listOf("360", "445", "530", "615", "700nm")
+                    } else {
+                        listOf("0", "64", "128", "192", "255")
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        listOf("360", "445", "530", "615", "700nm").forEach { tick ->
+                        ticks.forEach { tick ->
                             Text(
                                 text = tick,
                                 color = Color.White.copy(alpha = 0.62f),

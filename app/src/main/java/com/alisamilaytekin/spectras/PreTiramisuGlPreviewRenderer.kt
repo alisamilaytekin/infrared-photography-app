@@ -94,9 +94,21 @@ internal class PreTiramisuGlPreviewRenderer {
     private var attachedOutputSt: SurfaceTexture? = null
 
     private var program: Int = 0
+    private var passthroughProgram: Int = 0
+    private var pPositionLoc = -1
+    private var pTexCoordLoc = -1
+    private var pTexMatrixLoc = -1
+    private var pContentLoc = -1
+    private var lastUploadedSnapshot: UniformSnapshot? = null
+    private var lastUsedProgram: Int = 0
     private var oesTextureId: Int = 0
     private var inputSurfaceTexture: SurfaceTexture? = null
     private var hasFirstFrame: Boolean = false
+    private val redrawRunnable = Runnable {
+        if (!isReleased && !isFailed && hasFirstFrame && eglSurface != EGL14.EGL_NO_SURFACE) {
+            drawCurrentFrame(updateTexture = false)
+        }
+    }
 
     private val texMatrix = FloatArray(16).apply { Matrix.setIdentityM(this, 0) }
     private val surfaceDim = IntArray(2)
@@ -228,11 +240,8 @@ internal class PreTiramisuGlPreviewRenderer {
             focusPeaking = focusPeaking
         )
 
-        glHandler.post {
-            if (!isReleased && !isFailed && hasFirstFrame && eglSurface != EGL14.EGL_NO_SURFACE) {
-                drawCurrentFrame(updateTexture = false)
-            }
-        }
+        glHandler.removeCallbacks(redrawRunnable)
+        glHandler.post(redrawRunnable)
     }
 
     /**
@@ -456,6 +465,31 @@ internal class PreTiramisuGlPreviewRenderer {
         uBandLumBLoc = GLES20.glGetUniformLocation(prog, "uBandLumB")
         uBandLumCLoc = GLES20.glGetUniformLocation(prog, "uBandLumC")
         uFocusPeakingLoc = GLES20.glGetUniformLocation(prog, "uFocusPeaking")
+
+        // Ultra-fast passthrough shader for zero-overhead preview when no grading/peaking is active
+        try {
+            val pVs = compileShader(GLES20.GL_VERTEX_SHADER, VERTEX_SHADER)
+            val pFs = compileShader(GLES20.GL_FRAGMENT_SHADER, PASSTHROUGH_FRAGMENT_SHADER)
+            val pProg = GLES20.glCreateProgram()
+            GLES20.glAttachShader(pProg, pVs)
+            GLES20.glAttachShader(pProg, pFs)
+            GLES20.glLinkProgram(pProg)
+            val pStatus = IntArray(1)
+            GLES20.glGetProgramiv(pProg, GLES20.GL_LINK_STATUS, pStatus, 0)
+            GLES20.glDeleteShader(pVs)
+            GLES20.glDeleteShader(pFs)
+            if (pStatus[0] == GLES20.GL_TRUE) {
+                passthroughProgram = pProg
+                pPositionLoc = GLES20.glGetAttribLocation(pProg, "aPosition")
+                pTexCoordLoc = GLES20.glGetAttribLocation(pProg, "aTexCoord")
+                pTexMatrixLoc = GLES20.glGetUniformLocation(pProg, "uTexMatrix")
+                pContentLoc = GLES20.glGetUniformLocation(pProg, "uContent")
+            } else {
+                GLES20.glDeleteProgram(pProg)
+            }
+        } catch (_: Throwable) {
+            passthroughProgram = 0
+        }
     }
 
     private fun compileShader(type: Int, src: String): Int {
@@ -478,7 +512,9 @@ internal class PreTiramisuGlPreviewRenderer {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && st.isReleased) return
 
         try {
-            if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) return
+            if (EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW) != eglSurface) {
+                if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) return
+            }
             if (updateTexture) {
                 st.updateTexImage()
                 st.getTransformMatrix(texMatrix)
@@ -492,71 +528,103 @@ internal class PreTiramisuGlPreviewRenderer {
             val h = surfaceDim[1].coerceAtLeast(1)
             GLES20.glViewport(0, 0, w, h)
 
-            GLES20.glUseProgram(program)
-
-            quadVertices.position(0)
-            GLES20.glEnableVertexAttribArray(aPositionLoc)
-            GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
-
-            quadVertices.position(2)
-            GLES20.glEnableVertexAttribArray(aTexCoordLoc)
-            GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
-
-            GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
-            GLES20.glUniform2f(uTexelSizeLoc, 1.0f / w.toFloat(), 1.0f / h.toFloat())
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
-            GLES20.glUniform1i(uContentLoc, 0)
-
             val s = snapshot
             val activeLook = !s.bypass && s.hasLook
             val activeSwap = !s.bypass && s.channelSwap
             val activePoint = !s.bypass && s.hasPoint
             val activeBands = !s.bypass && s.hasBands
+            val needsGrading = activeLook || activeSwap || activePoint || activeBands || s.focusPeaking
 
-            GLES20.glUniform1f(uLookActiveLoc, if (activeLook) 1f else 0f)
-            GLES20.glUniform1f(uLookSharpnessLoc, if (activeLook) s.sharpness else 0f)
-            GLES20.glUniform3f(uLookWbGainsLoc, s.wbR, s.wbG, s.wbB)
-            GLES20.glUniform1f(uLookExpScaleLoc, if (activeLook) s.expScale else 1f)
-            GLES20.glUniform1f(uLookContrastLoc, if (activeLook) s.contrast else 0f)
-            GLES20.glUniform1f(uLookHighlightsLoc, if (activeLook) s.highlights else 0f)
-            GLES20.glUniform1f(uLookShadowsLoc, if (activeLook) s.shadows else 0f)
-            GLES20.glUniform1f(uLookWhitesLoc, if (activeLook) s.whites else 0f)
-            GLES20.glUniform1f(uLookBlacksLoc, if (activeLook) s.blacks else 0f)
-            GLES20.glUniform1f(uLookVibranceLoc, if (activeLook) s.vibrance else 0f)
-            GLES20.glUniform1f(uLookSatLoc, if (activeLook) s.saturation else 0f)
-            GLES20.glUniform1f(uSplitActiveLoc, if (activeLook && s.hasSplit) 1f else 0f)
-            GLES20.glUniform3f(uSplitShadowLoc, s.shR, s.shG, s.shB)
-            GLES20.glUniform3f(uSplitMidLoc, s.midR, s.midG, s.midB)
-            GLES20.glUniform3f(uSplitHighLoc, s.hiR, s.hiG, s.hiB)
-            GLES20.glUniform1f(uMonoMixLoc, if (activeLook) s.monoMix else 0f)
-            GLES20.glUniform3f(uBwWeightsLoc, s.bwR, s.bwG, s.bwB)
-            GLES20.glUniform1f(uChannelSwapLoc, if (activeSwap) 1f else 0f)
-            GLES20.glUniform1f(uTargetHueLoc, s.targetHue)
-            GLES20.glUniform1f(uHueWidthLoc, s.hueWidth)
-            GLES20.glUniform1f(uHueFeatherLoc, s.hueFeather)
-            GLES20.glUniform1f(uDeltaHueLoc, s.deltaHue)
-            GLES20.glUniform1f(uDeltaSatLoc, s.deltaSat)
-            GLES20.glUniform1f(uDeltaLumLoc, s.deltaLum)
-            GLES20.glUniform1f(uActiveLoc, if (activePoint) 1f else 0f)
-            GLES20.glUniform1f(uBandsActiveLoc, if (activeBands) 1f else 0f)
+            if (!needsGrading && passthroughProgram != 0) {
+                if (lastUsedProgram != passthroughProgram) {
+                    GLES20.glUseProgram(passthroughProgram)
+                    lastUsedProgram = passthroughProgram
+                }
+                quadVertices.position(0)
+                GLES20.glEnableVertexAttribArray(pPositionLoc)
+                GLES20.glVertexAttribPointer(pPositionLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
 
-            GLES20.glUniform4f(uBandHueALoc, s.bandHue[0], s.bandHue[1], s.bandHue[2], s.bandHue[3])
-            GLES20.glUniform4f(uBandHueBLoc, s.bandHue[4], s.bandHue[5], s.bandHue[6], s.bandHue[7])
-            GLES20.glUniform4f(uBandHueCLoc, s.bandHue[8], s.bandHue[9], s.bandHue[10], s.bandHue[11])
-            GLES20.glUniform4f(uBandSatALoc, s.bandSat[0], s.bandSat[1], s.bandSat[2], s.bandSat[3])
-            GLES20.glUniform4f(uBandSatBLoc, s.bandSat[4], s.bandSat[5], s.bandSat[6], s.bandSat[7])
-            GLES20.glUniform4f(uBandSatCLoc, s.bandSat[8], s.bandSat[9], s.bandSat[10], s.bandSat[11])
-            GLES20.glUniform4f(uBandLumALoc, s.bandLum[0], s.bandLum[1], s.bandLum[2], s.bandLum[3])
-            GLES20.glUniform4f(uBandLumBLoc, s.bandLum[4], s.bandLum[5], s.bandLum[6], s.bandLum[7])
-            GLES20.glUniform4f(uBandLumCLoc, s.bandLum[8], s.bandLum[9], s.bandLum[10], s.bandLum[11])
-            GLES20.glUniform1f(uFocusPeakingLoc, if (s.focusPeaking) 1f else 0f)
+                quadVertices.position(2)
+                GLES20.glEnableVertexAttribArray(pTexCoordLoc)
+                GLES20.glVertexAttribPointer(pTexCoordLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
 
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+                GLES20.glUniformMatrix4fv(pTexMatrixLoc, 1, false, texMatrix, 0)
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
+                GLES20.glUniform1i(pContentLoc, 0)
 
-            GLES20.glDisableVertexAttribArray(aPositionLoc)
-            GLES20.glDisableVertexAttribArray(aTexCoordLoc)
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+                GLES20.glDisableVertexAttribArray(pPositionLoc)
+                GLES20.glDisableVertexAttribArray(pTexCoordLoc)
+            } else {
+                val switchedProgram = lastUsedProgram != program
+                if (switchedProgram) {
+                    GLES20.glUseProgram(program)
+                    lastUsedProgram = program
+                }
+
+                quadVertices.position(0)
+                GLES20.glEnableVertexAttribArray(aPositionLoc)
+                GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
+
+                quadVertices.position(2)
+                GLES20.glEnableVertexAttribArray(aTexCoordLoc)
+                GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 16, quadVertices)
+
+                GLES20.glUniformMatrix4fv(uTexMatrixLoc, 1, false, texMatrix, 0)
+                GLES20.glUniform2f(uTexelSizeLoc, 1.0f / w.toFloat(), 1.0f / h.toFloat())
+
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureId)
+                GLES20.glUniform1i(uContentLoc, 0)
+
+                if (switchedProgram || lastUploadedSnapshot !== s) {
+                    lastUploadedSnapshot = s
+                    GLES20.glUniform1f(uLookActiveLoc, if (activeLook) 1f else 0f)
+                    GLES20.glUniform1f(uLookSharpnessLoc, if (activeLook) s.sharpness else 0f)
+                    GLES20.glUniform3f(uLookWbGainsLoc, s.wbR, s.wbG, s.wbB)
+                    GLES20.glUniform1f(uLookExpScaleLoc, if (activeLook) s.expScale else 1f)
+                    GLES20.glUniform1f(uLookContrastLoc, if (activeLook) s.contrast else 0f)
+                    GLES20.glUniform1f(uLookHighlightsLoc, if (activeLook) s.highlights else 0f)
+                    GLES20.glUniform1f(uLookShadowsLoc, if (activeLook) s.shadows else 0f)
+                    GLES20.glUniform1f(uLookWhitesLoc, if (activeLook) s.whites else 0f)
+                    GLES20.glUniform1f(uLookBlacksLoc, if (activeLook) s.blacks else 0f)
+                    GLES20.glUniform1f(uLookVibranceLoc, if (activeLook) s.vibrance else 0f)
+                    GLES20.glUniform1f(uLookSatLoc, if (activeLook) s.saturation else 0f)
+                    GLES20.glUniform1f(uSplitActiveLoc, if (activeLook && s.hasSplit) 1f else 0f)
+                    GLES20.glUniform3f(uSplitShadowLoc, s.shR, s.shG, s.shB)
+                    GLES20.glUniform3f(uSplitMidLoc, s.midR, s.midG, s.midB)
+                    GLES20.glUniform3f(uSplitHighLoc, s.hiR, s.hiG, s.hiB)
+                    GLES20.glUniform1f(uMonoMixLoc, if (activeLook) s.monoMix else 0f)
+                    GLES20.glUniform3f(uBwWeightsLoc, s.bwR, s.bwG, s.bwB)
+                    GLES20.glUniform1f(uChannelSwapLoc, if (activeSwap) 1f else 0f)
+                    GLES20.glUniform1f(uTargetHueLoc, s.targetHue)
+                    GLES20.glUniform1f(uHueWidthLoc, s.hueWidth)
+                    GLES20.glUniform1f(uHueFeatherLoc, s.hueFeather)
+                    GLES20.glUniform1f(uDeltaHueLoc, s.deltaHue)
+                    GLES20.glUniform1f(uDeltaSatLoc, s.deltaSat)
+                    GLES20.glUniform1f(uDeltaLumLoc, s.deltaLum)
+                    GLES20.glUniform1f(uActiveLoc, if (activePoint) 1f else 0f)
+                    GLES20.glUniform1f(uBandsActiveLoc, if (activeBands) 1f else 0f)
+
+                    GLES20.glUniform4f(uBandHueALoc, s.bandHue[0], s.bandHue[1], s.bandHue[2], s.bandHue[3])
+                    GLES20.glUniform4f(uBandHueBLoc, s.bandHue[4], s.bandHue[5], s.bandHue[6], s.bandHue[7])
+                    GLES20.glUniform4f(uBandHueCLoc, s.bandHue[8], s.bandHue[9], s.bandHue[10], s.bandHue[11])
+                    GLES20.glUniform4f(uBandSatALoc, s.bandSat[0], s.bandSat[1], s.bandSat[2], s.bandSat[3])
+                    GLES20.glUniform4f(uBandSatBLoc, s.bandSat[4], s.bandSat[5], s.bandSat[6], s.bandSat[7])
+                    GLES20.glUniform4f(uBandSatCLoc, s.bandSat[8], s.bandSat[9], s.bandSat[10], s.bandSat[11])
+                    GLES20.glUniform4f(uBandLumALoc, s.bandLum[0], s.bandLum[1], s.bandLum[2], s.bandLum[3])
+                    GLES20.glUniform4f(uBandLumBLoc, s.bandLum[4], s.bandLum[5], s.bandLum[6], s.bandLum[7])
+                    GLES20.glUniform4f(uBandLumCLoc, s.bandLum[8], s.bandLum[9], s.bandLum[10], s.bandLum[11])
+                    GLES20.glUniform1f(uFocusPeakingLoc, if (s.focusPeaking) 1f else 0f)
+                }
+
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+                GLES20.glDisableVertexAttribArray(aPositionLoc)
+                GLES20.glDisableVertexAttribArray(aTexCoordLoc)
+            }
 
             EGL14.eglSwapBuffers(eglDisplay, eglSurface)
         } catch (t: Throwable) {
@@ -567,6 +635,8 @@ internal class PreTiramisuGlPreviewRenderer {
     private fun cleanupSurfaceOnGlThread() {
         hasFirstFrame = false
         attachedOutputSt = null
+        lastUsedProgram = 0
+        lastUploadedSnapshot = null
         inputSurfaceTexture?.let { st ->
             try {
                 st.setOnFrameAvailableListener(null)
@@ -589,9 +659,15 @@ internal class PreTiramisuGlPreviewRenderer {
     }
 
     private fun cleanupContextOnGlThread() {
+        lastUsedProgram = 0
+        lastUploadedSnapshot = null
         if (program != 0) {
             GLES20.glDeleteProgram(program)
             program = 0
+        }
+        if (passthroughProgram != 0) {
+            GLES20.glDeleteProgram(passthroughProgram)
+            passthroughProgram = 0
         }
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
             EGL14.eglMakeCurrent(eglDisplay, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_SURFACE, EGL14.EGL_NO_CONTEXT)
@@ -618,11 +694,21 @@ internal class PreTiramisuGlPreviewRenderer {
             }
         """
 
+        private const val PASSTHROUGH_FRAGMENT_SHADER = """
+            #extension GL_OES_EGL_image_external : require
+            precision mediump float;
+            varying highp vec2 vTexCoord;
+            uniform samplerExternalOES uContent;
+            void main() {
+                gl_FragColor = texture2D(uContent, vTexCoord);
+            }
+        """
+
         private const val FRAGMENT_SHADER = """
             #extension GL_OES_EGL_image_external : require
-            precision highp float;
+            precision mediump float;
 
-            varying vec2 vTexCoord;
+            varying highp vec2 vTexCoord;
             uniform samplerExternalOES uContent;
             uniform vec2 uTexelSize;
 
@@ -763,8 +849,8 @@ internal class PreTiramisuGlPreviewRenderer {
                     if (abs(uLookContrast) > 0.004) {
                         float k = clamp(1.0 + uLookContrast * 0.85, 0.70, 1.55);
                         targetL = targetL <= 0.5
-                            ? 0.5 * pow(max(2.0 * targetL, 0.00001), k)
-                            : 1.0 - 0.5 * pow(max(2.0 * (1.0 - targetL), 0.00001), k);
+                            ? 0.5 * pow(max(2.0 * targetL, 0.0005), k)
+                            : 1.0 - 0.5 * pow(max(2.0 * (1.0 - targetL), 0.0005), k);
                     }
                     float lRatio = targetL / max(l, 0.001);
                     rgb = clamp(rgb * mix(1.0, lRatio, 0.92) + vec3((targetL - l) * 0.08), 0.0, 1.0);

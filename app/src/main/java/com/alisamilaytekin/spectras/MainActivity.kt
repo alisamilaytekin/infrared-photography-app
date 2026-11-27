@@ -716,10 +716,13 @@ private fun choosePreviewSize(
     }
     val candidates = matching.ifEmpty { previewSizes.toList() }
 
-    // Allow 1920x1080 (16:9), 1440x1080 (4:3), and 1088x1088 (1:1) while staying within LIMITED bounds
+    // Android 13+: keep full 1920x1088 crisp preview.
+    // Android 12 and below (GLES2 shader path): cap tier 0 to 1280x960 (~56% less GPU fill-rate = 2x+ FPS)
+    // while still capturing full-resolution JPEG/RAW photos.
+    val preTiramisu = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
     val (maxLong, maxPixels) = when (fallbackTier) {
-        0 -> 1920 to (1920L * 1088L)
-        1 -> 1280 to (1280L * 960L)
+        0 -> if (preTiramisu) 1280 to (1280L * 960L) else 1920 to (1920L * 1088L)
+        1 -> if (preTiramisu) 960 to (960L * 720L) else 1280 to (1280L * 960L)
         else -> 800 to (800L * 600L)
     }
 
@@ -4258,7 +4261,7 @@ fun CameraScreen(
     fun measureAndApplyExposureMetering(applyEvAdjust: Boolean) {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
-        val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
+        val bmp = try { view.getBitmap(96, 96) } catch (_: Exception) { null } ?: return
         val captureZebra = showZebra
         coroutineScope.launch(Dispatchers.Default) {
             try {
@@ -4368,7 +4371,7 @@ fun CameraScreen(
     fun runAutoContrast() {
         val view = textureViewInstance ?: return
         if (!view.isAvailable || view.width <= 0 || view.height <= 0) return
-        val bmp = try { view.getBitmap(160, 160) } catch (_: Exception) { null } ?: return
+        val bmp = try { view.getBitmap(96, 96) } catch (_: Exception) { null } ?: return
         coroutineScope.launch(Dispatchers.Default) {
             try {
                 val res = calculateAutoContrastFromPreview(bmp, aeStep, exposureEvIndex, aeRange)
@@ -5538,12 +5541,25 @@ fun CameraScreen(
         }
     }
 
-    LaunchedEffect(cameraReady, isStudioMode, meteringMode, exposureBoxNorm, exposureBoxSizeNorm, surfaceGeneration) {
+    LaunchedEffect(
+        cameraReady,
+        isStudioMode,
+        experienceMode,
+        histogramDisplayMode,
+        showZebra,
+        meteringMode,
+        exposureBoxNorm,
+        exposureBoxSizeNorm,
+        surfaceGeneration
+    ) {
+        val pollMs = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) 750L else 450L
         while (cameraReady && !isStudioMode) {
-            if (!holder.isTakingPhoto) {
+            val needTelemetryReadback = experienceMode != ExperienceMode.AESTHETIC &&
+                (histogramDisplayMode != HistogramDisplayMode.ICON || showZebra || meteringMode == ExposureMeteringMode.BOX_SPOT)
+            if (needTelemetryReadback && !holder.isTakingPhoto && !isAnySliderDragging) {
                 measureAndApplyExposureMetering(applyEvAdjust = false)
             }
-            delay(450)
+            delay(pollMs)
         }
     }
 

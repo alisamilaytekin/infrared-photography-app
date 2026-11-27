@@ -153,6 +153,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.roundToInt
@@ -446,6 +447,8 @@ internal class ProHistogramData(
     val b: FloatArray = FloatArray(48),
     val luma: FloatArray = FloatArray(48),
     val hueBins: FloatArray = FloatArray(48),
+    val spectrum: FloatArray = FloatArray(48),
+    val peakWavelengthNm: Int = 550,
     val shadowClip: Boolean = false,
     val highlightClip: Boolean = false
 )
@@ -2639,7 +2642,49 @@ private fun perceptualBandPosToHue(pos: Float): Float {
     return ((clamped * 30f - 15f) % 360f + 360f) % 360f
 }
 
-// Önizleme görüntüsünden 48 sütunlu profesyonel RGB + Parlaklık + Algısal Bant Hizalı Renk Tonu (Hue) histogramı üretir
+private const val SPECTRUM_LAMBDA_MIN = 360f
+private const val SPECTRUM_LAMBDA_MAX = 700f
+private const val SPECTRUM_LAMBDA_SPAN = SPECTRUM_LAMBDA_MAX - SPECTRUM_LAMBDA_MIN
+private const val SPECTRUM_BINS = 48
+
+private fun buildSpectralGaussianBasis(centerNm: Float, sigmaNm: Float, weight: Float = 1f): FloatArray {
+    return FloatArray(SPECTRUM_BINS) { i ->
+        val lambda = SPECTRUM_LAMBDA_MIN + (i.toFloat() / (SPECTRUM_BINS - 1)) * SPECTRUM_LAMBDA_SPAN
+        val d = (lambda - centerNm) / sigmaNm
+        (weight * exp(-0.5 * d * d)).toFloat()
+    }
+}
+
+private val SPEC_BASIS_UV_V = buildSpectralGaussianBasis(centerNm = 395f, sigmaNm = 22f, weight = 0.42f)
+private val SPEC_BASIS_BLUE = buildSpectralGaussianBasis(centerNm = 455f, sigmaNm = 30f, weight = 1.0f)
+private val SPEC_BASIS_GREEN = buildSpectralGaussianBasis(centerNm = 535f, sigmaNm = 36f, weight = 1.0f)
+private val SPEC_BASIS_RED = buildSpectralGaussianBasis(centerNm = 620f, sigmaNm = 38f, weight = 1.0f)
+private val SPEC_BASIS_FAR_RED = buildSpectralGaussianBasis(centerNm = 675f, sigmaNm = 22f, weight = 0.34f)
+
+private fun wavelengthToSpectralColor(lambdaNm: Float): Color {
+    val l = lambdaNm.coerceIn(SPECTRUM_LAMBDA_MIN, SPECTRUM_LAMBDA_MAX)
+    return when {
+        l < 405f -> lerp(Color(0xFF5B21B6), Color(0xFF7C3AED), (l - 360f) / 45f)
+        l < 455f -> lerp(Color(0xFF7C3AED), Color(0xFF2563EB), (l - 405f) / 50f)
+        l < 495f -> lerp(Color(0xFF2563EB), Color(0xFF06B6D4), (l - 455f) / 40f)
+        l < 535f -> lerp(Color(0xFF06B6D4), Color(0xFF22C55E), (l - 495f) / 40f)
+        l < 575f -> lerp(Color(0xFF22C55E), Color(0xFFEAB308), (l - 535f) / 40f)
+        l < 610f -> lerp(Color(0xFFEAB308), Color(0xFFF97316), (l - 575f) / 35f)
+        l < 655f -> lerp(Color(0xFFF97316), Color(0xFFEF4444), (l - 610f) / 45f)
+        else -> lerp(Color(0xFFEF4444), Color(0xFF991B1B), (l - 655f) / 45f)
+    }
+}
+
+private fun addSpectralPeak(target: FloatArray, lambdaNm: Float, energy: Float) {
+    if (energy <= 0f) return
+    val pos = ((lambdaNm - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN) * (target.size - 1)
+    val idx = pos.roundToInt().coerceIn(0, target.size - 1)
+    target[idx] += energy * 0.56f
+    if (idx > 0) target[idx - 1] += energy * 0.22f
+    if (idx + 1 < target.size) target[idx + 1] += energy * 0.22f
+}
+
+// Önizleme görüntüsünden 48 sütunlu profesyonel RGB + Parlaklık + 360-700nm Görünür Spektrum + Renk Tonu (Hue) histogramı üretir
 internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogramData {
     val w = bitmap.width
     val h = bitmap.height
@@ -2652,7 +2697,11 @@ internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogr
     val bCounts = FloatArray(bins)
     val lCounts = FloatArray(bins)
     val hueWeights = FloatArray(bins)
+    val chromaSpec = FloatArray(SPECTRUM_BINS)
     val hsv = FloatArray(3)
+    var broadR = 0.0
+    var broadG = 0.0
+    var broadB = 0.0
     var totalPixels = 0
     var shadowClipped = 0
     var highlightClipped = 0
@@ -2676,10 +2725,39 @@ internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogr
             if (luma >= 250f) highlightClipped++
             totalPixels++
 
-            // Doygunluk ağırlıklı renk tonu (Hue) dağılımı — 12 bant sütunuyla 1:1 hizalı
+            // Doygunluk ağırlıklı renk tonu (Hue) + 360–700nm görünür ışık spektrumu (radyometrik enerji)
             AndroidColor.RGBToHSV(r, g, b, hsv)
             val sat = hsv[1]
             val lum = hsv[2]
+            val rLin = (r / 255f) * (r / 255f)
+            val gLin = (g / 255f) * (g / 255f)
+            val bLin = (b / 255f) * (b / 255f)
+            val broadWeight = (1f - 0.55f * sat).coerceIn(0.35f, 1f)
+            broadR += rLin * broadWeight
+            broadG += gLin * broadWeight
+            broadB += bLin * broadWeight
+
+            if (sat > 0.08f && lum > 0.05f) {
+                val energy = (0.2126f * rLin + 0.7152f * gLin + 0.0722f * bLin) * sat * 0.9f
+                val hueDeg = hsv[0]
+                if (hueDeg <= 280f) {
+                    val lambdaNm = when {
+                        hueDeg <= 30f -> 650f - (hueDeg / 30f) * 45f
+                        hueDeg <= 60f -> 605f - ((hueDeg - 30f) / 30f) * 30f
+                        hueDeg <= 120f -> 575f - ((hueDeg - 60f) / 60f) * 45f
+                        hueDeg <= 180f -> 530f - ((hueDeg - 120f) / 60f) * 40f
+                        hueDeg <= 240f -> 490f - ((hueDeg - 180f) / 60f) * 35f
+                        else -> 455f - ((hueDeg - 240f) / 40f) * 65f
+                    }
+                    addSpectralPeak(chromaSpec, lambdaNm, energy)
+                } else {
+                    // Mor / Macenta spektral olmayan karışımdır: 400nm (mor) + 650nm (kırmızı) çift tepe
+                    val t = ((hueDeg - 280f) / 80f).coerceIn(0f, 1f)
+                    addSpectralPeak(chromaSpec, 400f, energy * (1f - t))
+                    addSpectralPeak(chromaSpec, 650f, energy * t)
+                }
+            }
+
             if (sat > 0.10f && lum > 0.06f && lum < 0.96f) {
                 val bandPos = hueToPerceptualBandPos(hsv[0])
                 val hueBin = ((bandPos / 12f) * bins).toInt().coerceIn(0, bins - 1)
@@ -2691,18 +2769,51 @@ internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogr
     }
 
     fun smoothAndNormalize(arr: FloatArray, globalMax: Float, circular: Boolean = false): FloatArray {
-        val out = FloatArray(bins)
-        val denom = globalMax.coerceAtLeast(1f)
-        for (i in 0 until bins) {
-            val prev = if (i > 0) arr[i - 1] else if (circular) arr[bins - 1] else arr[0]
-            val next = if (i < bins - 1) arr[i + 1] else if (circular) arr[0] else arr[bins - 1]
+        val out = FloatArray(arr.size)
+        val denom = globalMax.coerceAtLeast(1e-5f)
+        for (i in arr.indices) {
+            val prev = if (i > 0) arr[i - 1] else if (circular) arr[arr.size - 1] else arr[0]
+            val next = if (i < arr.size - 1) arr[i + 1] else if (circular) arr[0] else arr[arr.size - 1]
             val smoothed = (prev * 0.25f + arr[i] * 0.50f + next * 0.25f)
-            // Hafif logaritmik sıkıştırma: tek bir tepe diğer tonları ezmez (Lightroom tarzı okunabilirlik)
             val ratio = (smoothed / denom).coerceIn(0f, 1f)
             out[i] = ratio.toDouble().pow(0.75).toFloat().coerceIn(0f, 1f)
         }
         return out
     }
+
+    // 360–700nm sürekli optik spektrum eğrisi (geniş bant RGB sensör tabanı + dar bant kromatik enerji)
+    val rawSpec = FloatArray(SPECTRUM_BINS)
+    val bF = broadB.toFloat()
+    val gF = broadG.toFloat()
+    val rF = broadR.toFloat()
+    val uvWeight = bF * 0.55f + minOf(rF, bF) * 0.45f
+    for (i in 0 until SPECTRUM_BINS) {
+        val broad = bF * SPEC_BASIS_BLUE[i] +
+            gF * SPEC_BASIS_GREEN[i] +
+            rF * (SPEC_BASIS_RED[i] + SPEC_BASIS_FAR_RED[i]) +
+            uvWeight * SPEC_BASIS_UV_V[i]
+        rawSpec[i] = broad + chromaSpec[i] * 2.2f
+    }
+    // İkinci hafif yumuşatma (optik spektrometre FWHM profili)
+    val smoothSpec = FloatArray(SPECTRUM_BINS)
+    var specPeak = 1e-4f
+    var peakIdx = SPECTRUM_BINS / 2
+    for (i in 0 until SPECTRUM_BINS) {
+        val p = if (i > 0) rawSpec[i - 1] else rawSpec[0]
+        val n = if (i < SPECTRUM_BINS - 1) rawSpec[i + 1] else rawSpec[SPECTRUM_BINS - 1]
+        val v = p * 0.25f + rawSpec[i] * 0.50f + n * 0.25f
+        smoothSpec[i] = v
+        if (v > specPeak) {
+            specPeak = v
+            peakIdx = i
+        }
+    }
+    val normSpectrum = FloatArray(SPECTRUM_BINS) { i ->
+        (smoothSpec[i] / specPeak).coerceIn(0f, 1f)
+    }
+    val peakLambdaNm = (SPECTRUM_LAMBDA_MIN + (peakIdx.toFloat() / (SPECTRUM_BINS - 1)) * SPECTRUM_LAMBDA_SPAN)
+        .roundToInt()
+        .coerceIn(360, 700)
 
     var rgbPeak = 1f
     for (i in 0 until bins) {
@@ -2723,6 +2834,8 @@ internal fun computeProHistogramData(bitmap: Bitmap, bins: Int = 48): ProHistogr
         b = smoothAndNormalize(bCounts, rgbPeak),
         luma = smoothAndNormalize(lCounts, rgbPeak),
         hueBins = smoothAndNormalize(hueWeights, huePeak, circular = true),
+        spectrum = normSpectrum,
+        peakWavelengthNm = peakLambdaNm,
         shadowClip = (shadowClipped / denomTotal) > 0.015f,
         highlightClip = (highlightClipped / denomTotal) > 0.015f
     )
@@ -9474,7 +9587,7 @@ internal fun LiveHistogramOverlay(
     val targetWidth by animateDpAsState(
         targetValue = when (mode) {
             HistogramDisplayMode.NORMAL -> 114.dp
-            HistogramDisplayMode.EXPANDED -> 158.dp
+            HistogramDisplayMode.EXPANDED -> 168.dp
             HistogramDisplayMode.ICON -> 36.dp
         },
         animationSpec = tween(180),
@@ -9483,7 +9596,7 @@ internal fun LiveHistogramOverlay(
     val targetHeight by animateDpAsState(
         targetValue = when (mode) {
             HistogramDisplayMode.NORMAL -> 44.dp
-            HistogramDisplayMode.EXPANDED -> 76.dp
+            HistogramDisplayMode.EXPANDED -> 78.dp
             HistogramDisplayMode.ICON -> 32.dp
         },
         animationSpec = tween(180),
@@ -9493,16 +9606,29 @@ internal fun LiveHistogramOverlay(
         fontFamily = FontFamily.Monospace,
         platformStyle = PlatformTextStyle(includeFontPadding = false)
     )
+    val spectrumColors = remember {
+        listOf(
+            Color(0xFF5B21B6), // 360nm UV-Violet
+            Color(0xFF7C3AED), // 405nm Violet
+            Color(0xFF2563EB), // 455nm Blue
+            Color(0xFF06B6D4), // 495nm Cyan
+            Color(0xFF22C55E), // 535nm Green
+            Color(0xFFEAB308), // 575nm Yellow
+            Color(0xFFF97316), // 610nm Orange
+            Color(0xFFEF4444), // 655nm Red
+            Color(0xFF991B1B)  // 700nm Far-Red / NIR edge
+        )
+    }
 
     Box(
         modifier = modifier
             .width(targetWidth)
             .height(targetHeight)
             .clip(RoundedCornerShape(10.dp))
-            .background(Color(0xD907090D))
+            .background(Color(0xDE07090D))
             .border(0.9.dp, borderColor, RoundedCornerShape(10.dp))
             .padding(
-                horizontal = if (mode == HistogramDisplayMode.ICON) 6.dp else 5.dp,
+                horizontal = if (mode == HistogramDisplayMode.ICON) 6.dp else 6.dp,
                 vertical = if (mode == HistogramDisplayMode.ICON) 6.dp else 4.dp
             )
     ) {
@@ -9510,13 +9636,13 @@ internal fun LiveHistogramOverlay(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val w = size.width
                 val h = size.height
-                val barHeights = floatArrayOf(0.42f, 0.85f, 0.62f, 0.96f, 0.50f)
+                val barHeights = floatArrayOf(0.40f, 0.78f, 0.96f, 0.68f, 0.48f)
                 val barColors = listOf(
-                    Color(0xFF0A84FF),
-                    Color(0xFF30D158),
-                    Color.White.copy(alpha = 0.9f),
-                    Color(0xFFFF453A),
-                    Color(0xFFF5A623)
+                    Color(0xFF7C3AED),
+                    Color(0xFF2563EB),
+                    Color(0xFF22C55E),
+                    Color(0xFFF97316),
+                    Color(0xFFEF4444)
                 )
                 val count = barHeights.size
                 val gap = 2.dp.toPx()
@@ -9525,7 +9651,7 @@ internal fun LiveHistogramOverlay(
                     val bh = (h * barHeights[i]).coerceAtLeast(2f)
                     val x = i * (barW + gap)
                     drawRoundRect(
-                        color = barColors[i].copy(alpha = 0.9f),
+                        color = barColors[i].copy(alpha = 0.92f),
                         topLeft = Offset(x, h - bh),
                         size = androidx.compose.ui.geometry.Size(barW, bh),
                         cornerRadius = CornerRadius(1.2.dp.toPx(), 1.2.dp.toPx())
@@ -9538,30 +9664,23 @@ internal fun LiveHistogramOverlay(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 if (mode == HistogramDisplayMode.EXPANDED) {
+                    val peakColor = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "B 450nm",
-                            color = Color(0xFF38BDF8),
+                            text = "λ 360–700nm",
+                            color = Color.White.copy(alpha = 0.72f),
                             fontSize = 7.5.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             style = microStyle,
                             maxLines = 1
                         )
                         Text(
-                            text = "G 530nm",
-                            color = Color(0xFF30D158),
-                            fontSize = 7.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            style = microStyle,
-                            maxLines = 1
-                        )
-                        Text(
-                            text = "R 630nm",
-                            color = Color(0xFFFF5A4F),
+                            text = "Peak ${data.peakWavelengthNm}nm",
+                            color = peakColor,
                             fontSize = 7.5.sp,
                             fontWeight = FontWeight.Bold,
                             style = microStyle,
@@ -9575,97 +9694,103 @@ internal fun LiveHistogramOverlay(
                         .fillMaxWidth()
                         .weight(1f)
                 ) {
-                    val luma = data.luma
-                    if (luma.isEmpty()) return@Canvas
+                    val spec = data.spectrum
+                    if (spec.isEmpty()) return@Canvas
                     val w = size.width
                     val h = size.height
+                    val stripH = 2.2.dp.toPx()
+                    val baseY = (h - stripH - 1.dp.toPx()).coerceAtLeast(2f)
                     val topPad = 2.5.dp.toPx()
-                    val graphH = (h - topPad).coerceAtLeast(1f)
+                    val graphH = (baseY - topPad).coerceAtLeast(1f)
 
-                    // 5 pozlama bölgesi dikey referans ızgarası (Siyahlar · Gölgeler · Orta · Vurgular · Beyazlar)
-                    val zoneGuide = Color.White.copy(alpha = 0.10f)
-                    val midGuide = Color.White.copy(alpha = 0.17f)
-                    for (z in 1..4) {
-                        val x = w * (z / 5f)
-                        drawLine(zoneGuide, Offset(x, 0f), Offset(x, h), strokeWidth = 0.7.dp.toPx())
+                    // Bilimsel dalgaboyu dikey referans çizgileri: 400nm · 500nm · 600nm
+                    val gridColor = Color.White.copy(alpha = 0.11f)
+                    val midGuide = Color.White.copy(alpha = 0.15f)
+                    for (wl in listOf(400f, 500f, 600f)) {
+                        val frac = (wl - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN
+                        val x = w * frac
+                        drawLine(gridColor, Offset(x, 0f), Offset(x, baseY), strokeWidth = 0.7.dp.toPx())
                     }
-                    drawLine(midGuide, Offset(0f, topPad + graphH * 0.5f), Offset(w, topPad + graphH * 0.5f), strokeWidth = 0.6.dp.toPx())
-
-                    fun buildSmoothCurvePaths(bins: FloatArray): Pair<Path, Path> {
-                        val step = w / (bins.size - 1).coerceAtLeast(1)
-                        val fillPath = Path()
-                        val strokePath = Path()
-                        fillPath.moveTo(0f, h)
-                        var prevX = 0f
-                        var prevY = h - (bins[0].coerceIn(0f, 1f) * graphH)
-                        fillPath.lineTo(prevX, prevY)
-                        strokePath.moveTo(prevX, prevY)
-                        for (i in 1 until bins.size) {
-                            val cx = i * step
-                            val cy = h - (bins[i].coerceIn(0f, 1f) * graphH)
-                            val midX = (prevX + cx) * 0.5f
-                            val midY = (prevY + cy) * 0.5f
-                            fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
-                            strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
-                            prevX = cx
-                            prevY = cy
-                        }
-                        fillPath.lineTo(prevX, prevY)
-                        fillPath.lineTo(w, h)
-                        fillPath.close()
-                        strokePath.lineTo(prevX, prevY)
-                        return fillPath to strokePath
-                    }
-
-                    // Üst üste katmanlı RGB kanalları (renk dengesi tek bakışta okunur)
-                    val channels = listOf(
-                        Triple(data.r, Color(0xFFFF453A), 0.34f),
-                        Triple(data.g, Color(0xFF30D158), 0.32f),
-                        Triple(data.b, Color(0xFF0A84FF), 0.36f)
+                    drawLine(
+                        midGuide,
+                        Offset(0f, topPad + graphH * 0.5f),
+                        Offset(w, topPad + graphH * 0.5f),
+                        strokeWidth = 0.6.dp.toPx()
                     )
-                    channels.forEach { (bins, color, fillAlpha) ->
-                        if (bins.isNotEmpty()) {
-                            val (fillP, strokeP) = buildSmoothCurvePaths(bins)
-                            drawPath(
-                                path = fillP,
-                                brush = Brush.verticalGradient(
-                                    colors = listOf(color.copy(alpha = fillAlpha), color.copy(alpha = 0.04f))
-                                ),
-                                style = Fill
-                            )
-                            drawPath(
-                                path = strokeP,
-                                color = color.copy(alpha = 0.72f),
-                                style = Stroke(width = 0.9.dp.toPx(), join = StrokeJoin.Round)
-                            )
-                        }
-                    }
 
-                    // Üstte parlak beyaz Luma (genel parlaklık) zarf çizgisi
-                    val (lumaFill, lumaStroke) = buildSmoothCurvePaths(luma)
+                    // Yumuşatılmış 360–700nm görünür ışık spektrumu eğrisi S(λ)
+                    val step = w / (spec.size - 1).coerceAtLeast(1)
+                    val fillPath = Path()
+                    val strokePath = Path()
+                    fillPath.moveTo(0f, baseY)
+                    var prevX = 0f
+                    var prevY = baseY - (spec[0].coerceIn(0f, 1f) * graphH)
+                    fillPath.lineTo(prevX, prevY)
+                    strokePath.moveTo(prevX, prevY)
+                    for (i in 1 until spec.size) {
+                        val cx = i * step
+                        val cy = baseY - (spec[i].coerceIn(0f, 1f) * graphH)
+                        val midX = (prevX + cx) * 0.5f
+                        val midY = (prevY + cy) * 0.5f
+                        fillPath.quadraticBezierTo(prevX, prevY, midX, midY)
+                        strokePath.quadraticBezierTo(prevX, prevY, midX, midY)
+                        prevX = cx
+                        prevY = cy
+                    }
+                    fillPath.lineTo(prevX, prevY)
+                    fillPath.lineTo(w, baseY)
+                    fillPath.close()
+                    strokePath.lineTo(prevX, prevY)
+
+                    // Eğri altı sürekli CIE görünür spektrum dolgusu (360nm mor → 700nm derin kırmızı)
                     drawPath(
-                        path = lumaFill,
-                        brush = Brush.verticalGradient(
-                            colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.02f))
+                        path = fillPath,
+                        brush = Brush.horizontalGradient(
+                            colors = spectrumColors.map { it.copy(alpha = 0.56f) }
                         ),
                         style = Fill
                     )
+                    // Parlak spektral üst çizgi + ince beyaz parlaklık zarfı
                     drawPath(
-                        path = lumaStroke,
-                        color = Color.White.copy(alpha = 0.94f),
-                        style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
+                        path = strokePath,
+                        brush = Brush.horizontalGradient(colors = spectrumColors),
+                        style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round)
+                    )
+                    drawPath(
+                        path = strokePath,
+                        color = Color.White.copy(alpha = 0.72f),
+                        style = Stroke(width = 0.75.dp.toPx(), join = StrokeJoin.Round)
                     )
 
-                    // Alt taban çizgisi
+                    // Tepe dalgaboyu (λpeak) dikey referans çizgisi ve noktası
+                    val peakFrac = ((data.peakWavelengthNm - SPECTRUM_LAMBDA_MIN) / SPECTRUM_LAMBDA_SPAN)
+                        .coerceIn(0f, 1f)
+                    val peakX = w * peakFrac
+                    val peakBin = (peakFrac * (spec.size - 1)).roundToInt().coerceIn(0, spec.size - 1)
+                    val peakY = baseY - (spec[peakBin].coerceIn(0f, 1f) * graphH)
+                    val peakCol = wavelengthToSpectralColor(data.peakWavelengthNm.toFloat())
                     drawLine(
-                        color = Color.White.copy(alpha = 0.22f),
-                        start = Offset(0f, h),
-                        end = Offset(w, h),
+                        color = peakCol.copy(alpha = 0.55f),
+                        start = Offset(peakX, peakY),
+                        end = Offset(peakX, baseY),
                         strokeWidth = 0.8.dp.toPx()
                     )
+                    drawCircle(
+                        color = Color.White,
+                        radius = 1.9.dp.toPx(),
+                        center = Offset(peakX, peakY)
+                    )
 
-                    // Sol üst gölge taşma (crushed blacks) + sağ üst vurgu yanma (blown highlights) üçgen göstergeleri
-                    val tri = 4.2.dp.toPx()
+                    // Alt 360–700nm sürekli renk referans bandı
+                    drawRoundRect(
+                        brush = Brush.horizontalGradient(colors = spectrumColors),
+                        topLeft = Offset(0f, h - stripH),
+                        size = androidx.compose.ui.geometry.Size(w, stripH),
+                        cornerRadius = CornerRadius(stripH * 0.5f, stripH * 0.5f)
+                    )
+
+                    // Sol üst gölge + sağ üst vurgu taşma göstergeleri
+                    val tri = 3.8.dp.toPx()
                     val shadowTri = Path().apply {
                         moveTo(0f, 0f)
                         lineTo(tri, 0f)
@@ -9674,7 +9799,7 @@ internal fun LiveHistogramOverlay(
                     }
                     drawPath(
                         path = shadowTri,
-                        color = if (data.shadowClip) IrPalette.IrCyan else Color.White.copy(alpha = 0.18f),
+                        color = if (data.shadowClip) IrPalette.IrCyan else Color.White.copy(alpha = 0.16f),
                         style = Fill
                     )
 
@@ -9686,7 +9811,7 @@ internal fun LiveHistogramOverlay(
                     }
                     drawPath(
                         path = highlightTri,
-                        color = if (data.highlightClip) IrPalette.IrCoral else Color.White.copy(alpha = 0.18f),
+                        color = if (data.highlightClip) IrPalette.IrCoral else Color.White.copy(alpha = 0.16f),
                         style = Fill
                     )
                 }
@@ -9696,11 +9821,11 @@ internal fun LiveHistogramOverlay(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        listOf("0", "64", "128", "192", "255").forEach { tick ->
+                        listOf("360", "445", "530", "615", "700nm").forEach { tick ->
                             Text(
                                 text = tick,
-                                color = Color.White.copy(alpha = 0.56f),
-                                fontSize = 7.sp,
+                                color = Color.White.copy(alpha = 0.62f),
+                                fontSize = 6.8.sp,
                                 style = microStyle,
                                 maxLines = 1
                             )

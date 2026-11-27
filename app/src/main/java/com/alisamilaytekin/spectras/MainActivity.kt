@@ -587,6 +587,7 @@ private class CameraHolder {
     var isDisposed: Boolean = false
 
     @Volatile var useFrontCamera: Boolean = false
+    @Volatile var mirrorFrontCamera: Boolean = false
     @Volatile var hasFlash: Boolean = false
     @Volatile var flashMode: FlashMode = FlashMode.OFF
     @Volatile var availableAeModes: IntArray = intArrayOf()
@@ -3550,6 +3551,9 @@ fun CameraScreen(
     var isAutoMode by remember { mutableStateOf(true) }
     var pendingIrLabAutoSeed by remember { mutableStateOf(experienceMode == ExperienceMode.IR_LAB) }
     var useFrontCamera by remember { mutableStateOf(false) }
+    var mirrorFrontCamera by remember {
+        mutableStateOf(sharedPrefs.getBoolean("mirror_front_camera", false))
+    }
     var hasFlash by remember { mutableStateOf(false) }
     var flashMode by remember { mutableStateOf(FlashMode.OFF) }
     var channelSwapEnabled by remember { mutableStateOf(false) }
@@ -3888,6 +3892,7 @@ fun CameraScreen(
         holder.rawCaptureEnabled = rawEnabled
         holder.flashMode = flashMode
         holder.useFrontCamera = useFrontCamera
+        holder.mirrorFrontCamera = mirrorFrontCamera
     }
 
     fun applyCamera2Settings(
@@ -5020,10 +5025,12 @@ fun CameraScreen(
                     withContext(Dispatchers.Main) { lastCapturedThumb = imgBmp }
                 }
 
+                val snapMirrorFront = (lensFacing == CameraCharacteristics.LENS_FACING_FRONT) && holder.mirrorFrontCamera
                 val ok = withContext(Dispatchers.IO) {
-                    if (hasSelectiveHsl) {
+                    if (hasSelectiveHsl || snapMirrorFront) {
                         var decoded: Bitmap? = null
                         var graded: Bitmap? = null
+                        var mirrored: Bitmap? = null
                         try {
                             val orientation = readExifOrientation(bytes, context.cacheDir)
                             val opts = BitmapFactory.Options().apply {
@@ -5032,15 +5039,32 @@ fun CameraScreen(
                             }
                             decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
                             if (decoded != null) {
-                                graded = applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
-                                saveOutputToGalleryWithExif(context, null, graded, orientation, sourceExifBytes = bytes, onSavedUri = onSaved)
+                                graded = if (hasSelectiveHsl) {
+                                    applyTargetedHslToBitmap(decoded, snapTargetedColor, snapColorBands, snapChannelSwap, snapLookGrade)
+                                } else {
+                                    decoded
+                                }
+                                val finalBmp = if (snapMirrorFront) {
+                                    val m = Matrix()
+                                    if (orientation == ExifInterface.ORIENTATION_ROTATE_90 || orientation == ExifInterface.ORIENTATION_ROTATE_270) {
+                                        m.postScale(1f, -1f)
+                                    } else {
+                                        m.postScale(-1f, 1f)
+                                    }
+                                    mirrored = Bitmap.createBitmap(graded, 0, 0, graded.width, graded.height, m, true)
+                                    mirrored
+                                } else {
+                                    graded
+                                }
+                                saveOutputToGalleryWithExif(context, null, finalBmp, orientation, sourceExifBytes = bytes, onSavedUri = onSaved)
                             } else {
                                 saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                             }
                         } catch (e: Throwable) {
-                            Log.e("CameraScreen", "Targeted HSL post-processing failed", e)
+                            Log.e("CameraScreen", "Post-processing failed", e)
                             saveOutputToGallery(context, bytes, null, ExifInterface.ORIENTATION_NORMAL, onSaved)
                         } finally {
+                            if (mirrored != null && mirrored !== graded && mirrored !== decoded) mirrored.recycle()
                             if (graded != null && graded !== decoded) graded.recycle()
                             decoded?.recycle()
                         }
@@ -5414,6 +5438,33 @@ fun CameraScreen(
         } catch (_: Throwable) {}
         onDispose {
             try { orientationListener.disable() } catch (_: Throwable) {}
+        }
+    }
+
+    DisposableEffect(cameraManager) {
+        val availCallback = object : CameraManager.AvailabilityCallback() {
+            override fun onCameraAvailable(cameraId: String) {
+                cameraHandler.post {
+                    if (!holder.isDisposed && !currentIsStudioMode && holder.device == null && !holder.isOpening && !holder.isClosingDevice) {
+                        val expectedId = holder.activeCameraId
+                        if (expectedId == null || expectedId == cameraId) {
+                            val tv = textureViewInstance
+                            val st = tv?.surfaceTexture
+                            val valid = tv != null && tv.isAvailable && st != null &&
+                                (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !st.isReleased)
+                            if (valid && st != null) {
+                                startCameraInternal(st)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        try {
+            cameraManager.registerAvailabilityCallback(availCallback, cameraHandler)
+        } catch (_: Throwable) {}
+        onDispose {
+            try { cameraManager.unregisterAvailabilityCallback(availCallback) } catch (_: Throwable) {}
         }
     }
 
@@ -9416,6 +9467,20 @@ fun CameraScreen(
                                     showStatus(if (rawEnabled) strRawOn else strRawOff)
                                     cameraHandler.post { closeCameraInternal(releaseReader = true) }
                                     surfaceGeneration += 1
+                                }
+                            )
+                        }
+                    }
+                    if (hasFrontCamera) {
+                        item(key = "tool_mirror_front") {
+                            SettingsToggleRow(
+                                label = "Mirror Front Camera",
+                                checked = mirrorFrontCamera,
+                                accentColor = IrPalette.IrCyan,
+                                onToggle = {
+                                    mirrorFrontCamera = !mirrorFrontCamera
+                                    holder.mirrorFrontCamera = mirrorFrontCamera
+                                    sharedPrefs.edit { putBoolean("mirror_front_camera", mirrorFrontCamera) }
                                 }
                             )
                         }

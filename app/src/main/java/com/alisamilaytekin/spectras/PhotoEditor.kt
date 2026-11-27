@@ -6,10 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
+import android.graphics.Typeface
 import android.media.ExifInterface
 import android.net.Uri
 import android.os.Build
@@ -62,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.edit
 import androidx.core.graphics.get
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -622,6 +626,64 @@ private fun decodeUprightBitmapFromUri(context: Context, uri: Uri, maxEdge: Int)
     }
 }
 
+private fun readShortExifCaption(context: Context, uri: Uri, peakNm: Int, w: Int, h: Int): String {
+    val parts = mutableListOf<String>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                val exif = ExifInterface(stream)
+                exif.getAttribute("FNumber")?.toDoubleOrNull()?.let { f ->
+                    if (f > 0.0) parts.add("f/${String.format(Locale.US, "%.1f", f)}")
+                }
+                exif.getAttribute("ExposureTime")?.toDoubleOrNull()?.let { exp ->
+                    if (exp > 0.0) {
+                        val s = if (exp >= 1.0) "${String.format(Locale.US, "%.1f", exp)}s"
+                        else "1/${(1.0 / exp).roundToInt().coerceAtLeast(1)}s"
+                        parts.add(s)
+                    }
+                }
+                exif.getAttribute("ISOSpeedRatings")?.trim()?.takeIf { it.isNotEmpty() }?.let { iso ->
+                    parts.add("ISO $iso")
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+    if (parts.isEmpty()) {
+        parts.add("${w}×${h}")
+    }
+    parts.add("λ ${peakNm}nm")
+    return parts.joinToString("  ·  ")
+}
+
+private fun applyGalleryFilmFrame(source: Bitmap, metaRight: String): Bitmap {
+    val shortEdge = minOf(source.width, source.height).coerceAtLeast(100)
+    val padSide = (shortEdge * 0.036f).roundToInt().coerceAtLeast(16)
+    val padBottom = (shortEdge * 0.115f).roundToInt().coerceAtLeast(52)
+    val outW = source.width + padSide * 2
+    val outH = source.height + padSide + padBottom
+    val framed = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(framed)
+    canvas.drawColor(AndroidColor.rgb(248, 248, 246))
+    canvas.drawBitmap(source, padSide.toFloat(), padSide.toFloat(), null)
+
+    val brandPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.rgb(24, 24, 28)
+        textSize = (padBottom * 0.28f).coerceIn(14f, 68f)
+        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        letterSpacing = 0.16f
+    }
+    val metaPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.rgb(108, 114, 126)
+        textSize = (padBottom * 0.21f).coerceIn(11f, 50f)
+        typeface = Typeface.MONOSPACE
+        textAlign = Paint.Align.RIGHT
+    }
+    val baseY = (source.height + padSide) + padBottom * 0.60f
+    canvas.drawText("SPECTRAS", padSide.toFloat(), baseY, brandPaint)
+    canvas.drawText(metaRight, (outW - padSide).toFloat(), baseY, metaPaint)
+    return framed
+}
+
 private fun computePhotoSpotWb(bitmap: Bitmap, cx: Int, cy: Int): Pair<Float, Float> {
     var sumR = 0.0
     var sumG = 0.0
@@ -774,7 +836,12 @@ internal fun PhotoEditorScreen(
     var isSpotWbActive by remember { mutableStateOf(false) }
     var isPipetteActive by remember { mutableStateOf(false) }
     var pickedMarkerPos by remember { mutableStateOf<Offset?>(null) }
+    val editorPrefs = remember { context.getSharedPreferences("CameraPresetsPrefs", Context.MODE_PRIVATE) }
     var liveHistogram by remember { mutableStateOf(ProHistogramData()) }
+    var histogramDisplayMode by remember {
+        mutableStateOf(HistogramDisplayMode.fromKey(editorPrefs.getString("histogram_display_mode", null)))
+    }
+    var includeFilmFrame by remember { mutableStateOf(false) }
     var statusText by remember { mutableStateOf<String?>(null) }
     var statusNonce by remember { mutableIntStateOf(0) }
     var lastExportedUri by remember { mutableStateOf<Uri?>(null) }
@@ -922,14 +989,28 @@ internal fun PhotoEditorScreen(
             val ok = withContext(Dispatchers.IO) {
                 var fullBmp: Bitmap? = null
                 var gradedBmp: Bitmap? = null
+                var framedBmp: Bitmap? = null
                 try {
                     fullBmp = decodeUprightBitmapFromUri(context, uri, maxEdge = 4096)
                     if (fullBmp != null) {
                         gradedBmp = applyFullPhotoEditToBitmap(fullBmp, editConfig)
+                        val outputBmp = if (includeFilmFrame) {
+                            val caption = readShortExifCaption(
+                                context = context,
+                                uri = uri,
+                                peakNm = liveHistogram.peakWavelengthNm,
+                                w = gradedBmp.width,
+                                h = gradedBmp.height
+                            )
+                            framedBmp = applyGalleryFilmFrame(gradedBmp, caption)
+                            framedBmp
+                        } else {
+                            gradedBmp
+                        }
                         saveOutputToGallery(
                             context = context,
                             rawBytes = null,
-                            processedBitmap = gradedBmp,
+                            processedBitmap = outputBmp,
                             exifOrientation = ExifInterface.ORIENTATION_NORMAL
                         ) { saved ->
                             exportedUri = saved
@@ -941,6 +1022,7 @@ internal fun PhotoEditorScreen(
                     Log.e("PhotoEditor", "Export failed", e)
                     false
                 } finally {
+                    if (framedBmp != null && framedBmp !== gradedBmp && framedBmp !== fullBmp) framedBmp.recycle()
                     if (gradedBmp != null && gradedBmp !== fullBmp) gradedBmp.recycle()
                     fullBmp?.recycle()
                 }
@@ -1082,6 +1164,17 @@ internal fun PhotoEditorScreen(
                     onClick = { photoPickerLauncher.launch("image/*") }
                 )
                 if (hasPhoto) {
+                    TopBadgeButton(
+                        text = "Frame",
+                        active = includeFilmFrame,
+                        accentColor = IrPalette.IrAmber,
+                        enabled = !isSavingPhoto,
+                        onClick = {
+                            includeFilmFrame = !includeFilmFrame
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            showEditorStatus(if (includeFilmFrame) "Film Frame ON" else "Film Frame OFF")
+                        }
+                    )
                     TopIconButton(
                         active = false,
                         accentColor = IrPalette.IrCyan,
@@ -1294,7 +1387,7 @@ internal fun PhotoEditorScreen(
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
+                            verticalAlignment = Alignment.Top,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(
@@ -1318,10 +1411,12 @@ internal fun PhotoEditorScreen(
 
                             LiveHistogramOverlay(
                                 data = liveHistogram,
+                                mode = histogramDisplayMode,
                                 modifier = Modifier.clickable {
-                                    activeTab = EditorTab.COLOR
-                                    colorPanelMode = ColorPanelMode.BANTLAR
-                                    isDeckCollapsed = false
+                                    val nextMode = histogramDisplayMode.next()
+                                    histogramDisplayMode = nextMode
+                                    editorPrefs.edit { putString("histogram_display_mode", nextMode.prefKey) }
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                 }
                             )
                         }

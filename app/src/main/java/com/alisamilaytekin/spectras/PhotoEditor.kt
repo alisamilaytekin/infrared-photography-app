@@ -865,23 +865,34 @@ internal fun PhotoEditorScreen(
             }
             delay(45)
             val rendered = withContext(Dispatchers.Default) {
-                val maxSide = 860
-                val working = if (maxOf(src.width, src.height) > maxSide) {
-                    val scale = maxSide.toFloat() / maxOf(src.width, src.height).toFloat()
-                    Bitmap.createScaledBitmap(
-                        src,
-                        (src.width * scale).roundToInt().coerceAtLeast(1),
-                        (src.height * scale).roundToInt().coerceAtLeast(1),
-                        true
-                    )
-                } else {
-                    src
+                var working: Bitmap? = null
+                try {
+                    val maxSide = 860
+                    working = if (maxOf(src.width, src.height) > maxSide) {
+                        val scale = maxSide.toFloat() / maxOf(src.width, src.height).toFloat()
+                        Bitmap.createScaledBitmap(
+                            src,
+                            (src.width * scale).roundToInt().coerceAtLeast(1),
+                            (src.height * scale).roundToInt().coerceAtLeast(1),
+                            true
+                        )
+                    } else {
+                        src
+                    }
+                    val out = applyFullPhotoEditToBitmap(working, editConfig)
+                    if (working !== src && working !== out) working.recycle()
+                    out
+                } catch (t: Throwable) {
+                    Log.w("PhotoEditor", "Pre-Tiramisu live preview render skipped", t)
+                    if (working != null && working !== src && !working.isRecycled) {
+                        try { working.recycle() } catch (_: Throwable) {}
+                    }
+                    null
                 }
-                val out = applyFullPhotoEditToBitmap(working, editConfig)
-                if (working !== src && working !== out) working.recycle()
-                out
             }
-            fallbackRenderedBitmap = rendered
+            if (rendered != null) {
+                fallbackRenderedBitmap = rendered
+            }
         }
     }
 

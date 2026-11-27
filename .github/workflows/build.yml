@@ -67,6 +67,19 @@ jobs:
           path: app/build/outputs/bundle/release/SpectraS-playstore.aab
           retention-days: 30
 
+      - name: Run Official Android Lint Audit
+        run: |
+          gradle lintRelease --no-daemon --continue || true
+
+      - name: Upload Android Lint Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpectraS-Android-Lint-Report
+          path: app/build/reports/lint-results-release.*
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Commit and Push APK to Repository Root
         run: |
           cp app/build/outputs/apk/release_named/SpectraS-v5.0.apk ./SpectraS-v5.0.apk

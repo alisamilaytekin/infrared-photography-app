@@ -4592,6 +4592,7 @@ fun CameraScreen(
                 } else {
                     null
                 }
+                try { holder.activeSurface?.release() } catch (_: Exception) {}
                 holder.activeSurface = surface
                 holder.activeSurfaceTexture = surfaceTexture
             }
@@ -4605,6 +4606,10 @@ fun CameraScreen(
                         if (holder.isDisposed || currentIsStudioMode || holder.cameraGeneration != openGen || surfaceDead) {
                             stalePending = holder.pendingReopenSurfaceTexture
                             holder.pendingReopenSurfaceTexture = null
+                            if (holder.activeSurface === surface) {
+                                holder.activeSurface = null
+                                holder.activeSurfaceTexture = null
+                            }
                             true
                         } else {
                             holder.device = camera
@@ -4613,6 +4618,7 @@ fun CameraScreen(
                     }
                     if (shouldAbort) {
                         try { camera.close() } catch (_: Exception) {}
+                        try { surface.release() } catch (_: Exception) {}
                         val nextSt = stalePending
                         if (nextSt != null && !holder.isDisposed && !currentIsStudioMode) {
                             cameraHandler.post { startCameraInternal(nextSt) }
